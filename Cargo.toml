@@ -97,3 +97,8 @@ honba-strategy         = { package = "honba-nou-strategy", path = "../honba-nou/
 
 honba-te-core          = { path = "../honba-te/crates/honba-te-core" }
 honba-te-router        = { path = "../honba-te/crates/honba-te-router" }
+sha2 = "0.10"
+honba-indicators = { package = "honba-me-indicators", path = "../honba-me/crates/honba-me-indicators" }
+honba-portfolio  = { package = "honba-kokoro-portfolio", path = "../honba-kokoro/crates/honba-kokoro-portfolio" }
+honba-tamashii-codegen = { path = "../honba-tamashii/crates/honba-tamashii-codegen" }
+honba-codegen          = { package = "honba-tamashii-codegen", path = "../honba-tamashii/crates/honba-tamashii-codegen" }
