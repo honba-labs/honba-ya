@@ -767,10 +767,10 @@ impl BacktestExecutor {
                 });
             }
         }
-        if !is_l2 && !matches!(fill_model, FillModel::BarFill | FillModel::BarFillThrough | FillModel::None) {
+        if !is_l2 && !matches!(fill_model, FillModel::BarFill) {
             return Err(ErrorDetail::new(
                 ErrorCode::Unsupported,
-                "only the bar_fill, bar_fill_through, and none models are available",
+                "only the bar_fill model is available",
             ));
         }
         let currency = self.account_currency()?;

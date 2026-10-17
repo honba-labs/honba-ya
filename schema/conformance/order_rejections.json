@@ -1,0 +1,415 @@
+{
+  "fixture_version": 1,
+  "type": "OrderRejections",
+  "description": "Execution-port reject/cancel path shared by Python and Rust (ADR 008, decision 11). The strategy under test submits, on the first bar event of each ts in `submit`, the listed intents [side, symbol, quantity] (market orders); the runner names the orders \"{strategy_name}-{n}\" in submission order. The execution port is a scripted venue that fills at price 10.0 and stamps fills and venue rejections with the order's ts_init, and a cancellation with the time of the cancel (the ts of the bar event the cancel follows; ADR 008, decision 13 addendum): an order id absent from `venue` fills in full; {\"action\": \"reject\", \"reason\"} refuses it whole; {\"action\": \"partial\", \"filled\", \"reason\"} fills `filled` and refuses the rest; {\"action\": \"hold\"} keeps it working until cancelled. After the bar event with ts T, every [T, order_id] in `cancels` is passed to the runner's cancel. Expected: `order_rejections` entries are [order_id, symbol, side, released quantity, reason, ts, cancelled] in drain order; `fills` are [order_id, quantity]; `busy` and `positions` are read from the strategy context at the end of the run (a rejected or cancelled remainder is released, so it no longer keeps the instrument busy).",
+  "strategy_name": "rej",
+  "scenarios": [
+    {
+      "name": "reject_whole_order",
+      "events": [
+        [
+          "bar",
+          "A",
+          1
+        ],
+        [
+          "bar",
+          "A",
+          2
+        ]
+      ],
+      "submit": {
+        "1": [
+          [
+            "buy",
+            "A",
+            10.0
+          ]
+        ],
+        "2": [
+          [
+            "buy",
+            "A",
+            5.0
+          ]
+        ]
+      },
+      "venue": {
+        "rej-0": {
+          "action": "reject",
+          "reason": "insufficient_funds"
+        }
+      },
+      "cancels": [],
+      "expect": {
+        "order_rejections": [
+          [
+            "rej-0",
+            "A",
+            "buy",
+            10.0,
+            "insufficient_funds",
+            1,
+            false
+          ]
+        ],
+        "fills": [
+          [
+            "rej-1",
+            5.0
+          ]
+        ],
+        "busy": {
+          "A": false
+        },
+        "positions": {
+          "A": 5.0
+        }
+      }
+    },
+    {
+      "name": "partial_fill_rejects_the_remainder",
+      "events": [
+        [
+          "bar",
+          "A",
+          1
+        ]
+      ],
+      "submit": {
+        "1": [
+          [
+            "buy",
+            "A",
+            10.0
+          ]
+        ]
+      },
+      "venue": {
+        "rej-0": {
+          "action": "partial",
+          "filled": 4.0,
+          "reason": "insufficient_funds"
+        }
+      },
+      "cancels": [],
+      "expect": {
+        "order_rejections": [
+          [
+            "rej-0",
+            "A",
+            "buy",
+            6.0,
+            "insufficient_funds",
+            1,
+            false
+          ]
+        ],
+        "fills": [
+          [
+            "rej-0",
+            4.0
+          ]
+        ],
+        "busy": {
+          "A": false
+        },
+        "positions": {
+          "A": 4.0
+        }
+      }
+    },
+    {
+      "name": "sell_without_position",
+      "events": [
+        [
+          "bar",
+          "A",
+          1
+        ]
+      ],
+      "submit": {
+        "1": [
+          [
+            "sell",
+            "A",
+            5.0
+          ]
+        ]
+      },
+      "venue": {
+        "rej-0": {
+          "action": "reject",
+          "reason": "no_position"
+        }
+      },
+      "cancels": [],
+      "expect": {
+        "order_rejections": [
+          [
+            "rej-0",
+            "A",
+            "sell",
+            5.0,
+            "no_position",
+            1,
+            false
+          ]
+        ],
+        "fills": [],
+        "busy": {
+          "A": false
+        },
+        "positions": {}
+      }
+    },
+    {
+      "name": "cancel_working_order",
+      "events": [
+        [
+          "bar",
+          "A",
+          1
+        ],
+        [
+          "bar",
+          "A",
+          2
+        ]
+      ],
+      "submit": {
+        "1": [
+          [
+            "buy",
+            "A",
+            10.0
+          ]
+        ]
+      },
+      "venue": {
+        "rej-0": {
+          "action": "hold"
+        }
+      },
+      "cancels": [
+        [
+          1,
+          "rej-0"
+        ]
+      ],
+      "expect": {
+        "order_rejections": [
+          [
+            "rej-0",
+            "A",
+            "buy",
+            10.0,
+            "cancelled",
+            1,
+            true
+          ]
+        ],
+        "fills": [],
+        "busy": {
+          "A": false
+        },
+        "positions": {}
+      }
+    },
+    {
+      "name": "late_cancel_is_stamped_with_the_cancel_time",
+      "events": [
+        [
+          "bar",
+          "A",
+          2
+        ],
+        [
+          "bar",
+          "B",
+          5
+        ]
+      ],
+      "submit": {
+        "2": [
+          [
+            "buy",
+            "A",
+            7.0
+          ]
+        ]
+      },
+      "venue": {
+        "rej-0": {
+          "action": "hold"
+        }
+      },
+      "cancels": [
+        [
+          5,
+          "rej-0"
+        ]
+      ],
+      "expect": {
+        "order_rejections": [
+          [
+            "rej-0",
+            "A",
+            "buy",
+            7.0,
+            "cancelled",
+            5,
+            true
+          ]
+        ],
+        "fills": [],
+        "busy": {
+          "A": false,
+          "B": false
+        },
+        "positions": {}
+      }
+    },
+    {
+      "name": "held_order_stays_busy",
+      "events": [
+        [
+          "bar",
+          "A",
+          1
+        ],
+        [
+          "bar",
+          "A",
+          2
+        ]
+      ],
+      "submit": {
+        "1": [
+          [
+            "buy",
+            "A",
+            10.0
+          ]
+        ]
+      },
+      "venue": {
+        "rej-0": {
+          "action": "hold"
+        }
+      },
+      "cancels": [],
+      "expect": {
+        "order_rejections": [],
+        "fills": [],
+        "busy": {
+          "A": true
+        },
+        "positions": {}
+      }
+    },
+    {
+      "name": "cancel_finished_or_unknown_is_a_no_op",
+      "events": [
+        [
+          "bar",
+          "A",
+          1
+        ]
+      ],
+      "submit": {
+        "1": [
+          [
+            "buy",
+            "A",
+            3.0
+          ]
+        ]
+      },
+      "venue": {},
+      "cancels": [
+        [
+          1,
+          "rej-0"
+        ],
+        [
+          1,
+          "nope"
+        ]
+      ],
+      "expect": {
+        "order_rejections": [],
+        "fills": [
+          [
+            "rej-0",
+            3.0
+          ]
+        ],
+        "busy": {
+          "A": false
+        },
+        "positions": {
+          "A": 3.0
+        }
+      }
+    },
+    {
+      "name": "release_is_per_instrument",
+      "events": [
+        [
+          "bar",
+          "A",
+          1
+        ],
+        [
+          "bar",
+          "B",
+          1
+        ]
+      ],
+      "submit": {
+        "1": [
+          [
+            "buy",
+            "A",
+            2.0
+          ],
+          [
+            "buy",
+            "B",
+            3.0
+          ]
+        ]
+      },
+      "venue": {
+        "rej-0": {
+          "action": "hold"
+        },
+        "rej-1": {
+          "action": "reject",
+          "reason": "insufficient_funds"
+        }
+      },
+      "cancels": [],
+      "expect": {
+        "order_rejections": [
+          [
+            "rej-1",
+            "B",
+            "buy",
+            3.0,
+            "insufficient_funds",
+            1,
+            false
+          ]
+        ],
+        "fills": [],
+        "busy": {
+          "A": true,
+          "B": false
+        },
+        "positions": {}
+      }
+    }
+  ]
+}

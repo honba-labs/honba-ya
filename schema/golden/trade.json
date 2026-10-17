@@ -1,0 +1,127 @@
+{
+  "schema_version": 4,
+  "type": "Trade",
+  "cases": [
+    {
+      "name": "buy_with_costs",
+      "value": {
+        "order_id": "O-1",
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "buy",
+        "quantity": 75.0,
+        "price": 22000.0,
+        "costs": {
+          "amount": 4567,
+          "currency": "INR"
+        },
+        "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"},
+        "ts_init": {"iso": "2023-11-14T22:14:20.000000005Z", "unix_nanos": "1700000060000000005"}
+      }
+    },
+    {
+      "name": "sell_zero_costs",
+      "value": {
+        "order_id": "O-2",
+        "instrument_id": {
+          "symbol": "RELIANCE",
+          "exchange": "NSE"
+        },
+        "side": "sell",
+        "quantity": 10.0,
+        "price": 2950.05,
+        "costs": {
+          "amount": 0,
+          "currency": "INR"
+        },
+        "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"},
+        "ts_init": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "negative_quantity",
+      "value": {
+        "order_id": "O-1",
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "buy",
+        "quantity": -1.0,
+        "price": 22000.0,
+        "costs": {
+          "amount": 4567,
+          "currency": "INR"
+        },
+        "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"},
+        "ts_init": {"iso": "2023-11-14T22:14:20.000000005Z", "unix_nanos": "1700000060000000005"}
+      }
+    },
+    {
+      "name": "zero_price",
+      "value": {
+        "order_id": "O-1",
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "buy",
+        "quantity": 75.0,
+        "price": 0.0,
+        "costs": {
+          "amount": 4567,
+          "currency": "INR"
+        },
+        "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"},
+        "ts_init": {"iso": "2023-11-14T22:14:20.000000005Z", "unix_nanos": "1700000060000000005"}
+      }
+    },
+    {
+      "name": "no_order_side",
+      "value": {
+        "order_id": "O-1",
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "no_order_side",
+        "quantity": 75.0,
+        "price": 22000.0,
+        "costs": {
+          "amount": 4567,
+          "currency": "INR"
+        },
+        "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"},
+        "ts_init": {"iso": "2023-11-14T22:14:20.000000005Z", "unix_nanos": "1700000060000000005"}
+      }
+    },
+    {
+      "name": "missing_costs",
+      "value": {
+        "order_id": "O-1",
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "buy",
+        "quantity": 75.0,
+        "price": 22000.0,
+        "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"},
+        "ts_init": {"iso": "2023-11-14T22:14:20.000000005Z", "unix_nanos": "1700000060000000005"}
+      }
+    }
+  ],
+  "invalid_text": [
+    {
+      "name": "duplicate_price",
+      "text": "{\"order_id\":\"O-1\",\"instrument_id\":{\"symbol\":\"NIFTY50\",\"exchange\":\"NSE\"},\"side\":\"buy\",\"quantity\":75.0,\"price\":22000.0,\"price\":22001.0,\"costs\":{\"amount\":0,\"currency\":\"INR\"},\"ts_event\":1,\"ts_init\":1}"
+    }
+  ],
+  "tolerated": [
+    {"name": "unknown_fields_incl_money", "value": {"order_id": "O-1", "instrument_id": {"symbol": "NIFTY50", "exchange": "NSE"}, "side": "buy", "quantity": 75.0, "price": 22000.0, "costs": {"amount": 4567, "currency": "INR", "breakdown": {"stt": 10}}, "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}, "ts_init": {"iso": "2023-11-14T22:14:20.000000005Z", "unix_nanos": "1700000060000000005"}, "trade_id": "T-1"}, "canonical": {"order_id": "O-1", "instrument_id": {"symbol": "NIFTY50", "exchange": "NSE"}, "side": "buy", "quantity": 75.0, "price": 22000.0, "costs": {"amount": 4567, "currency": "INR"}, "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}, "ts_init": {"iso": "2023-11-14T22:14:20.000000005Z", "unix_nanos": "1700000060000000005"}}}
+  ]
+}

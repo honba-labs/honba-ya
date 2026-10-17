@@ -1,0 +1,96 @@
+{
+  "schema_version": 4,
+  "type": "Position",
+  "cases": [
+    {
+      "name": "flat",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "currency": "INR",
+        "side": "long",
+        "quantity": 0.0,
+        "avg_price": 0.0,
+        "realized_pnl": {
+          "amount": 0,
+          "currency": "INR"
+        }
+      }
+    },
+    {
+      "name": "short_with_realized_pnl",
+      "value": {
+        "instrument_id": {
+          "symbol": "RELIANCE",
+          "exchange": "NSE"
+        },
+        "currency": "INR",
+        "side": "short",
+        "quantity": 60.0,
+        "avg_price": 2950.5,
+        "realized_pnl": {
+          "amount": -8000,
+          "currency": "INR"
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "negative_quantity",
+      "value": {
+        "instrument_id": {
+          "symbol": "RELIANCE",
+          "exchange": "NSE"
+        },
+        "currency": "INR",
+        "side": "short",
+        "quantity": -5.0,
+        "avg_price": 2950.5,
+        "realized_pnl": {
+          "amount": -8000,
+          "currency": "INR"
+        }
+      }
+    },
+    {
+      "name": "negative_avg_price",
+      "value": {
+        "instrument_id": {
+          "symbol": "RELIANCE",
+          "exchange": "NSE"
+        },
+        "currency": "INR",
+        "side": "short",
+        "quantity": 60.0,
+        "avg_price": -1.0,
+        "realized_pnl": {
+          "amount": -8000,
+          "currency": "INR"
+        }
+      }
+    },
+    {
+      "name": "unknown_currency",
+      "value": {
+        "instrument_id": {
+          "symbol": "RELIANCE",
+          "exchange": "NSE"
+        },
+        "currency": "inr",
+        "side": "short",
+        "quantity": 60.0,
+        "avg_price": 2950.5,
+        "realized_pnl": {
+          "amount": -8000,
+          "currency": "INR"
+        }
+      }
+    }
+  ],
+  "tolerated": [
+    {"name": "unknown_field", "value": {"instrument_id": {"symbol": "RELIANCE", "exchange": "NSE"}, "currency": "INR", "side": "short", "quantity": 60.0, "avg_price": 2950.5, "realized_pnl": {"amount": -8000, "currency": "INR"}, "unrealized_pnl": 1.5}, "canonical": {"instrument_id": {"symbol": "RELIANCE", "exchange": "NSE"}, "currency": "INR", "side": "short", "quantity": 60.0, "avg_price": 2950.5, "realized_pnl": {"amount": -8000, "currency": "INR"}}}
+  ]
+}

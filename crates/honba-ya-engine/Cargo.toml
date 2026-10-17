@@ -7,6 +7,9 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Event kernel: clock, queue, dispatch, and engine traits"
 
+[lib]
+name = "honba_engine"
+
 [dependencies]
 honba-messages.workspace = true
 honba-entities.workspace = true

@@ -1,0 +1,11 @@
+# Zerodha Kite Connect Live broker configuration
+# Sensitive tokens should be supplied via environment variables or CLI overrides.
+
+[adapter]
+name = "zerodha"
+mode = "live"
+api_key = "${ZERODHA_API_KEY}"
+access_token = "${ZERODHA_ACCESS_TOKEN}"
+order_rate_limit = 10.0
+data_rate_limit = 10.0
+history_rate_limit = 3.0

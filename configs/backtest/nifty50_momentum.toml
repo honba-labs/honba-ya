@@ -1,0 +1,28 @@
+# Backtest configuration: daily SMA momentum on the NIFTY 50 index.
+# Schema: honba_config::BacktestRunConfig (schema/domain/domain_schema.json);
+# checked by crates/honba-config/tests/configs.rs. Unknown keys are errors.
+
+seed = 42
+
+[strategy]
+api_version = "1.0.0"
+name = "sma_crossover"
+# Replaced by the digest `honba verify` computes once the strategy source is pinned.
+source_hash = "unverified:nifty50_momentum"
+universe = { explicit = [{ symbol = "NIFTY50", exchange = "NSE" }] }
+subscriptions = { instruments = [{ symbol = "NIFTY50", exchange = "NSE" }] }
+driving_timeframe = { interval = 1, aggregation = "day" }
+warmup_bars = 50
+
+[data.local]
+root = "data/catalog"
+
+[execution]
+fill_model = "bar_fill"
+cost_model_version = "latest"
+slippage_multiplier = 1.0
+apply_market_calendar = true
+
+[account]
+starting_cash = 1000000.0
+currency = "INR"

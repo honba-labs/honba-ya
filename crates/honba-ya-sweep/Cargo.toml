@@ -7,6 +7,9 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Concurrent, reproducible parameter sweeps for Honba"
 
+[lib]
+name = "honba_sweep"
+
 [dependencies]
 honba-messages.workspace = true
 honba-entities.workspace = true

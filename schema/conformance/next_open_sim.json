@@ -1,0 +1,1053 @@
+{
+  "fixture_version": 1,
+  "type": "NextOpenSim",
+  "description": "Next-open simulator vectors generated from honba.backtest.simulated.NextOpenExecution (ADR 0016). See scripts/gen_next_open_vectors.py for the step and expectation schema. `chunk` says which implementation chunk covers the scenario; a runner replays only the chunks it implements.",
+  "scenarios": [
+    {
+      "name": "fills_at_next_open_not_decision_close",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 105.0, "low": 100.0, "close": 105.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 10, "ts": 1},
+        {"op": "drain"},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 110.0, "high": 120.0, "low": 110.0, "close": 120.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [], "rejections": []},
+        {"fills": [["o-0", "AAA", "buy", 10, 110.0, 2, 0]], "rejections": []}
+        ],
+        "final": {"cash": 890000, "positions": {"AAA": 10.0}, "working": [], "fees": 0, "traded_notional": 110000}
+      }
+    },
+    {
+      "name": "order_waits_for_its_instrument_to_print",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "BBB", "side": "buy", "type": "market", "qty": 1, "ts": 1},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "drain"},
+        {"op": "bar", "symbol": "BBB", "ts": 3, "open": 50.0, "high": 50.0, "low": 50.0, "close": 50.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [], "rejections": []},
+        {"fills": [["o-0", "BBB", "buy", 1, 50.0, 3, 0]], "rejections": []}
+        ],
+        "final": {"cash": 995000, "positions": {"BBB": 1.0}, "working": [], "fees": 0, "traded_notional": 5000}
+      }
+    },
+    {
+      "name": "same_session_bar_does_not_fill_an_order_submitted_in_it",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "BBB", "side": "buy", "type": "market", "qty": 1, "ts": 1},
+        {"op": "bar", "symbol": "BBB", "ts": 1, "open": 50.0, "high": 50.0, "low": 50.0, "close": 50.0},
+        {"op": "drain"},
+        {"op": "bar", "symbol": "BBB", "ts": 2, "open": 60.0, "high": 60.0, "low": 60.0, "close": 60.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [], "rejections": []},
+        {"fills": [["o-0", "BBB", "buy", 1, 60.0, 2, 0]], "rejections": []}
+        ],
+        "final": {"cash": 994000, "positions": {"BBB": 1.0}, "working": [], "fees": 0, "traded_notional": 6000}
+      }
+    },
+    {
+      "name": "order_submitted_before_any_session_fills_at_the_first_open",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 2, "ts": 0},
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["o-0", "AAA", "buy", 2, 100.0, 1, 0]], "rejections": []}
+        ],
+        "final": {"cash": 980000, "positions": {"AAA": 2.0}, "working": [], "fees": 0, "traded_notional": 20000}
+      }
+    },
+    {
+      "name": "two_bars_one_ts_open_their_own_instruments",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 1, "ts": 1},
+        {"op": "submit", "id": "o-1", "symbol": "BBB", "side": "buy", "type": "market", "qty": 1, "ts": 1},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 101.0, "high": 101.0, "low": 101.0, "close": 101.0},
+        {"op": "bar", "symbol": "BBB", "ts": 2, "open": 51.0, "high": 51.0, "low": 51.0, "close": 51.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["o-0", "AAA", "buy", 1, 101.0, 2, 0], ["o-1", "BBB", "buy", 1, 51.0, 2, 0]], "rejections": []}
+        ],
+        "final": {"cash": 984800, "positions": {"AAA": 1.0, "BBB": 1.0}, "working": [], "fees": 0, "traded_notional": 15200}
+      }
+    },
+    {
+      "name": "sells_fill_before_buys_in_a_session",
+      "chunk": 1,
+      "config": {"cash": 100000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "open_session", "ts": 1, "bars": [{"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "BBB", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 10, "ts": 1},
+        {"op": "open_session", "ts": 2, "bars": [{"op": "bar", "symbol": "AAA", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "BBB", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "drain"},
+        {"op": "submit", "id": "o-1", "symbol": "BBB", "side": "buy", "type": "market", "qty": 10, "ts": 2},
+        {"op": "submit", "id": "o-2", "symbol": "AAA", "side": "sell", "type": "market", "qty": 10, "ts": 2},
+        {"op": "open_session", "ts": 3, "bars": [{"op": "bar", "symbol": "AAA", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "BBB", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["o-0", "AAA", "buy", 10, 100.0, 2, 0]], "rejections": []},
+        {"fills": [["o-2", "AAA", "sell", 10, 100.0, 3, 0], ["o-1", "BBB", "buy", 10, 100.0, 3, 0]], "rejections": []}
+        ],
+        "final": {"cash": 0, "positions": {"BBB": 10.0}, "working": [], "fees": 0, "traded_notional": 300000}
+      }
+    },
+    {
+      "name": "buys_fill_in_submission_order_until_cash_runs_out",
+      "chunk": 1,
+      "config": {"cash": 100000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 60, "ts": 1},
+        {"op": "submit", "id": "o-1", "symbol": "AAA", "side": "buy", "type": "market", "qty": 60, "ts": 1},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["o-0", "AAA", "buy", 60, 10.0, 2, 0], ["o-1", "AAA", "buy", 40.0, 10.0, 2, 0]], "rejections": [["o-1", "AAA", "buy", 20.0, "insufficient_funds", 2]]}
+        ],
+        "final": {"cash": 0, "positions": {"AAA": 100.0}, "working": [], "fees": 0, "traded_notional": 100000}
+      }
+    },
+    {
+      "name": "sell_is_capped_at_the_position",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 5, "ts": 1},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-1", "symbol": "AAA", "side": "sell", "type": "market", "qty": 8, "ts": 2},
+        {"op": "bar", "symbol": "AAA", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["o-0", "AAA", "buy", 5, 100.0, 2, 0], ["o-1", "AAA", "sell", 5.0, 100.0, 3, 0]], "rejections": [["o-1", "AAA", "sell", 3.0, "no_position", 3]]}
+        ],
+        "final": {"cash": 1000000, "positions": {}, "working": [], "fees": 0, "traded_notional": 100000}
+      }
+    },
+    {
+      "name": "sell_without_a_position_is_rejected",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "sell", "type": "market", "qty": 3, "ts": 1},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [], "rejections": [["o-0", "AAA", "sell", 3.0, "no_position", 2]]}
+        ],
+        "final": {"cash": 1000000, "positions": {}, "working": [], "fees": 0, "traded_notional": 0}
+      }
+    },
+    {
+      "name": "sell_a_hair_over_the_position_is_float_residue",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 0.3, "ts": 1},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-1", "symbol": "AAA", "side": "sell", "type": "market", "qty": 0.3000000005, "ts": 2},
+        {"op": "bar", "symbol": "AAA", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["o-0", "AAA", "buy", 0.3, 100.0, 2, 0], ["o-1", "AAA", "sell", 0.3, 100.0, 3, 0]], "rejections": []}
+        ],
+        "final": {"cash": 1000000, "positions": {}, "working": [], "fees": 0, "traded_notional": 6000}
+      }
+    },
+    {
+      "name": "short_sell_when_not_long_only",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": false, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "sell", "type": "market", "qty": 4, "ts": 1},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["o-0", "AAA", "sell", 4, 100.0, 2, 0]], "rejections": []}
+        ],
+        "final": {"cash": 1040000, "positions": {"AAA": -4.0}, "working": [], "fees": 0, "traded_notional": 40000}
+      }
+    },
+    {
+      "name": "buy_is_cut_to_whole_units_the_cash_allows",
+      "chunk": 1,
+      "config": {"cash": 105000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 20, "ts": 1},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["o-0", "AAA", "buy", 10.0, 100.0, 2, 0]], "rejections": [["o-0", "AAA", "buy", 10.0, "insufficient_funds", 2]]}
+        ],
+        "final": {"cash": 5000, "positions": {"AAA": 10.0}, "working": [], "fees": 0, "traded_notional": 100000}
+      }
+    },
+    {
+      "name": "buy_is_cut_to_whole_lots",
+      "chunk": 1,
+      "config": {"cash": 80500, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {"AAA": 3}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 90, "ts": 1},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["o-0", "AAA", "buy", 78, 10.0, 2, 0]], "rejections": [["o-0", "AAA", "buy", 12, "insufficient_funds", 2]]}
+        ],
+        "final": {"cash": 2500, "positions": {"AAA": 78.0}, "working": [], "fees": 0, "traded_notional": 78000}
+      }
+    },
+    {
+      "name": "buy_with_no_cash_for_one_unit_is_rejected_whole",
+      "chunk": 1,
+      "config": {"cash": 5000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 2, "ts": 1},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [], "rejections": [["o-0", "AAA", "buy", 2.0, "insufficient_funds", 2]]}
+        ],
+        "final": {"cash": 5000, "positions": {}, "working": [], "fees": 0, "traded_notional": 0}
+      }
+    },
+    {
+      "name": "fractional_quantity_notional_rounds_half_away_from_zero",
+      "chunk": 1,
+      "config": {"cash": 100000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 33.33, "high": 33.33, "low": 33.33, "close": 33.33},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 0.5, "ts": 1},
+        {"op": "submit", "id": "o-1", "symbol": "AAA", "side": "buy", "type": "market", "qty": 1.5, "ts": 1},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 33.33, "high": 33.33, "low": 33.33, "close": 33.33},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["o-0", "AAA", "buy", 0.5, 33.33, 2, 0], ["o-1", "AAA", "buy", 1.5, 33.33, 2, 0]], "rejections": []}
+        ],
+        "final": {"cash": 93333, "positions": {"AAA": 2.0}, "working": [], "fees": 0, "traded_notional": 6667}
+      }
+    },
+    {
+      "name": "unusable_open_means_the_instrument_did_not_print",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 1, "ts": 1},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 0.0, "high": 0.0, "low": 0.0, "close": 0.0},
+        {"op": "drain"},
+        {"op": "bar", "symbol": "AAA", "ts": 3, "open": 90.0, "high": 90.0, "low": 90.0, "close": 90.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [], "rejections": []},
+        {"fills": [["o-0", "AAA", "buy", 1, 90.0, 3, 0]], "rejections": []}
+        ],
+        "final": {"cash": 991000, "positions": {"AAA": 1.0}, "working": [], "fees": 0, "traded_notional": 9000}
+      }
+    },
+    {
+      "name": "limit_and_stop_orders_are_unsupported",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "limit", "qty": 1, "ts": 1, "price": 99.0},
+        {"op": "submit", "id": "o-1", "symbol": "AAA", "side": "sell", "type": "stop_market", "qty": 1, "ts": 1, "trigger": 95.0},
+        {"op": "submit", "id": "o-2", "symbol": "AAA", "side": "buy", "type": "stop_limit", "qty": 1, "ts": 1, "price": 101.0, "trigger": 100.0},
+        {"op": "drain"},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [], "rejections": [["o-0", "AAA", "buy", 1, "unsupported_order_type", 1], ["o-1", "AAA", "sell", 1, "unsupported_order_type", 1], ["o-2", "AAA", "buy", 1, "unsupported_order_type", 1]]},
+        {"fills": [], "rejections": []}
+        ],
+        "final": {"cash": 1000000, "positions": {}, "working": [], "fees": 0, "traded_notional": 0}
+      }
+    },
+    {
+      "name": "cancel_a_working_order",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 3, "ts": 1},
+        {"op": "cancel", "id": "o-0", "now": 1},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [], "rejections": [["o-0", "AAA", "buy", 3, "cancelled", 1]]}
+        ],
+        "final": {"cash": 1000000, "positions": {}, "working": [], "fees": 0, "traded_notional": 0}
+      }
+    },
+    {
+      "name": "late_cancel_is_stamped_with_the_cancel_time",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "BBB", "side": "buy", "type": "market", "qty": 3, "ts": 2},
+        {"op": "bar", "symbol": "AAA", "ts": 5, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "cancel", "id": "o-0", "now": 5},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [], "rejections": [["o-0", "BBB", "buy", 3, "cancelled", 5]]}
+        ],
+        "final": {"cash": 1000000, "positions": {}, "working": [], "fees": 0, "traded_notional": 0}
+      }
+    },
+    {
+      "name": "cancel_of_unknown_filled_or_cancelled_orders_is_a_no_op",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 1, "ts": 1},
+        {"op": "submit", "id": "o-1", "symbol": "BBB", "side": "buy", "type": "market", "qty": 1, "ts": 1},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "cancel", "id": "o-0", "now": 2},
+        {"op": "cancel", "id": "nope", "now": 2},
+        {"op": "cancel", "id": "o-1", "now": 2},
+        {"op": "cancel", "id": "o-1", "now": 2},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["o-0", "AAA", "buy", 1, 100.0, 2, 0]], "rejections": [["o-1", "BBB", "buy", 1, "cancelled", 2]]}
+        ],
+        "final": {"cash": 990000, "positions": {"AAA": 1.0}, "working": [], "fees": 0, "traded_notional": 10000}
+      }
+    },
+    {
+      "name": "cancel_before_any_session_is_stamped_zero",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 1, "ts": 0},
+        {"op": "cancel", "id": "o-0", "now": 0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [], "rejections": [["o-0", "AAA", "buy", 1, "cancelled", 0]]}
+        ],
+        "final": {"cash": 1000000, "positions": {}, "working": [], "fees": 0, "traded_notional": 0}
+      }
+    },
+    {
+      "name": "a_cut_order_has_nothing_left_to_cancel",
+      "chunk": 1,
+      "config": {"cash": 105000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 20, "ts": 1},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "cancel", "id": "o-0", "now": 2},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["o-0", "AAA", "buy", 10.0, 100.0, 2, 0]], "rejections": [["o-0", "AAA", "buy", 10.0, "insufficient_funds", 2]]}
+        ],
+        "final": {"cash": 5000, "positions": {"AAA": 10.0}, "working": [], "fees": 0, "traded_notional": 100000}
+      }
+    },
+    {
+      "name": "drain_twice_repeats_nothing",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 1, "ts": 1},
+        {"op": "submit", "id": "o-1", "symbol": "BBB", "side": "buy", "type": "market", "qty": 1, "ts": 1},
+        {"op": "cancel", "id": "o-1", "now": 1},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "drain"},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["o-0", "AAA", "buy", 1, 100.0, 2, 0]], "rejections": [["o-1", "BBB", "buy", 1, "cancelled", 1]]},
+        {"fills": [], "rejections": []}
+        ],
+        "final": {"cash": 990000, "positions": {"AAA": 1.0}, "working": [], "fees": 0, "traded_notional": 10000}
+      }
+    },
+    {
+      "name": "duplicate_working_order_id_is_an_error",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 1, "ts": 1},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 2, "ts": 1, "error": true},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["o-0", "AAA", "buy", 1, 100.0, 2, 0]], "rejections": []}
+        ],
+        "final": {"cash": 990000, "positions": {"AAA": 1.0}, "working": [], "fees": 0, "traded_notional": 10000}
+      }
+    },
+    {
+      "name": "a_finished_order_id_may_be_reused",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 1, "ts": 1},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 2, "ts": 2},
+        {"op": "bar", "symbol": "AAA", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["o-0", "AAA", "buy", 1, 100.0, 2, 0], ["o-0", "AAA", "buy", 2, 100.0, 3, 0]], "rejections": []}
+        ],
+        "final": {"cash": 970000, "positions": {"AAA": 3.0}, "working": [], "fees": 0, "traded_notional": 30000}
+      }
+    },
+    {
+      "name": "bar_before_the_session_is_non_monotonic",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 5, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 1, "ts": 5},
+        {"op": "bar", "symbol": "AAA", "ts": 4, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "error": true},
+        {"op": "bar", "symbol": "AAA", "ts": 6, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["o-0", "AAA", "buy", 1, 100.0, 6, 0]], "rejections": []}
+        ],
+        "final": {"cash": 990000, "positions": {"AAA": 1.0}, "working": [], "fees": 0, "traded_notional": 10000}
+      }
+    },
+    {
+      "name": "second_bar_for_an_instrument_in_a_session_is_an_error",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "bar", "symbol": "AAA", "ts": 1, "open": 101.0, "high": 101.0, "low": 101.0, "close": 101.0, "error": true},
+        {"op": "bar", "symbol": "BBB", "ts": 1, "open": 50.0, "high": 50.0, "low": 50.0, "close": 50.0},
+        {"op": "bar", "symbol": "AAA", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [], "rejections": []}
+        ],
+        "final": {"cash": 1000000, "positions": {}, "working": [], "fees": 0, "traded_notional": 0}
+      }
+    },
+    {
+      "name": "open_session_must_advance",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "open_session", "ts": 3, "bars": [{"op": "bar", "symbol": "AAA", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "open_session", "ts": 3, "bars": [{"op": "bar", "symbol": "AAA", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}], "error": true},
+        {"op": "open_session", "ts": 2, "bars": [{"op": "bar", "symbol": "AAA", "ts": 2, "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0}], "error": true},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 1, "ts": 3},
+        {"op": "open_session", "ts": 4, "bars": [{"op": "bar", "symbol": "AAA", "ts": 4, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["o-0", "AAA", "buy", 1, 100.0, 4, 0]], "rejections": []}
+        ],
+        "final": {"cash": 990000, "positions": {"AAA": 1.0}, "working": [], "fees": 0, "traded_notional": 10000}
+      }
+    },
+    {
+      "name": "session_key_need_not_be_the_bar_ts",
+      "chunk": 1,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "open_session", "ts": 10, "bars": [{"op": "bar", "symbol": "AAA", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "o-0", "symbol": "AAA", "side": "buy", "type": "market", "qty": 1, "ts": 1},
+        {"op": "open_session", "ts": 20, "bars": [{"op": "bar", "symbol": "AAA", "ts": 2, "open": 101.0, "high": 101.0, "low": 101.0, "close": 101.0}]},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["o-0", "AAA", "buy", 1, 101.0, 2, 0]], "rejections": []}
+        ],
+        "final": {"cash": 989900, "positions": {"AAA": 1.0}, "working": [], "fees": 0, "traded_notional": 10100}
+      }
+    },
+    {
+      "name": "settlement_t0_proceeds_fund_the_same_session_buy",
+      "chunk": 2,
+      "config": {"cash": 100000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "open_session", "ts": 1, "bars": [{"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 10, "ts": 1},
+        {"op": "open_session", "ts": 2, "bars": [{"op": "bar", "symbol": "A", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "sell-a", "symbol": "A", "side": "sell", "type": "market", "qty": 10, "ts": 2},
+        {"op": "submit", "id": "buy-b", "symbol": "B", "side": "buy", "type": "market", "qty": 10, "ts": 2},
+        {"op": "probe"},
+        {"op": "open_session", "ts": 3, "bars": [{"op": "bar", "symbol": "A", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "drain"},
+        {"op": "open_session", "ts": 4, "bars": [{"op": "bar", "symbol": "A", "ts": 4, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 4, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "drain"},
+        {"op": "open_session", "ts": 5, "bars": [{"op": "bar", "symbol": "A", "ts": 5, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 5, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "drain"},
+        {"op": "open_session", "ts": 6, "bars": [{"op": "bar", "symbol": "A", "ts": 6, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 6, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["buy-a", "A", "buy", 10, 100.0, 2, 0], ["sell-a", "A", "sell", 10, 100.0, 3, 0], ["buy-b", "B", "buy", 10, 100.0, 3, 0]], "rejections": []},
+        {"fills": [], "rejections": []},
+        {"fills": [], "rejections": []},
+        {"fills": [], "rejections": []}
+        ],
+        "final": {"cash": 0, "positions": {"B": 10.0}, "working": [], "fees": 0, "traded_notional": 300000, "unsettled": 0, "available_cash": 0, "probes": [{"unsettled": 0, "available_cash": 0}, {"unsettled": 0, "available_cash": 0}, {"unsettled": 0, "available_cash": 0}, {"unsettled": 0, "available_cash": 0}, {"unsettled": 0, "available_cash": 0}]}
+      }
+    },
+    {
+      "name": "settlement_t1_waiting_buy_fills_once_proceeds_settle",
+      "chunk": 2,
+      "config": {"cash": 100000, "currency": "INR", "long_only": true, "settlement_days": 1, "lot_sizes": {}},
+      "steps": [
+        {"op": "open_session", "ts": 1, "bars": [{"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 10, "ts": 1},
+        {"op": "open_session", "ts": 2, "bars": [{"op": "bar", "symbol": "A", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "sell-a", "symbol": "A", "side": "sell", "type": "market", "qty": 10, "ts": 2},
+        {"op": "submit", "id": "buy-b", "symbol": "B", "side": "buy", "type": "market", "qty": 10, "ts": 2},
+        {"op": "probe"},
+        {"op": "open_session", "ts": 3, "bars": [{"op": "bar", "symbol": "A", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "drain"},
+        {"op": "open_session", "ts": 4, "bars": [{"op": "bar", "symbol": "A", "ts": 4, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 4, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "drain"},
+        {"op": "open_session", "ts": 5, "bars": [{"op": "bar", "symbol": "A", "ts": 5, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 5, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "drain"},
+        {"op": "open_session", "ts": 6, "bars": [{"op": "bar", "symbol": "A", "ts": 6, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 6, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["buy-a", "A", "buy", 10, 100.0, 2, 0], ["sell-a", "A", "sell", 10, 100.0, 3, 0]], "rejections": []},
+        {"fills": [["buy-b", "B", "buy", 10, 100.0, 4, 0]], "rejections": []},
+        {"fills": [], "rejections": []},
+        {"fills": [], "rejections": []}
+        ],
+        "final": {"cash": 0, "positions": {"B": 10.0}, "working": [], "fees": 0, "traded_notional": 300000, "unsettled": 0, "available_cash": 0, "probes": [{"unsettled": 0, "available_cash": 0}, {"unsettled": 100000, "available_cash": 0}, {"unsettled": 0, "available_cash": 0}, {"unsettled": 0, "available_cash": 0}, {"unsettled": 0, "available_cash": 0}]}
+      }
+    },
+    {
+      "name": "settlement_t2_waiting_buy_fills_once_proceeds_settle",
+      "chunk": 2,
+      "config": {"cash": 100000, "currency": "INR", "long_only": true, "settlement_days": 2, "lot_sizes": {}},
+      "steps": [
+        {"op": "open_session", "ts": 1, "bars": [{"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 10, "ts": 1},
+        {"op": "open_session", "ts": 2, "bars": [{"op": "bar", "symbol": "A", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "sell-a", "symbol": "A", "side": "sell", "type": "market", "qty": 10, "ts": 2},
+        {"op": "submit", "id": "buy-b", "symbol": "B", "side": "buy", "type": "market", "qty": 10, "ts": 2},
+        {"op": "probe"},
+        {"op": "open_session", "ts": 3, "bars": [{"op": "bar", "symbol": "A", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "drain"},
+        {"op": "open_session", "ts": 4, "bars": [{"op": "bar", "symbol": "A", "ts": 4, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 4, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "drain"},
+        {"op": "open_session", "ts": 5, "bars": [{"op": "bar", "symbol": "A", "ts": 5, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 5, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "drain"},
+        {"op": "open_session", "ts": 6, "bars": [{"op": "bar", "symbol": "A", "ts": 6, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 6, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["buy-a", "A", "buy", 10, 100.0, 2, 0], ["sell-a", "A", "sell", 10, 100.0, 3, 0]], "rejections": []},
+        {"fills": [], "rejections": []},
+        {"fills": [["buy-b", "B", "buy", 10, 100.0, 5, 0]], "rejections": []},
+        {"fills": [], "rejections": []}
+        ],
+        "final": {"cash": 0, "positions": {"B": 10.0}, "working": [], "fees": 0, "traded_notional": 300000, "unsettled": 0, "available_cash": 0, "probes": [{"unsettled": 0, "available_cash": 0}, {"unsettled": 100000, "available_cash": 0}, {"unsettled": 100000, "available_cash": 0}, {"unsettled": 0, "available_cash": 0}, {"unsettled": 0, "available_cash": 0}]}
+      }
+    },
+    {
+      "name": "waiting_buy_is_cut_once_the_wait_is_over",
+      "chunk": 2,
+      "config": {"cash": 100000, "currency": "INR", "long_only": true, "settlement_days": 1, "lot_sizes": {}},
+      "steps": [
+        {"op": "open_session", "ts": 1, "bars": [{"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 10, "ts": 1},
+        {"op": "open_session", "ts": 2, "bars": [{"op": "bar", "symbol": "A", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "sell-a", "symbol": "A", "side": "sell", "type": "market", "qty": 10, "ts": 2},
+        {"op": "submit", "id": "buy-b", "symbol": "B", "side": "buy", "type": "market", "qty": 25, "ts": 2},
+        {"op": "open_session", "ts": 3, "bars": [{"op": "bar", "symbol": "A", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "open_session", "ts": 4, "bars": [{"op": "bar", "symbol": "A", "ts": 4, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 4, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["buy-a", "A", "buy", 10, 100.0, 2, 0], ["sell-a", "A", "sell", 10, 100.0, 3, 0], ["buy-b", "B", "buy", 10.0, 100.0, 4, 0]], "rejections": [["buy-b", "B", "buy", 15.0, "insufficient_funds", 4]]}
+        ],
+        "final": {"cash": 0, "positions": {"B": 10.0}, "working": [], "fees": 0, "traded_notional": 300000, "unsettled": 0, "available_cash": 0, "probes": [{"unsettled": 100000, "available_cash": 0}, {"unsettled": 0, "available_cash": 0}]}
+      }
+    },
+    {
+      "name": "waiting_buy_whose_instrument_does_not_print_starts_waiting_when_it_does",
+      "chunk": 2,
+      "config": {"cash": 100000, "currency": "INR", "long_only": true, "settlement_days": 2, "lot_sizes": {}},
+      "steps": [
+        {"op": "open_session", "ts": 1, "bars": [{"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 10, "ts": 1},
+        {"op": "open_session", "ts": 2, "bars": [{"op": "bar", "symbol": "A", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "sell-a", "symbol": "A", "side": "sell", "type": "market", "qty": 10, "ts": 2},
+        {"op": "submit", "id": "buy-b", "symbol": "B", "side": "buy", "type": "market", "qty": 5, "ts": 2},
+        {"op": "open_session", "ts": 3, "bars": [{"op": "bar", "symbol": "A", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "open_session", "ts": 4, "bars": [{"op": "bar", "symbol": "A", "ts": 4, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 4, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "open_session", "ts": 5, "bars": [{"op": "bar", "symbol": "A", "ts": 5, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 5, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["buy-a", "A", "buy", 10, 100.0, 2, 0], ["sell-a", "A", "sell", 10, 100.0, 3, 0], ["buy-b", "B", "buy", 5, 100.0, 5, 0]], "rejections": []}
+        ],
+        "final": {"cash": 50000, "positions": {"B": 5.0}, "working": [], "fees": 0, "traded_notional": 250000, "unsettled": 0, "available_cash": 50000, "probes": [{"unsettled": 100000, "available_cash": 0}, {"unsettled": 100000, "available_cash": 0}, {"unsettled": 0, "available_cash": 50000}]}
+      }
+    },
+    {
+      "name": "sale_proceeds_pending_in_two_sessions_sum_up_and_settle_separately",
+      "chunk": 2,
+      "config": {"cash": 200000, "currency": "INR", "long_only": true, "settlement_days": 2, "lot_sizes": {}},
+      "steps": [
+        {"op": "open_session", "ts": 1, "bars": [{"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 1, "open": 50.0, "high": 50.0, "low": 50.0, "close": 50.0}]},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 5, "ts": 1},
+        {"op": "submit", "id": "buy-b", "symbol": "B", "side": "buy", "type": "market", "qty": 10, "ts": 1},
+        {"op": "open_session", "ts": 2, "bars": [{"op": "bar", "symbol": "A", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 2, "open": 50.0, "high": 50.0, "low": 50.0, "close": 50.0}]},
+        {"op": "submit", "id": "sell-a", "symbol": "A", "side": "sell", "type": "market", "qty": 5, "ts": 2},
+        {"op": "open_session", "ts": 3, "bars": [{"op": "bar", "symbol": "A", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 3, "open": 50.0, "high": 50.0, "low": 50.0, "close": 50.0}]},
+        {"op": "submit", "id": "sell-b", "symbol": "B", "side": "sell", "type": "market", "qty": 10, "ts": 3},
+        {"op": "probe"},
+        {"op": "open_session", "ts": 4, "bars": [{"op": "bar", "symbol": "A", "ts": 4, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 4, "open": 50.0, "high": 50.0, "low": 50.0, "close": 50.0}]},
+        {"op": "probe"},
+        {"op": "open_session", "ts": 5, "bars": [{"op": "bar", "symbol": "A", "ts": 5, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 5, "open": 50.0, "high": 50.0, "low": 50.0, "close": 50.0}]},
+        {"op": "probe"},
+        {"op": "open_session", "ts": 6, "bars": [{"op": "bar", "symbol": "A", "ts": 6, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 6, "open": 50.0, "high": 50.0, "low": 50.0, "close": 50.0}]},
+        {"op": "probe"},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["buy-a", "A", "buy", 5, 100.0, 2, 0], ["buy-b", "B", "buy", 10, 50.0, 2, 0], ["sell-a", "A", "sell", 5, 100.0, 3, 0], ["sell-b", "B", "sell", 10, 50.0, 4, 0]], "rejections": []}
+        ],
+        "final": {"cash": 200000, "positions": {}, "working": [], "fees": 0, "traded_notional": 200000, "unsettled": 0, "available_cash": 200000, "probes": [{"unsettled": 50000, "available_cash": 100000}, {"unsettled": 100000, "available_cash": 100000}, {"unsettled": 50000, "available_cash": 150000}, {"unsettled": 0, "available_cash": 200000}]}
+      }
+    },
+    {
+      "name": "short_sell_proceeds_also_settle_later",
+      "chunk": 2,
+      "config": {"cash": 10000, "currency": "INR", "long_only": false, "settlement_days": 1, "lot_sizes": {}},
+      "steps": [
+        {"op": "open_session", "ts": 1, "bars": [{"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "short", "symbol": "A", "side": "sell", "type": "market", "qty": 4, "ts": 1},
+        {"op": "open_session", "ts": 2, "bars": [{"op": "bar", "symbol": "A", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "open_session", "ts": 3, "bars": [{"op": "bar", "symbol": "A", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["short", "A", "sell", 4, 100.0, 2, 0]], "rejections": []}
+        ],
+        "final": {"cash": 50000, "positions": {"A": -4.0}, "working": [], "fees": 0, "traded_notional": 40000, "unsettled": 0, "available_cash": 50000, "probes": [{"unsettled": 40000, "available_cash": 10000}, {"unsettled": 0, "available_cash": 50000}]}
+      }
+    },
+    {
+      "name": "set_settlement_days_only_before_the_first_session",
+      "chunk": 2,
+      "config": {"cash": 100000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "set_settlement_days", "days": 1},
+        {"op": "set_settlement_days", "days": -1, "error": true},
+        {"op": "open_session", "ts": 1, "bars": [{"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "set_settlement_days", "days": 2, "error": true},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 10, "ts": 1},
+        {"op": "open_session", "ts": 2, "bars": [{"op": "bar", "symbol": "A", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "sell-a", "symbol": "A", "side": "sell", "type": "market", "qty": 10, "ts": 2},
+        {"op": "open_session", "ts": 3, "bars": [{"op": "bar", "symbol": "A", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "probe"},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["buy-a", "A", "buy", 10, 100.0, 2, 0], ["sell-a", "A", "sell", 10, 100.0, 3, 0]], "rejections": []}
+        ],
+        "final": {"cash": 100000, "positions": {}, "working": [], "fees": 0, "traded_notional": 200000, "unsettled": 100000, "available_cash": 0, "probes": [{"unsettled": 100000, "available_cash": 0}]}
+      }
+    },
+    {
+      "name": "costs_are_paid_on_buys_and_taken_from_sell_proceeds",
+      "chunk": 2,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}, "costs": {"flat_buy": 250, "flat_sell": 300, "bps_buy": 10, "bps_sell": 20}},
+      "steps": [
+        {"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 10, "ts": 1},
+        {"op": "bar", "symbol": "A", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "sell-a", "symbol": "A", "side": "sell", "type": "market", "qty": 10, "ts": 2},
+        {"op": "bar", "symbol": "A", "ts": 3, "open": 101.0, "high": 101.0, "low": 101.0, "close": 101.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["buy-a", "A", "buy", 10, 100.0, 2, 350], ["sell-a", "A", "sell", 10, 101.0, 3, 502]], "rejections": []}
+        ],
+        "final": {"cash": 1000148, "positions": {}, "working": [], "fees": 852, "traded_notional": 201000, "unsettled": 0, "available_cash": 1000148}
+      }
+    },
+    {
+      "name": "costs_reduce_pending_sale_proceeds",
+      "chunk": 2,
+      "config": {"cash": 200000, "currency": "INR", "long_only": true, "settlement_days": 1, "lot_sizes": {}, "costs": {"flat_sell": 5000, "bps_sell": 100}},
+      "steps": [
+        {"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 10, "ts": 1},
+        {"op": "bar", "symbol": "A", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "sell-a", "symbol": "A", "side": "sell", "type": "market", "qty": 10, "ts": 2},
+        {"op": "bar", "symbol": "A", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "probe"},
+        {"op": "bar", "symbol": "A", "ts": 4, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "probe"},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["buy-a", "A", "buy", 10, 100.0, 2, 0], ["sell-a", "A", "sell", 10, 100.0, 3, 6000]], "rejections": []}
+        ],
+        "final": {"cash": 194000, "positions": {}, "working": [], "fees": 6000, "traded_notional": 200000, "unsettled": 0, "available_cash": 194000, "probes": [{"unsettled": 94000, "available_cash": 100000}, {"unsettled": 0, "available_cash": 194000}]}
+      }
+    },
+    {
+      "name": "costs_cut_a_buy_to_what_notional_plus_cost_allows",
+      "chunk": 2,
+      "config": {"cash": 100000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}, "costs": {"bps_buy": 100}},
+      "steps": [
+        {"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 20, "ts": 1},
+        {"op": "bar", "symbol": "A", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["buy-a", "A", "buy", 9.0, 100.0, 2, 900]], "rejections": [["buy-a", "A", "buy", 11.0, "insufficient_funds", 2]]}
+        ],
+        "final": {"cash": 9100, "positions": {"A": 9.0}, "working": [], "fees": 900, "traded_notional": 90000, "unsettled": 0, "available_cash": 9100}
+      }
+    },
+    {
+      "name": "a_flat_cost_alone_can_cost_one_more_unit",
+      "chunk": 2,
+      "config": {"cash": 100000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}, "costs": {"flat_buy": 10000}},
+      "steps": [
+        {"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 10, "ts": 1},
+        {"op": "bar", "symbol": "A", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["buy-a", "A", "buy", 9.0, 100.0, 2, 10000]], "rejections": [["buy-a", "A", "buy", 1.0, "insufficient_funds", 2]]}
+        ],
+        "final": {"cash": 0, "positions": {"A": 9.0}, "working": [], "fees": 10000, "traded_notional": 90000, "unsettled": 0, "available_cash": 0}
+      }
+    },
+    {
+      "name": "a_cost_cut_floors_to_whole_lots",
+      "chunk": 2,
+      "config": {"cash": 100000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {"A": 3}, "costs": {"bps_buy": 250}},
+      "steps": [
+        {"op": "bar", "symbol": "A", "ts": 1, "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 90, "ts": 1},
+        {"op": "bar", "symbol": "A", "ts": 2, "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["buy-a", "A", "buy", 90, 10.0, 2, 2250]], "rejections": []}
+        ],
+        "final": {"cash": 7750, "positions": {"A": 90.0}, "working": [], "fees": 2250, "traded_notional": 90000, "unsettled": 0, "available_cash": 7750}
+      }
+    },
+    {
+      "name": "a_cost_larger_than_cash_rejects_the_whole_buy",
+      "chunk": 2,
+      "config": {"cash": 10000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}, "costs": {"flat_buy": 1000000}},
+      "steps": [
+        {"op": "bar", "symbol": "A", "ts": 1, "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 1, "ts": 1},
+        {"op": "bar", "symbol": "A", "ts": 2, "open": 10.0, "high": 10.0, "low": 10.0, "close": 10.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [], "rejections": [["buy-a", "A", "buy", 1.0, "insufficient_funds", 2]]}
+        ],
+        "final": {"cash": 10000, "positions": {}, "working": [], "fees": 0, "traded_notional": 0, "unsettled": 0, "available_cash": 10000}
+      }
+    },
+    {
+      "name": "an_exact_fit_including_cost_fills_in_full",
+      "chunk": 2,
+      "config": {"cash": 101000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}, "costs": {"flat_buy": 1000}},
+      "steps": [
+        {"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 10, "ts": 1},
+        {"op": "bar", "symbol": "A", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["buy-a", "A", "buy", 10, 100.0, 2, 1000]], "rejections": []}
+        ],
+        "final": {"cash": 0, "positions": {"A": 10.0}, "working": [], "fees": 1000, "traded_notional": 100000, "unsettled": 0, "available_cash": 0}
+      }
+    },
+    {
+      "name": "negative_buy_cost_errors_and_leaves_the_order_working",
+      "chunk": 2,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}, "costs": {"flat_buy": -1}},
+      "steps": [
+        {"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 1, "ts": 1},
+        {"op": "bar", "symbol": "A", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "error": true},
+        {"op": "drain"},
+        {"op": "bar", "symbol": "A", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "error": true},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [], "rejections": []},
+        {"fills": [], "rejections": []}
+        ],
+        "final": {"cash": 1000000, "positions": {}, "working": ["buy-a"], "fees": 0, "traded_notional": 0, "unsettled": 0, "available_cash": 1000000}
+      }
+    },
+    {
+      "name": "negative_sell_cost_errors_and_leaves_the_position",
+      "chunk": 2,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}, "costs": {"flat_sell": -5}},
+      "steps": [
+        {"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 2, "ts": 1},
+        {"op": "bar", "symbol": "A", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "sell-a", "symbol": "A", "side": "sell", "type": "market", "qty": 2, "ts": 2},
+        {"op": "bar", "symbol": "A", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "error": true},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["buy-a", "A", "buy", 2, 100.0, 2, 0]], "rejections": []}
+        ],
+        "final": {"cash": 980000, "positions": {"A": 2.0}, "working": ["sell-a"], "fees": 0, "traded_notional": 20000, "unsettled": 0, "available_cash": 980000}
+      }
+    },
+    {
+      "name": "session_open_fills_sells_before_buys_like_open_session",
+      "chunk": 2,
+      "config": {"cash": 100000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "session_open", "ts": 1, "bars": [{"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 10, "ts": 1},
+        {"op": "session_open", "ts": 2, "bars": [{"op": "bar", "symbol": "A", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "buy-b", "symbol": "B", "side": "buy", "type": "market", "qty": 10, "ts": 2},
+        {"op": "submit", "id": "sell-a", "symbol": "A", "side": "sell", "type": "market", "qty": 10, "ts": 2},
+        {"op": "session_open", "ts": 3, "bars": [{"op": "bar", "symbol": "A", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}, {"op": "bar", "symbol": "B", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["buy-a", "A", "buy", 10, 100.0, 2, 0], ["sell-a", "A", "sell", 10, 100.0, 3, 0], ["buy-b", "B", "buy", 10, 100.0, 3, 0]], "rejections": []}
+        ],
+        "final": {"cash": 0, "positions": {"B": 10.0}, "working": [], "fees": 0, "traded_notional": 300000, "unsettled": 0, "available_cash": 0}
+      }
+    },
+    {
+      "name": "session_open_ignores_later_earlier_and_repeated_bars",
+      "chunk": 2,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "session_open", "ts": 10, "bars": [{"op": "bar", "symbol": "A", "ts": 10, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 1, "ts": 10},
+        {"op": "bar", "symbol": "A", "ts": 20, "open": 120.0, "high": 120.0, "low": 120.0, "close": 120.0},
+        {"op": "bar", "symbol": "A", "ts": 5, "open": 90.0, "high": 90.0, "low": 90.0, "close": 90.0},
+        {"op": "bar", "symbol": "A", "ts": 10, "open": 95.0, "high": 95.0, "low": 95.0, "close": 95.0},
+        {"op": "drain"},
+        {"op": "session_open", "ts": 11, "bars": [{"op": "bar", "symbol": "A", "ts": 11, "open": 101.0, "high": 101.0, "low": 101.0, "close": 101.0}]},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [], "rejections": []},
+        {"fills": [["buy-a", "A", "buy", 1, 101.0, 11, 0]], "rejections": []}
+        ],
+        "final": {"cash": 989900, "positions": {"A": 1.0}, "working": [], "fees": 0, "traded_notional": 10100, "unsettled": 0, "available_cash": 989900}
+      }
+    },
+    {
+      "name": "a_bar_at_the_session_ts_opens_an_instrument_the_session_open_left_out",
+      "chunk": 2,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "session_open", "ts": 1, "bars": [{"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "buy-b", "symbol": "B", "side": "buy", "type": "market", "qty": 2, "ts": 1},
+        {"op": "session_open", "ts": 2, "bars": [{"op": "bar", "symbol": "A", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "bar", "symbol": "A", "ts": 2, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "bar", "symbol": "B", "ts": 2, "open": 7.0, "high": 7.0, "low": 7.0, "close": 7.0},
+        {"op": "bar", "symbol": "B", "ts": 2, "open": 8.0, "high": 8.0, "low": 8.0, "close": 8.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["buy-b", "B", "buy", 2, 7.0, 2, 0]], "rejections": []}
+        ],
+        "final": {"cash": 998600, "positions": {"B": 2.0}, "working": [], "fees": 0, "traded_notional": 1400, "unsettled": 0, "available_cash": 998600}
+      }
+    },
+    {
+      "name": "session_open_key_need_not_be_a_bar_ts_and_bars_never_open_sessions",
+      "chunk": 2,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "session_open", "ts": 10, "bars": [{"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 1, "ts": 1},
+        {"op": "bar", "symbol": "A", "ts": 2, "open": 101.0, "high": 101.0, "low": 101.0, "close": 101.0},
+        {"op": "bar", "symbol": "A", "ts": 1, "open": 102.0, "high": 102.0, "low": 102.0, "close": 102.0},
+        {"op": "drain"},
+        {"op": "session_open", "ts": 20, "bars": [{"op": "bar", "symbol": "A", "ts": 2, "open": 103.0, "high": 103.0, "low": 103.0, "close": 103.0}]},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [], "rejections": []},
+        {"fills": [["buy-a", "A", "buy", 1, 103.0, 2, 0]], "rejections": []}
+        ],
+        "final": {"cash": 989700, "positions": {"A": 1.0}, "working": [], "fees": 0, "traded_notional": 10300, "unsettled": 0, "available_cash": 989700}
+      }
+    },
+    {
+      "name": "session_open_must_advance",
+      "chunk": 2,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "session_open", "ts": 3, "bars": [{"op": "bar", "symbol": "A", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "session_open", "ts": 3, "bars": [{"op": "bar", "symbol": "A", "ts": 3, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}], "error": true},
+        {"op": "session_open", "ts": 2, "bars": [{"op": "bar", "symbol": "A", "ts": 2, "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0}], "error": true},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 1, "ts": 3},
+        {"op": "session_open", "ts": 4, "bars": [{"op": "bar", "symbol": "A", "ts": 4, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}]},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["buy-a", "A", "buy", 1, 100.0, 4, 0]], "rejections": []}
+        ],
+        "final": {"cash": 990000, "positions": {"A": 1.0}, "working": [], "fees": 0, "traded_notional": 10000, "unsettled": 0, "available_cash": 990000}
+      }
+    },
+    {
+      "name": "session_open_after_plain_bars_switches_to_the_lenient_rules",
+      "chunk": 2,
+      "config": {"cash": 1000000, "currency": "INR", "long_only": true, "settlement_days": 0, "lot_sizes": {}},
+      "steps": [
+        {"op": "bar", "symbol": "A", "ts": 1, "open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0},
+        {"op": "submit", "id": "buy-a", "symbol": "A", "side": "buy", "type": "market", "qty": 1, "ts": 1},
+        {"op": "session_open", "ts": 2, "bars": [{"op": "bar", "symbol": "A", "ts": 2, "open": 101.0, "high": 101.0, "low": 101.0, "close": 101.0}]},
+        {"op": "submit", "id": "buy-b", "symbol": "B", "side": "buy", "type": "market", "qty": 1, "ts": 2},
+        {"op": "bar", "symbol": "B", "ts": 2, "open": 50.0, "high": 50.0, "low": 50.0, "close": 50.0},
+        {"op": "bar", "symbol": "B", "ts": 3, "open": 51.0, "high": 51.0, "low": 51.0, "close": 51.0},
+        {"op": "drain"}
+      ],
+      "expect": {
+        "drains": [
+        {"fills": [["buy-a", "A", "buy", 1, 101.0, 2, 0]], "rejections": []}
+        ],
+        "final": {"cash": 989900, "positions": {"A": 1.0}, "working": ["buy-b"], "fees": 0, "traded_notional": 10100, "unsettled": 0, "available_cash": 989900}
+      }
+    }
+  ]
+}

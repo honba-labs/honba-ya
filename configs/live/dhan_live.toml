@@ -1,0 +1,12 @@
+# DhanHQ Live broker configuration
+# Sensitive tokens should be supplied via environment variables or CLI overrides.
+
+[adapter]
+name = "dhan"
+mode = "live"
+client_id = "${DHAN_CLIENT_ID}"
+access_token = "${DHAN_ACCESS_TOKEN}"
+timeout_seconds = 10.0
+orders_per_second = 10
+orders_burst = 25
+data_per_second = 5

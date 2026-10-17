@@ -7,6 +7,9 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Transport-agnostic versioned API surface for the Honba platform"
 
+[lib]
+name = "honba_api"
+
 [dependencies]
 honba-messages.workspace = true
 honba-entities.workspace = true

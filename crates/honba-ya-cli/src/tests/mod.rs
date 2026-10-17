@@ -6,4 +6,5 @@ mod args;
 mod backtest;
 mod data;
 mod serve;
+mod ticks_file;
 mod trading_state;

@@ -1,0 +1,130 @@
+{
+  "fixture_version": 1,
+  "type": "StrategyManifest",
+  "description": "StrategyManifest cases shared by Rust (honba_strategy::StrategyManifest) and Python (honba.strategies.manifest.StrategyManifest). 'error' is null for a valid manifest, 'deserialize' when parsing must fail (unknown field, negative warmup), otherwise the validate() error code.",
+  "cases": [
+    {
+      "name": "valid_with_warmup",
+      "error": null,
+      "value": {
+        "api_version": "1.0.0",
+        "name": "sma_crossover",
+        "source_hash": "sha256:abc123",
+        "universe": {"explicit": [{"symbol": "NIFTY50", "exchange": "NSE"}]},
+        "subscriptions": {
+          "instruments": [{"symbol": "NIFTY50", "exchange": "NSE"}],
+          "quotes": false,
+          "trades": false
+        },
+        "driving_timeframe": {"interval": 1, "aggregation": "day"},
+        "warmup_bars": 20,
+        "schedules": {"session_open": "09:15:00+05:30"}
+      }
+    },
+    {
+      "name": "valid_named_universe_resolved_defaults_omitted",
+      "error": null,
+      "value": {
+        "api_version": "1.0.0",
+        "name": "alpha30",
+        "source_hash": "sha256:def456",
+        "universe": {"named": "NIFTY50"},
+        "subscriptions": {"instruments": [{"symbol": "RELIANCE", "exchange": "NSE"}]},
+        "driving_timeframe": {"interval": 1, "aggregation": "day"},
+        "warmup_bars": 0
+      }
+    },
+    {
+      "name": "empty_name",
+      "error": "empty_name",
+      "value": {
+        "api_version": "1.0.0",
+        "name": "  ",
+        "source_hash": "sha256:abc",
+        "universe": {"explicit": []},
+        "subscriptions": {"instruments": []},
+        "driving_timeframe": {"interval": 1, "aggregation": "day"},
+        "warmup_bars": 0
+      }
+    },
+    {
+      "name": "empty_source_hash",
+      "error": "empty_source_hash",
+      "value": {
+        "api_version": "1.0.0",
+        "name": "sma",
+        "source_hash": "",
+        "universe": {"explicit": []},
+        "subscriptions": {"instruments": []},
+        "driving_timeframe": {"interval": 1, "aggregation": "day"},
+        "warmup_bars": 0
+      }
+    },
+    {
+      "name": "unsupported_api_version",
+      "error": "unsupported_api_version",
+      "value": {
+        "api_version": "99.0.0",
+        "name": "sma",
+        "source_hash": "sha256:abc",
+        "universe": {"explicit": []},
+        "subscriptions": {"instruments": []},
+        "driving_timeframe": {"interval": 1, "aggregation": "day"},
+        "warmup_bars": 0
+      }
+    },
+    {
+      "name": "zero_interval",
+      "error": "zero_interval",
+      "value": {
+        "api_version": "1.0.0",
+        "name": "sma",
+        "source_hash": "sha256:abc",
+        "universe": {"explicit": []},
+        "subscriptions": {"instruments": []},
+        "driving_timeframe": {"interval": 0, "aggregation": "day"},
+        "warmup_bars": 0
+      }
+    },
+    {
+      "name": "named_universe_unresolved",
+      "error": "named_universe_unresolved",
+      "value": {
+        "api_version": "1.0.0",
+        "name": "sma",
+        "source_hash": "sha256:abc",
+        "universe": {"named": "NIFTY50"},
+        "subscriptions": {"instruments": []},
+        "driving_timeframe": {"interval": 1, "aggregation": "day"},
+        "warmup_bars": 0
+      }
+    },
+    {
+      "name": "unknown_field",
+      "error": "deserialize",
+      "value": {
+        "api_version": "1.0.0",
+        "name": "sma",
+        "source_hash": "sha256:abc",
+        "universe": {"explicit": []},
+        "subscriptions": {"instruments": []},
+        "driving_timeframe": {"interval": 1, "aggregation": "day"},
+        "warmup_bars": 0,
+        "warmup_days": 3
+      }
+    },
+    {
+      "name": "negative_warmup",
+      "error": "deserialize",
+      "value": {
+        "api_version": "1.0.0",
+        "name": "sma",
+        "source_hash": "sha256:abc",
+        "universe": {"explicit": []},
+        "subscriptions": {"instruments": []},
+        "driving_timeframe": {"interval": 1, "aggregation": "day"},
+        "warmup_bars": -1
+      }
+    }
+  ]
+}

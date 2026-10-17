@@ -1,0 +1,40 @@
+# Backtest configuration: monthly-rebalanced factor portfolio over NIFTY 50 names.
+# Schema: honba_config::BacktestRunConfig; checked by crates/honba-config/tests/configs.rs.
+# A named universe must be resolved into `subscriptions.instruments` before a run
+# (ResolvedUniverse::apply); the list below is the resolved snapshot.
+
+seed = 30
+
+[strategy]
+api_version = "1.0.0"
+name = "alpha30_factor"
+source_hash = "unverified:alpha30_factor"
+universe = { named = "NIFTY50" }
+driving_timeframe = { interval = 1, aggregation = "day" }
+warmup_bars = 252
+schedules = { rebalance = "monthly:first_session" }
+
+[strategy.subscriptions]
+instruments = [
+    { symbol = "RELIANCE", exchange = "NSE" },
+    { symbol = "HDFCBANK", exchange = "NSE" },
+    { symbol = "ICICIBANK", exchange = "NSE" },
+    { symbol = "INFY", exchange = "NSE" },
+    { symbol = "TCS", exchange = "NSE" },
+    { symbol = "ITC", exchange = "NSE" },
+    { symbol = "LT", exchange = "NSE" },
+    { symbol = "SBIN", exchange = "NSE" },
+    { symbol = "BHARTIARTL", exchange = "NSE" },
+    { symbol = "AXISBANK", exchange = "NSE" },
+]
+
+[data.local]
+root = "data/catalog"
+
+[execution]
+fill_model = "bar_fill"
+slippage_multiplier = 1.0
+
+[account]
+starting_cash = 5000000.0
+currency = "INR"

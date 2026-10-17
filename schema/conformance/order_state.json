@@ -1,0 +1,769 @@
+{
+  "fixture_version": 1,
+  "type": "OrderState",
+  "description": "Order-state machine vectors (ADR 0019 decision 8). Steps are literal: submit/cancel are submitter ops, venue steps are scripted venue events. cancel on an unknown, Initialized, terminal or already-pending order emits nothing. A step with expect_error must be an IllegalTransition of that kind (transition|overfill|fill_mismatch|invalid_quantity): state unchanged, no event. expect_events lists, per scenario, the wire-event projection each op yields (at most one; duplicate no-ops yield none); only the keys listed are compared. quantity on order_rejected/cancelled/expired is the released remainder. Under profile l1 (requires_ack false) order_accepted is removed from both sides before comparing; gateways run only scenarios whose profile list includes theirs, and price-driven (bar) sims only those with bar_realisable true; the rest are not_applicable for them, by name.",
+  "profiles": {
+    "l1": {
+      "requires_ack": false,
+      "emits_expiry": false
+    },
+    "ack": {
+      "requires_ack": true,
+      "emits_expiry": true
+    }
+  },
+  "scenarios": [
+    {
+      "name": "partial_fill_sequence",
+      "description": "A partial fill, then a cancel the venue honours: the remainder is released.",
+      "profile": [
+        "l1",
+        "ack"
+      ],
+      "bar_realisable": false,
+      "steps": [
+        {
+          "op": "submit",
+          "order_id": "S-1",
+          "side": "buy",
+          "symbol": "X",
+          "quantity": 3.0,
+          "order_type": "limit",
+          "price": 10.0,
+          "tif": "day",
+          "ts": 1
+        },
+        {
+          "op": "venue",
+          "event": "fill",
+          "order_id": "S-1",
+          "last_qty": 1.0,
+          "last_px": 10.0,
+          "ts": 2
+        },
+        {
+          "op": "cancel",
+          "order_id": "S-1",
+          "ts": 3
+        },
+        {
+          "op": "venue",
+          "event": "cancelled",
+          "order_id": "S-1",
+          "ts": 3
+        }
+      ],
+      "expect_events": [
+        {
+          "type": "order",
+          "order_id": "S-1",
+          "status": "submitted"
+        },
+        {
+          "type": "order_partially_filled",
+          "order_id": "S-1",
+          "last_qty": 1.0,
+          "cum_qty": 1.0
+        },
+        {
+          "type": "order_cancel_requested",
+          "order_id": "S-1"
+        },
+        {
+          "type": "order_cancelled",
+          "order_id": "S-1",
+          "quantity": 2.0
+        }
+      ],
+      "expect_state": {
+        "S-1": {
+          "status": "cancelled",
+          "filled_qty": 1.0,
+          "cancel_requested": false
+        }
+      }
+    },
+    {
+      "name": "reject_remainder_after_partial",
+      "description": "A venue rejects the remainder of a partly filled order.",
+      "profile": [
+        "l1",
+        "ack"
+      ],
+      "bar_realisable": false,
+      "steps": [
+        {
+          "op": "submit",
+          "order_id": "S-1",
+          "side": "buy",
+          "symbol": "X",
+          "quantity": 3.0,
+          "order_type": "limit",
+          "price": 10.0,
+          "tif": "day",
+          "ts": 1
+        },
+        {
+          "op": "venue",
+          "event": "fill",
+          "order_id": "S-1",
+          "last_qty": 1.0,
+          "last_px": 10.0,
+          "ts": 2
+        },
+        {
+          "op": "venue",
+          "event": "rejected",
+          "order_id": "S-1",
+          "reason": "rms",
+          "ts": 3
+        }
+      ],
+      "expect_events": [
+        {
+          "type": "order",
+          "order_id": "S-1",
+          "status": "submitted"
+        },
+        {
+          "type": "order_partially_filled",
+          "order_id": "S-1",
+          "last_qty": 1.0,
+          "cum_qty": 1.0
+        },
+        {
+          "type": "order_rejected",
+          "order_id": "S-1",
+          "quantity": 2.0
+        }
+      ],
+      "expect_state": {
+        "S-1": {
+          "status": "rejected",
+          "filled_qty": 1.0,
+          "cancel_requested": false
+        }
+      }
+    },
+    {
+      "name": "cancel_twice_emits_once",
+      "description": "cancel is idempotent: later cancels while one is pending, or after the order is terminal, emit nothing.",
+      "profile": [
+        "l1",
+        "ack"
+      ],
+      "bar_realisable": false,
+      "steps": [
+        {
+          "op": "submit",
+          "order_id": "S-1",
+          "side": "buy",
+          "symbol": "X",
+          "quantity": 3.0,
+          "order_type": "limit",
+          "price": 10.0,
+          "tif": "day",
+          "ts": 1
+        },
+        {
+          "op": "cancel",
+          "order_id": "S-1",
+          "ts": 2
+        },
+        {
+          "op": "cancel",
+          "order_id": "S-1",
+          "ts": 2
+        },
+        {
+          "op": "venue",
+          "event": "cancelled",
+          "order_id": "S-1",
+          "ts": 2
+        },
+        {
+          "op": "cancel",
+          "order_id": "S-1",
+          "ts": 3
+        }
+      ],
+      "expect_events": [
+        {
+          "type": "order",
+          "order_id": "S-1",
+          "status": "submitted"
+        },
+        {
+          "type": "order_cancel_requested",
+          "order_id": "S-1"
+        },
+        {
+          "type": "order_cancelled",
+          "order_id": "S-1",
+          "quantity": 3.0
+        }
+      ],
+      "expect_state": {
+        "S-1": {
+          "status": "cancelled",
+          "filled_qty": 0.0,
+          "cancel_requested": false
+        }
+      }
+    },
+    {
+      "name": "duplicate_terminal_is_noop",
+      "description": "A repeated terminal event is a no-op: one wire event, state unchanged.",
+      "profile": [
+        "l1",
+        "ack"
+      ],
+      "bar_realisable": false,
+      "steps": [
+        {
+          "op": "submit",
+          "order_id": "S-1",
+          "side": "buy",
+          "symbol": "X",
+          "quantity": 2.0,
+          "order_type": "limit",
+          "price": 10.0,
+          "tif": "day",
+          "ts": 1
+        },
+        {
+          "op": "venue",
+          "event": "cancelled",
+          "order_id": "S-1",
+          "ts": 2
+        },
+        {
+          "op": "venue",
+          "event": "cancelled",
+          "order_id": "S-1",
+          "ts": 3
+        },
+        {
+          "op": "submit",
+          "order_id": "S-2",
+          "side": "buy",
+          "symbol": "X",
+          "quantity": 2.0,
+          "order_type": "limit",
+          "price": 10.0,
+          "tif": "day",
+          "ts": 4
+        },
+        {
+          "op": "venue",
+          "event": "rejected",
+          "order_id": "S-2",
+          "ts": 5
+        },
+        {
+          "op": "venue",
+          "event": "rejected",
+          "order_id": "S-2",
+          "ts": 6
+        }
+      ],
+      "expect_events": [
+        {
+          "type": "order",
+          "order_id": "S-1",
+          "status": "submitted"
+        },
+        {
+          "type": "order_cancelled",
+          "order_id": "S-1",
+          "quantity": 2.0
+        },
+        {
+          "type": "order",
+          "order_id": "S-2",
+          "status": "submitted"
+        },
+        {
+          "type": "order_rejected",
+          "order_id": "S-2",
+          "quantity": 2.0
+        }
+      ],
+      "expect_state": {
+        "S-1": {
+          "status": "cancelled",
+          "filled_qty": 0.0,
+          "cancel_requested": false
+        },
+        "S-2": {
+          "status": "rejected",
+          "filled_qty": 0.0,
+          "cancel_requested": false
+        }
+      }
+    },
+    {
+      "name": "ioc_remainder_cancelled",
+      "description": "The unfilled remainder of an IOC order is Cancelled, never Expired.",
+      "profile": [
+        "l1",
+        "ack"
+      ],
+      "bar_realisable": false,
+      "steps": [
+        {
+          "op": "submit",
+          "order_id": "S-1",
+          "side": "buy",
+          "symbol": "X",
+          "quantity": 3.0,
+          "order_type": "limit",
+          "price": 10.0,
+          "tif": "ioc",
+          "ts": 1
+        },
+        {
+          "op": "venue",
+          "event": "fill",
+          "order_id": "S-1",
+          "last_qty": 1.0,
+          "last_px": 10.0,
+          "ts": 1
+        },
+        {
+          "op": "venue",
+          "event": "cancelled",
+          "order_id": "S-1",
+          "ts": 1
+        }
+      ],
+      "expect_events": [
+        {
+          "type": "order",
+          "order_id": "S-1",
+          "status": "submitted"
+        },
+        {
+          "type": "order_partially_filled",
+          "order_id": "S-1",
+          "last_qty": 1.0,
+          "cum_qty": 1.0
+        },
+        {
+          "type": "order_cancelled",
+          "order_id": "S-1",
+          "quantity": 2.0
+        }
+      ],
+      "expect_state": {
+        "S-1": {
+          "status": "cancelled",
+          "filled_qty": 1.0,
+          "cancel_requested": false
+        }
+      }
+    },
+    {
+      "name": "cancel_race",
+      "description": "Cancel enqueued first, completing fill second, same ts: the fill wins, exactly one terminal event (no order_cancelled), cancel_requested cleared.",
+      "profile": [
+        "l1",
+        "ack"
+      ],
+      "bar_realisable": false,
+      "steps": [
+        {
+          "op": "submit",
+          "order_id": "S-1",
+          "side": "buy",
+          "symbol": "X",
+          "quantity": 2.0,
+          "order_type": "limit",
+          "price": 10.0,
+          "tif": "day",
+          "ts": 1
+        },
+        {
+          "op": "cancel",
+          "order_id": "S-1",
+          "ts": 5
+        },
+        {
+          "op": "venue",
+          "event": "fill",
+          "order_id": "S-1",
+          "last_qty": 2.0,
+          "last_px": 10.0,
+          "ts": 5
+        }
+      ],
+      "expect_events": [
+        {
+          "type": "order",
+          "order_id": "S-1",
+          "status": "submitted"
+        },
+        {
+          "type": "order_cancel_requested",
+          "order_id": "S-1"
+        },
+        {
+          "type": "order_filled",
+          "order_id": "S-1",
+          "last_qty": 2.0
+        }
+      ],
+      "expect_state": {
+        "S-1": {
+          "status": "filled",
+          "filled_qty": 2.0,
+          "cancel_requested": false
+        }
+      }
+    },
+    {
+      "name": "cancel_race_fill_first",
+      "description": "Completing fill enqueued before the cancel at the same ts: the cancel is a no-op on a finished order.",
+      "profile": [
+        "l1",
+        "ack"
+      ],
+      "bar_realisable": false,
+      "steps": [
+        {
+          "op": "submit",
+          "order_id": "S-1",
+          "side": "buy",
+          "symbol": "X",
+          "quantity": 2.0,
+          "order_type": "limit",
+          "price": 10.0,
+          "tif": "day",
+          "ts": 1
+        },
+        {
+          "op": "venue",
+          "event": "fill",
+          "order_id": "S-1",
+          "last_qty": 2.0,
+          "last_px": 10.0,
+          "ts": 5
+        },
+        {
+          "op": "cancel",
+          "order_id": "S-1",
+          "ts": 5
+        }
+      ],
+      "expect_events": [
+        {
+          "type": "order",
+          "order_id": "S-1",
+          "status": "submitted"
+        },
+        {
+          "type": "order_filled",
+          "order_id": "S-1",
+          "last_qty": 2.0
+        }
+      ],
+      "expect_state": {
+        "S-1": {
+          "status": "filled",
+          "filled_qty": 2.0,
+          "cancel_requested": false
+        }
+      }
+    },
+    {
+      "name": "cancel_race_cancel_wins",
+      "description": "Cancel acknowledged first, a late fill at the same ts is an illegal transition (state unchanged, no event).",
+      "profile": [
+        "l1",
+        "ack"
+      ],
+      "bar_realisable": false,
+      "steps": [
+        {
+          "op": "submit",
+          "order_id": "S-1",
+          "side": "buy",
+          "symbol": "X",
+          "quantity": 2.0,
+          "order_type": "limit",
+          "price": 10.0,
+          "tif": "day",
+          "ts": 1
+        },
+        {
+          "op": "cancel",
+          "order_id": "S-1",
+          "ts": 5
+        },
+        {
+          "op": "venue",
+          "event": "cancelled",
+          "order_id": "S-1",
+          "ts": 5
+        },
+        {
+          "op": "venue",
+          "event": "fill",
+          "order_id": "S-1",
+          "last_qty": 2.0,
+          "last_px": 10.0,
+          "ts": 5,
+          "expect_error": "transition"
+        }
+      ],
+      "expect_events": [
+        {
+          "type": "order",
+          "order_id": "S-1",
+          "status": "submitted"
+        },
+        {
+          "type": "order_cancel_requested",
+          "order_id": "S-1"
+        },
+        {
+          "type": "order_cancelled",
+          "order_id": "S-1",
+          "quantity": 2.0
+        }
+      ],
+      "expect_state": {
+        "S-1": {
+          "status": "cancelled",
+          "filled_qty": 0.0,
+          "cancel_requested": false
+        }
+      }
+    },
+    {
+      "name": "market_fill",
+      "description": "A market order fills completely: one terminal event.",
+      "profile": [
+        "l1",
+        "ack"
+      ],
+      "bar_realisable": true,
+      "steps": [
+        {
+          "op": "submit",
+          "order_id": "S-1",
+          "side": "buy",
+          "symbol": "X",
+          "quantity": 2.0,
+          "order_type": "market",
+          "tif": "day",
+          "ts": 1
+        },
+        {
+          "op": "venue",
+          "event": "fill",
+          "order_id": "S-1",
+          "last_qty": 2.0,
+          "last_px": 10.0,
+          "ts": 1
+        }
+      ],
+      "expect_events": [
+        {
+          "type": "order",
+          "order_id": "S-1",
+          "status": "submitted"
+        },
+        {
+          "type": "order_filled",
+          "order_id": "S-1",
+          "last_qty": 2.0
+        }
+      ],
+      "expect_state": {
+        "S-1": {
+          "status": "filled",
+          "filled_qty": 2.0,
+          "cancel_requested": false
+        }
+      }
+    },
+    {
+      "name": "limit_fill",
+      "description": "A limit order is acknowledged and fills completely. Under the l1 profile order_accepted is dropped from both sides.",
+      "profile": [
+        "l1",
+        "ack"
+      ],
+      "bar_realisable": true,
+      "steps": [
+        {
+          "op": "submit",
+          "order_id": "S-1",
+          "side": "buy",
+          "symbol": "X",
+          "quantity": 4.0,
+          "order_type": "limit",
+          "price": 10.0,
+          "tif": "day",
+          "ts": 1
+        },
+        {
+          "op": "venue",
+          "event": "accepted",
+          "order_id": "S-1",
+          "ts": 1
+        },
+        {
+          "op": "venue",
+          "event": "fill",
+          "order_id": "S-1",
+          "last_qty": 4.0,
+          "last_px": 10.0,
+          "ts": 2
+        }
+      ],
+      "expect_events": [
+        {
+          "type": "order",
+          "order_id": "S-1",
+          "status": "submitted"
+        },
+        {
+          "type": "order_accepted",
+          "order_id": "S-1"
+        },
+        {
+          "type": "order_filled",
+          "order_id": "S-1",
+          "last_qty": 4.0
+        }
+      ],
+      "expect_state": {
+        "S-1": {
+          "status": "filled",
+          "filled_qty": 4.0,
+          "cancel_requested": false
+        }
+      }
+    },
+    {
+      "name": "reject_at_submit",
+      "description": "A venue rejection right after submit releases the whole quantity. Risk refusals are ADR 0018's set.",
+      "profile": [
+        "l1",
+        "ack"
+      ],
+      "bar_realisable": false,
+      "steps": [
+        {
+          "op": "submit",
+          "order_id": "S-1",
+          "side": "buy",
+          "symbol": "X",
+          "quantity": 3.0,
+          "order_type": "limit",
+          "price": 10.0,
+          "tif": "day",
+          "ts": 1
+        },
+        {
+          "op": "venue",
+          "event": "rejected",
+          "order_id": "S-1",
+          "reason": "rms",
+          "ts": 1
+        }
+      ],
+      "expect_events": [
+        {
+          "type": "order",
+          "order_id": "S-1",
+          "status": "submitted"
+        },
+        {
+          "type": "order_rejected",
+          "order_id": "S-1",
+          "quantity": 3.0
+        }
+      ],
+      "expect_state": {
+        "S-1": {
+          "status": "rejected",
+          "filled_qty": 0.0,
+          "cancel_requested": false
+        }
+      }
+    },
+    {
+      "name": "tif_expiry",
+      "description": "A Day order expires at session end with a partial fill: the remainder is released as Expired. Needs a venue that emits expiry.",
+      "profile": [
+        "ack"
+      ],
+      "bar_realisable": false,
+      "steps": [
+        {
+          "op": "submit",
+          "order_id": "S-1",
+          "side": "buy",
+          "symbol": "X",
+          "quantity": 3.0,
+          "order_type": "limit",
+          "price": 10.0,
+          "tif": "day",
+          "ts": 1
+        },
+        {
+          "op": "venue",
+          "event": "accepted",
+          "order_id": "S-1",
+          "ts": 1
+        },
+        {
+          "op": "venue",
+          "event": "fill",
+          "order_id": "S-1",
+          "last_qty": 1.0,
+          "last_px": 10.0,
+          "ts": 2
+        },
+        {
+          "op": "venue",
+          "event": "expired",
+          "order_id": "S-1",
+          "ts": 9
+        }
+      ],
+      "expect_events": [
+        {
+          "type": "order",
+          "order_id": "S-1",
+          "status": "submitted"
+        },
+        {
+          "type": "order_accepted",
+          "order_id": "S-1"
+        },
+        {
+          "type": "order_partially_filled",
+          "order_id": "S-1",
+          "last_qty": 1.0,
+          "cum_qty": 1.0
+        },
+        {
+          "type": "order_expired",
+          "order_id": "S-1",
+          "quantity": 2.0
+        }
+      ],
+      "expect_state": {
+        "S-1": {
+          "status": "expired",
+          "filled_qty": 1.0,
+          "cancel_requested": false
+        }
+      }
+    }
+  ]
+}

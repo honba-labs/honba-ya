@@ -4,5 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+name = "honba_ws"
+
 [dependencies]
 tokio.workspace = true

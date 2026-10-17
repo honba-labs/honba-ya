@@ -31,10 +31,19 @@ const SYNC_KERNEL_CRATES: &[&str] = &[
 const FORBIDDEN: &[&str] = &["SystemTime", "Instant::now", "Utc::now", "Local::now"];
 
 fn sources_of(crate_name: &str) -> BTreeMap<PathBuf, String> {
-    let src = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join(crate_name)
-        .join("src");
+    let rel_path = match crate_name {
+        "honba-messages" => "../../../honba-kokoro/crates/honba-kokoro-messages/src",
+        "honba-entities" => "../../../honba-kokoro/crates/honba-kokoro-entities/src",
+        "honba-risk" => "../../../honba-kokoro/crates/honba-kokoro-risk/src",
+        "honba-engine" => "../honba-ya-engine/src",
+        "honba-indicators" => "../../../honba-me/crates/honba-me-indicators/src",
+        "honba-sim" => "../honba-ya-sim/src",
+        "honba-strategy" => "../../../honba-nou/crates/honba-nou-strategy/src",
+        "honba-market" => "../../../honba-me/crates/honba-me-market/src",
+        "honba-analytics" => "../../../honba-nou/crates/honba-nou-analytics/src",
+        other => panic!("unknown crate {other}"),
+    };
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join(rel_path);
     let mut out = BTreeMap::new();
     let mut dirs = vec![src];
     while let Some(dir) = dirs.pop() {

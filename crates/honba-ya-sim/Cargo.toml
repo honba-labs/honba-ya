@@ -7,6 +7,9 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Simulation and paper execution models for Honba"
 
+[lib]
+name = "honba_sim"
+
 [dependencies]
 honba-messages.workspace = true
 honba-entities.workspace = true

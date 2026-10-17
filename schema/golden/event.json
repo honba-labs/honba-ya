@@ -1,0 +1,356 @@
+{
+  "schema_version": 4,
+  "type": "Event",
+  "cases": [
+    {
+      "name": "quote",
+      "value": {
+        "type": "quote",
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "bid_price": 22000.0,
+        "ask_price": 22001.0,
+        "bid_size": 50.0,
+        "ask_size": 75.0,
+        "ts_event": {
+          "iso": "2023-11-14T22:14:20.000000000Z",
+          "unix_nanos": "1700000060000000000"
+        },
+        "ts_init": {
+          "iso": "2023-11-14T22:14:20.000000000Z",
+          "unix_nanos": "1700000060000000000"
+        }
+      }
+    },
+    {
+      "name": "trade_tick",
+      "value": {
+        "type": "trade",
+        "instrument_id": {
+          "symbol": "RELIANCE",
+          "exchange": "NSE"
+        },
+        "price": 2950.5,
+        "size": 100.0,
+        "aggressor_side": "seller",
+        "trade_id": "T-42",
+        "ts_event": {
+          "iso": "2023-11-14T22:14:20.000000000Z",
+          "unix_nanos": "1700000060000000000"
+        },
+        "ts_init": {
+          "iso": "2023-11-14T22:14:20.000000000Z",
+          "unix_nanos": "1700000060000000000"
+        }
+      }
+    },
+    {
+      "name": "bar",
+      "value": {
+        "type": "bar",
+        "bar_type": {
+          "instrument_id": {
+            "symbol": "BANKNIFTY",
+            "exchange": "NSE"
+          },
+          "spec": {
+            "step": 5,
+            "aggregation": "minute",
+            "price_type": "last"
+          }
+        },
+        "open": 48000.0,
+        "high": 48200.5,
+        "low": 47900.05,
+        "close": 48150.3,
+        "volume": 12345.0,
+        "ts_event": {
+          "iso": "2023-11-14T22:14:20.000000000Z",
+          "unix_nanos": "1700000060000000000"
+        },
+        "ts_init": {
+          "iso": "2023-11-14T22:14:20.000000001Z",
+          "unix_nanos": "1700000060000000001"
+        }
+      }
+    },
+    {
+      "name": "order",
+      "value": {
+        "type": "order",
+        "order_id": "O-4",
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "buy",
+        "order_type": "stop_limit",
+        "quantity": 75.0,
+        "price": 22010.0,
+        "trigger_price": 22000.0,
+        "status": "initialized",
+        "time_in_force": "day",
+        "ts_event": {
+          "iso": "2023-11-14T22:14:20.000000000Z",
+          "unix_nanos": "1700000060000000000"
+        },
+        "ts_init": {
+          "iso": "2023-11-14T22:14:20.000000000Z",
+          "unix_nanos": "1700000060000000000"
+        }
+      }
+    },
+    {
+      "name": "order_accepted",
+      "value": {
+        "type": "order_accepted",
+        "order_id": "O-1",
+        "ts_event": {
+          "iso": "2023-11-14T22:14:20.000000000Z",
+          "unix_nanos": "1700000060000000000"
+        }
+      }
+    },
+    {
+      "name": "order_accepted_with_venue_id",
+      "value": {
+        "type": "order_accepted",
+        "order_id": "O-1",
+        "venue_order_id": "V-100",
+        "ts_event": {
+          "iso": "2023-11-14T22:14:20.000000000Z",
+          "unix_nanos": "1700000060000000000"
+        }
+      }
+    },
+    {
+      "name": "order_accepted_without_venue_id",
+      "value": {
+        "type": "order_accepted",
+        "order_id": "O-6",
+        "ts_event": {
+          "iso": "2023-11-14T22:14:20.000000000Z",
+          "unix_nanos": "1700000060000000000"
+        }
+      }
+    },
+    {
+      "name": "order_partially_filled",
+      "value": {
+        "type": "order_partially_filled",
+        "order_id": "O-1",
+        "last_qty": 25.0,
+        "last_px": 22000.05,
+        "cum_qty": 25.0,
+        "ts_event": {
+          "iso": "2023-11-14T22:14:20.000000000Z",
+          "unix_nanos": "1700000060000000000"
+        }
+      }
+    },
+    {
+      "name": "order_cancel_requested",
+      "value": {
+        "type": "order_cancel_requested",
+        "order_id": "O-3",
+        "ts_event": {
+          "iso": "2023-11-14T22:14:20.000000000Z",
+          "unix_nanos": "1700000060000000000"
+        }
+      }
+    },
+    {
+      "name": "order_expired",
+      "value": {
+        "type": "order_expired",
+        "order_id": "O-5",
+        "ts_event": {
+          "iso": "2023-11-14T22:14:20.000000000Z",
+          "unix_nanos": "1700000060000000000"
+        }
+      }
+    },
+    {
+      "name": "order_rejected",
+      "value": {
+        "type": "order_rejected",
+        "order_id": "O-2",
+        "reason": "insufficient margin",
+        "ts_event": {
+          "iso": "2023-11-14T22:14:20.000000000Z",
+          "unix_nanos": "1700000060000000000"
+        }
+      }
+    },
+    {
+      "name": "order_filled",
+      "value": {
+        "type": "order_filled",
+        "order_id": "O-1",
+        "last_qty": 25.0,
+        "last_px": 22000.05,
+        "ts_event": {
+          "iso": "2023-11-14T22:14:20.000000000Z",
+          "unix_nanos": "1700000060000000000"
+        }
+      }
+    },
+    {
+      "name": "order_cancelled",
+      "value": {
+        "type": "order_cancelled",
+        "order_id": "O-3",
+        "ts_event": {
+          "iso": "2023-11-14T22:14:20.000000000Z",
+          "unix_nanos": "1700000060000000000"
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "unknown_type",
+      "value": {
+        "type": "order_exploded",
+        "order_id": "O-1",
+        "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}
+      }
+    },
+    {
+      "name": "order_id_not_a_string",
+      "value": {
+        "type": "order_cancelled",
+        "order_id": 7,
+        "ts_event": {"iso": "1970-01-01T00:00:00.000000001Z", "unix_nanos": "1"}
+      }
+    },
+    {
+      "name": "quote_ask_below_bid",
+      "value": {
+        "type": "quote",
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "bid_price": 22000.0,
+        "ask_price": 21999.0,
+        "bid_size": 50.0,
+        "ask_size": 75.0,
+        "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"},
+        "ts_init": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}
+      }
+    },
+    {
+      "name": "quote_negative_size",
+      "value": {
+        "type": "quote",
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "bid_price": 22000.0,
+        "ask_price": 22001.0,
+        "bid_size": -50.0,
+        "ask_size": 75.0,
+        "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"},
+        "ts_init": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}
+      }
+    },
+    {
+      "name": "trade_tick_negative_size",
+      "value": {
+        "type": "trade",
+        "instrument_id": {
+          "symbol": "RELIANCE",
+          "exchange": "NSE"
+        },
+        "price": 2950.5,
+        "size": -100.0,
+        "aggressor_side": "seller",
+        "trade_id": "T-42",
+        "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"},
+        "ts_init": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}
+      }
+    },
+    {
+      "name": "bar_high_below_low",
+      "value": {
+        "type": "bar",
+        "bar_type": {
+          "instrument_id": {
+            "symbol": "BANKNIFTY",
+            "exchange": "NSE"
+          },
+          "spec": {
+            "step": 5,
+            "aggregation": "minute",
+            "price_type": "last"
+          }
+        },
+        "open": 48000.0,
+        "high": 47000.0,
+        "low": 47900.05,
+        "close": 48150.3,
+        "volume": 12345.0,
+        "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"},
+        "ts_init": {"iso": "2023-11-14T22:14:20.000000001Z", "unix_nanos": "1700000060000000001"}
+      }
+    },
+    {
+      "name": "order_negative_quantity",
+      "value": {
+        "type": "order",
+        "order_id": "O-4",
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "buy",
+        "order_type": "stop_limit",
+        "quantity": -75.0,
+        "price": 22010.0,
+        "trigger_price": 22000.0,
+        "status": "initialized",
+        "time_in_force": "day",
+        "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"},
+        "ts_init": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}
+      }
+    },
+    {
+      "name": "order_partially_filled_zero_cum_qty",
+      "value": {
+        "type": "order_partially_filled",
+        "order_id": "O-1",
+        "last_qty": 25.0,
+        "last_px": 22000.05,
+        "cum_qty": 0.0,
+        "ts_event": {
+          "iso": "2023-11-14T22:14:20.000000000Z",
+          "unix_nanos": "1700000060000000000"
+        }
+      }
+    },
+    {
+      "name": "order_filled_zero_qty",
+      "value": {
+        "type": "order_filled",
+        "order_id": "O-1",
+        "last_qty": 0.0,
+        "last_px": 22000.05,
+        "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}
+      }
+    }
+  ],
+  "invalid_text": [
+    {
+      "name": "duplicate_type",
+      "text": "{\"type\":\"order_accepted\",\"order_id\":\"O-1\",\"ts_event\":1,\"type\":\"order_cancelled\"}"
+    }
+  ],
+  "tolerated": [
+    {"name": "order_accepted_unknown_field", "value": {"type": "order_accepted", "order_id": "O-1", "ts_event": {"iso": "1970-01-01T00:00:00.000000001Z", "unix_nanos": "1"}, "exchange_order_id": "X"}, "canonical": {"type": "order_accepted", "order_id": "O-1", "ts_event": {"iso": "1970-01-01T00:00:00.000000001Z", "unix_nanos": "1"}}},
+    {"name": "quote_unknown_fields", "value": {"type": "quote", "instrument_id": {"symbol": "NIFTY50", "exchange": "NSE", "isin": "INE000000000"}, "bid_price": 22000.0, "ask_price": 22001.0, "bid_size": 50.0, "ask_size": 75.0, "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}, "ts_init": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}, "depth": 5}, "canonical": {"type": "quote", "instrument_id": {"symbol": "NIFTY50", "exchange": "NSE"}, "bid_price": 22000.0, "ask_price": 22001.0, "bid_size": 50.0, "ask_size": 75.0, "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}, "ts_init": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}}}
+  ]
+}

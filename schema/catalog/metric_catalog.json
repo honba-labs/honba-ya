@@ -1,0 +1,838 @@
+{
+  "version": 1,
+  "notes": "Metric catalog: source of truth for screener metric definitions. `key` is the wire key sent to the backend; `uiId` is the frontend column id and is never sent on the wire; `aliases` are natural-language phrases resolved by honba.screener.MetricCatalog. Security identity is InstrumentId; `name` is the display ticker and `exchange` is the trading exchange code. Each entry validates as honba.entities.screener.MetricDefinition.",
+  "groups": [
+    "SECURITY",
+    "OVERVIEW",
+    "PERFORMANCE",
+    "TECHNICALS",
+    "EXTENDED_HOURS",
+    "FORECASTS",
+    "VALUATION",
+    "DIVIDENDS",
+    "PROFITABILITY",
+    "INCOME",
+    "BALANCE",
+    "CASHFLOW",
+    "PER_SHARE",
+    "DELIVERY",
+    "SHAREHOLDING",
+    "FUNDS",
+    "BONDS",
+    "IPO"
+  ],
+  "metrics": [
+    {
+      "key": "name",
+      "uiId": "symbol",
+      "label": "Symbol",
+      "group": "SECURITY",
+      "valueType": "STRING",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "ticker",
+        "ticker symbol",
+        "trading symbol"
+      ]
+    },
+    {
+      "key": "description",
+      "uiId": "name",
+      "label": "Name",
+      "group": "SECURITY",
+      "valueType": "STRING",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "company name",
+        "security name",
+        "full name"
+      ]
+    },
+    {
+      "key": "exchange",
+      "uiId": "exchange",
+      "label": "Exchange",
+      "group": "SECURITY",
+      "valueType": "ENUM",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "exchange",
+        "listing exchange",
+        "stock exchange"
+      ]
+    },
+    {
+      "key": "country",
+      "uiId": "country",
+      "label": "Country",
+      "group": "SECURITY",
+      "valueType": "ENUM",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "country of listing",
+        "domicile"
+      ]
+    },
+    {
+      "key": "sector",
+      "uiId": "sector",
+      "label": "Sector",
+      "group": "SECURITY",
+      "valueType": "ENUM",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "industry sector",
+        "sector name"
+      ]
+    },
+    {
+      "key": "close",
+      "uiId": "price",
+      "label": "Price",
+      "group": "OVERVIEW",
+      "valueType": "MONEY",
+      "unit": "PRICE",
+      "hasTimeframe": true,
+      "source": "MARKET",
+      "aliases": [
+        "last price",
+        "ltp",
+        "close price",
+        "current price"
+      ]
+    },
+    {
+      "key": "change",
+      "uiId": "changePercent",
+      "label": "Change %",
+      "group": "OVERVIEW",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "MARKET",
+      "aliases": [
+        "change %",
+        "change pct",
+        "percent change",
+        "pct change"
+      ]
+    },
+    {
+      "key": "change_abs",
+      "uiId": "change",
+      "label": "Change",
+      "group": "OVERVIEW",
+      "valueType": "MONEY",
+      "unit": "PRICE",
+      "source": "MARKET",
+      "aliases": [
+        "absolute change",
+        "price change",
+        "net change"
+      ]
+    },
+    {
+      "key": "volume",
+      "uiId": "volume",
+      "label": "Volume",
+      "group": "OVERVIEW",
+      "valueType": "NUMBER",
+      "unit": "SHARES",
+      "source": "MARKET",
+      "aliases": [
+        "vol",
+        "traded volume",
+        "volume traded"
+      ]
+    },
+    {
+      "key": "relative_volume_10d_calc",
+      "uiId": "relVol",
+      "label": "Relative Volume",
+      "group": "OVERVIEW",
+      "valueType": "NUMBER",
+      "unit": "RATIO",
+      "source": "CALCULATED",
+      "aliases": [
+        "relative volume",
+        "rel vol",
+        "rvol"
+      ]
+    },
+    {
+      "key": "average_volume_30d_calc",
+      "uiId": "avgVolume30d",
+      "label": "Average Volume (30D)",
+      "group": "OVERVIEW",
+      "valueType": "NUMBER",
+      "unit": "SHARES",
+      "source": "CALCULATED",
+      "aliases": [
+        "average volume",
+        "avg volume",
+        "30 day average volume"
+      ]
+    },
+    {
+      "key": "market_cap_basic",
+      "uiId": "marketCap",
+      "label": "Market Cap",
+      "group": "OVERVIEW",
+      "valueType": "MONEY",
+      "unit": "CURRENCY",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "market cap",
+        "mcap",
+        "market capitalization"
+      ]
+    },
+    {
+      "key": "earnings_per_share_diluted_ttm",
+      "uiId": "eps",
+      "label": "EPS (Diluted)",
+      "group": "OVERVIEW",
+      "valueType": "MONEY",
+      "unit": "PRICE",
+      "hasPeriod": true,
+      "defaultPeriod": "TTM",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "earnings per share",
+        "diluted eps",
+        "eps ttm"
+      ]
+    },
+    {
+      "key": "earnings_per_share_diluted_yoy_growth_ttm",
+      "uiId": "epsGrowth",
+      "label": "EPS Growth (YoY)",
+      "group": "OVERVIEW",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "hasPeriod": true,
+      "defaultPeriod": "TTM",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "eps growth",
+        "eps growth yoy",
+        "earnings growth"
+      ]
+    },
+    {
+      "key": "price_52_week_high",
+      "uiId": "high52",
+      "label": "52W High",
+      "group": "OVERVIEW",
+      "valueType": "MONEY",
+      "unit": "PRICE",
+      "source": "MARKET",
+      "aliases": [
+        "52 week high",
+        "52w high",
+        "52wk high"
+      ]
+    },
+    {
+      "key": "price_52_week_low",
+      "uiId": "low52",
+      "label": "52W Low",
+      "group": "OVERVIEW",
+      "valueType": "MONEY",
+      "unit": "PRICE",
+      "source": "MARKET",
+      "aliases": [
+        "52 week low",
+        "52w low",
+        "52wk low"
+      ]
+    },
+    {
+      "key": "price_earnings_ttm",
+      "uiId": "pe",
+      "label": "P/E",
+      "group": "VALUATION",
+      "valueType": "NUMBER",
+      "unit": "RATIO",
+      "hasPeriod": true,
+      "defaultPeriod": "TTM",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "pe",
+        "p/e",
+        "pe ratio",
+        "price to earnings"
+      ]
+    },
+    {
+      "key": "price_book_fq",
+      "uiId": "pb",
+      "label": "P/B",
+      "group": "VALUATION",
+      "valueType": "NUMBER",
+      "unit": "RATIO",
+      "hasPeriod": true,
+      "defaultPeriod": "FQ",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "pb",
+        "p/b",
+        "pb ratio",
+        "price to book"
+      ]
+    },
+    {
+      "key": "price_earnings_forward",
+      "uiId": "forwardPe",
+      "label": "Forward P/E",
+      "group": "FORECASTS",
+      "valueType": "NUMBER",
+      "unit": "RATIO",
+      "source": "ANALYST",
+      "aliases": [
+        "forward pe",
+        "forward p/e",
+        "fwd pe"
+      ]
+    },
+    {
+      "key": "total_revenue_yoy_growth_ttm",
+      "uiId": "revenueGrowth",
+      "label": "Revenue Growth (YoY)",
+      "group": "INCOME",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "hasPeriod": true,
+      "defaultPeriod": "TTM",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "revenue growth",
+        "sales growth",
+        "revenue growth yoy"
+      ]
+    },
+    {
+      "key": "dividends_yield_current",
+      "uiId": "dividendYield",
+      "label": "Dividend Yield",
+      "group": "DIVIDENDS",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "dividend yield",
+        "div yield",
+        "dy"
+      ]
+    },
+    {
+      "key": "Recommend.All",
+      "uiId": "technicalRating",
+      "label": "Technical Rating",
+      "group": "TECHNICALS",
+      "valueType": "NUMBER",
+      "unit": "RATIO",
+      "hasTimeframe": true,
+      "source": "CALCULATED",
+      "aliases": [
+        "technical rating",
+        "tech rating"
+      ]
+    },
+    {
+      "key": "RSI",
+      "uiId": "rsi14",
+      "label": "RSI (14)",
+      "group": "TECHNICALS",
+      "valueType": "NUMBER",
+      "unit": "RATIO",
+      "hasTimeframe": true,
+      "defaultTimeframe": "1D",
+      "source": "CALCULATED",
+      "aliases": [
+        "rsi",
+        "rsi 14",
+        "relative strength index"
+      ]
+    },
+    {
+      "key": "SMA20",
+      "uiId": "sma20",
+      "label": "SMA (20)",
+      "group": "TECHNICALS",
+      "valueType": "MONEY",
+      "unit": "PRICE",
+      "hasTimeframe": true,
+      "source": "CALCULATED",
+      "aliases": [
+        "sma 20",
+        "20 day sma",
+        "20 day moving average"
+      ]
+    },
+    {
+      "key": "SMA50",
+      "uiId": "sma50",
+      "label": "SMA (50)",
+      "group": "TECHNICALS",
+      "valueType": "MONEY",
+      "unit": "PRICE",
+      "hasTimeframe": true,
+      "source": "CALCULATED",
+      "aliases": [
+        "sma 50",
+        "50 day sma",
+        "50 day moving average",
+        "50 dma"
+      ]
+    },
+    {
+      "key": "SMA200",
+      "uiId": "sma200",
+      "label": "SMA (200)",
+      "group": "TECHNICALS",
+      "valueType": "MONEY",
+      "unit": "PRICE",
+      "hasTimeframe": true,
+      "source": "CALCULATED",
+      "aliases": [
+        "sma 200",
+        "200 day sma",
+        "200 day moving average",
+        "200 dma"
+      ]
+    },
+    {
+      "key": "Perf.W",
+      "uiId": "perf1W",
+      "label": "Perf 1W",
+      "group": "PERFORMANCE",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "CALCULATED",
+      "aliases": [
+        "1 week performance",
+        "weekly performance",
+        "1w return"
+      ]
+    },
+    {
+      "key": "Perf.1M",
+      "uiId": "perf1M",
+      "label": "Perf 1M",
+      "group": "PERFORMANCE",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "CALCULATED",
+      "aliases": [
+        "1 month performance",
+        "monthly performance",
+        "1m return"
+      ]
+    },
+    {
+      "key": "Perf.3M",
+      "uiId": "perf3M",
+      "label": "Perf 3M",
+      "group": "PERFORMANCE",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "CALCULATED",
+      "aliases": [
+        "3 month performance",
+        "quarterly performance",
+        "3m return"
+      ]
+    },
+    {
+      "key": "Perf.Y",
+      "uiId": "perf1Y",
+      "label": "Perf 1Y",
+      "group": "PERFORMANCE",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "CALCULATED",
+      "aliases": [
+        "1 year performance",
+        "yearly performance",
+        "1y return",
+        "annual return"
+      ]
+    },
+    {
+      "key": "cagr_3y",
+      "uiId": "cagr3y",
+      "label": "CAGR 3Y",
+      "group": "PERFORMANCE",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "CALCULATED",
+      "aliases": [
+        "3 year cagr",
+        "3y cagr"
+      ]
+    },
+    {
+      "key": "cagr_5y",
+      "uiId": "cagr5y",
+      "label": "CAGR 5Y",
+      "group": "PERFORMANCE",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "CALCULATED",
+      "aliases": [
+        "5 year cagr",
+        "5y cagr"
+      ]
+    },
+    {
+      "key": "net_margin_ttm",
+      "uiId": "netMargin",
+      "label": "Net Margin",
+      "group": "PROFITABILITY",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "hasPeriod": true,
+      "defaultPeriod": "TTM",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "net margin",
+        "net profit margin"
+      ]
+    },
+    {
+      "key": "return_on_equity_fq",
+      "uiId": "roe",
+      "label": "ROE",
+      "group": "PROFITABILITY",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "hasPeriod": true,
+      "defaultPeriod": "FQ",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "roe",
+        "return on equity"
+      ]
+    },
+    {
+      "key": "return_on_capital_employed",
+      "uiId": "roce",
+      "label": "ROCE",
+      "group": "PROFITABILITY",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "hasPeriod": true,
+      "defaultPeriod": "FY",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "roce",
+        "return on capital employed"
+      ]
+    },
+    {
+      "key": "debt_to_equity_fq",
+      "uiId": "debtToEquity",
+      "label": "Debt to Equity",
+      "group": "BALANCE",
+      "valueType": "NUMBER",
+      "unit": "RATIO",
+      "hasPeriod": true,
+      "defaultPeriod": "FQ",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "debt to equity",
+        "d/e",
+        "de ratio"
+      ]
+    },
+    {
+      "key": "delivery_pct",
+      "uiId": "deliveryPct",
+      "label": "Delivery %",
+      "group": "DELIVERY",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "MARKET",
+      "aliases": [
+        "delivery pct",
+        "delivery %",
+        "delivery percent"
+      ]
+    },
+    {
+      "key": "delivery_qty",
+      "uiId": "deliveryQty",
+      "label": "Delivery Qty",
+      "group": "DELIVERY",
+      "valueType": "NUMBER",
+      "unit": "SHARES",
+      "source": "MARKET",
+      "aliases": [
+        "delivery quantity",
+        "delivered quantity",
+        "delivery volume"
+      ]
+    },
+    {
+      "key": "delivery_avg_5d",
+      "uiId": "deliveryAvg5d",
+      "label": "Delivery % (5D Avg)",
+      "group": "DELIVERY",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "CALCULATED",
+      "aliases": [
+        "5 day average delivery",
+        "avg delivery 5d",
+        "5d delivery average"
+      ]
+    },
+    {
+      "key": "shareholding_promoter",
+      "uiId": "promoter",
+      "label": "Promoter Holding",
+      "group": "SHAREHOLDING",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "promoter holding",
+        "promoter shareholding",
+        "promoter %"
+      ]
+    },
+    {
+      "key": "shareholding_fii",
+      "uiId": "fii",
+      "label": "FII Holding",
+      "group": "SHAREHOLDING",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "fii holding",
+        "fpi holding",
+        "foreign institutional holding"
+      ]
+    },
+    {
+      "key": "shareholding_dii",
+      "uiId": "dii",
+      "label": "DII Holding",
+      "group": "SHAREHOLDING",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "dii holding",
+        "domestic institutional holding"
+      ]
+    },
+    {
+      "key": "shareholding_public",
+      "uiId": "public",
+      "label": "Public Holding",
+      "group": "SHAREHOLDING",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "public holding",
+        "public shareholding",
+        "retail holding"
+      ]
+    },
+    {
+      "key": "aum",
+      "uiId": "aum",
+      "label": "AUM",
+      "group": "FUNDS",
+      "valueType": "MONEY",
+      "unit": "CURRENCY",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "assets under management",
+        "fund size"
+      ]
+    },
+    {
+      "key": "expense_ratio",
+      "uiId": "expenseRatio",
+      "label": "Expense Ratio",
+      "group": "FUNDS",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "expense ratio",
+        "er"
+      ]
+    },
+    {
+      "key": "total_expense_ratio",
+      "uiId": "totalExpenseRatio",
+      "label": "Total Expense Ratio",
+      "group": "FUNDS",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "ter",
+        "total expense ratio"
+      ]
+    },
+    {
+      "key": "sharpe_ratio",
+      "uiId": "sharpeRatio",
+      "label": "Sharpe Ratio",
+      "group": "FUNDS",
+      "valueType": "NUMBER",
+      "unit": "RATIO",
+      "source": "CALCULATED",
+      "aliases": [
+        "sharpe",
+        "sharpe ratio"
+      ]
+    },
+    {
+      "key": "scheme_type",
+      "uiId": "schemeType",
+      "label": "Scheme Type",
+      "group": "FUNDS",
+      "valueType": "ENUM",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "fund type",
+        "scheme category"
+      ]
+    },
+    {
+      "key": "amc_brand",
+      "uiId": "brand",
+      "label": "Fund House",
+      "group": "FUNDS",
+      "valueType": "STRING",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "amc",
+        "fund house",
+        "asset management company"
+      ]
+    },
+    {
+      "key": "riskometer",
+      "uiId": "riskometer",
+      "label": "Riskometer",
+      "group": "FUNDS",
+      "valueType": "ENUM",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "risk level",
+        "risk grade"
+      ]
+    },
+    {
+      "key": "yield_to_worst",
+      "uiId": "ytw",
+      "label": "Yield to Worst",
+      "group": "BONDS",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "MARKET",
+      "aliases": [
+        "yield to worst",
+        "ytw"
+      ]
+    },
+    {
+      "key": "coupon",
+      "uiId": "coupon",
+      "label": "Coupon",
+      "group": "BONDS",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "coupon rate",
+        "interest rate"
+      ]
+    },
+    {
+      "key": "credit_rating",
+      "uiId": "creditRating",
+      "label": "Credit Rating",
+      "group": "BONDS",
+      "valueType": "ENUM",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "rating",
+        "credit rating"
+      ]
+    },
+    {
+      "key": "maturity_date",
+      "uiId": "maturityDate",
+      "label": "Maturity Date",
+      "group": "BONDS",
+      "valueType": "DATE",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "maturity",
+        "maturity date"
+      ]
+    },
+    {
+      "key": "issuer_type",
+      "uiId": "issuerType",
+      "label": "Issuer Type",
+      "group": "BONDS",
+      "valueType": "ENUM",
+      "source": "FUNDAMENTAL",
+      "aliases": [
+        "issuer category",
+        "issuer type"
+      ]
+    },
+    {
+      "key": "ipo_gmp",
+      "uiId": "gmpPrice",
+      "label": "GMP",
+      "group": "IPO",
+      "valueType": "MONEY",
+      "unit": "PRICE",
+      "source": "MARKET",
+      "aliases": [
+        "gmp",
+        "grey market premium"
+      ]
+    },
+    {
+      "key": "ipo_gmp_pct",
+      "uiId": "gmpPercent",
+      "label": "GMP %",
+      "group": "IPO",
+      "valueType": "NUMBER",
+      "unit": "PCT",
+      "source": "MARKET",
+      "aliases": [
+        "gmp %",
+        "gmp pct",
+        "grey market premium %"
+      ]
+    },
+    {
+      "key": "ipo_subscription_total",
+      "uiId": "subscriptionTotal",
+      "label": "Subscription (Total)",
+      "group": "IPO",
+      "valueType": "NUMBER",
+      "unit": "RATIO",
+      "source": "MARKET",
+      "aliases": [
+        "subscription",
+        "ipo subscription",
+        "times subscribed"
+      ]
+    }
+  ]
+}

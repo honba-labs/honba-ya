@@ -1,0 +1,166 @@
+{
+  "schema_version": 4,
+  "type": "UnixNanos",
+  "description": "E11-S2 timestamps cross JSON as {iso, unix_nanos}: unix_nanos is a decimal u64 string (the value; pre-epoch and > u64::MAX are unrepresentable and rejected), iso is RFC 3339 UTC with 9 fractional digits and informational on read (writers always derive it from unix_nanos). Values past 2^53 must survive exactly, so a JSON number is rejected.",
+  "cases": [
+    {
+      "name": "epoch",
+      "value": {
+        "iso": "1970-01-01T00:00:00.000000000Z",
+        "unix_nanos": "0"
+      }
+    },
+    {
+      "name": "one_nanosecond",
+      "value": {
+        "iso": "1970-01-01T00:00:00.000000001Z",
+        "unix_nanos": "1"
+      }
+    },
+    {
+      "name": "two_pow_53",
+      "value": {
+        "iso": "1970-04-15T05:59:59.254740992Z",
+        "unix_nanos": "9007199254740992"
+      }
+    },
+    {
+      "name": "two_pow_53_plus_one",
+      "value": {
+        "iso": "1970-04-15T05:59:59.254740993Z",
+        "unix_nanos": "9007199254740993"
+      }
+    },
+    {
+      "name": "nanos_beyond_f64_precision",
+      "value": {
+        "iso": "2023-11-14T22:14:20.123456789Z",
+        "unix_nanos": "1700000060123456789"
+      }
+    },
+    {
+      "name": "u64_max",
+      "value": {
+        "iso": "2554-07-21T23:34:33.709551615Z",
+        "unix_nanos": "18446744073709551615"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "pre_epoch",
+      "value": {
+        "iso": "1969-12-31T23:59:59.999999999Z",
+        "unix_nanos": "-1"
+      }
+    },
+    {
+      "name": "u64_overflow",
+      "value": {
+        "iso": "2554-07-21T23:34:33.709551616Z",
+        "unix_nanos": "18446744073709551616"
+      }
+    },
+    {
+      "name": "plus_sign",
+      "value": {
+        "iso": "1970-01-01T00:00:00.000000005Z",
+        "unix_nanos": "+5"
+      }
+    },
+    {
+      "name": "empty",
+      "value": {
+        "iso": "1970-01-01T00:00:00.000000000Z",
+        "unix_nanos": ""
+      }
+    },
+    {
+      "name": "fractional",
+      "value": {
+        "iso": "1970-01-01T00:00:00.000000001Z",
+        "unix_nanos": "1.5"
+      }
+    },
+    {
+      "name": "exponent",
+      "value": {
+        "iso": "1970-01-01T00:00:01.000000000Z",
+        "unix_nanos": "1e9"
+      }
+    },
+    {
+      "name": "whitespace",
+      "value": {
+        "iso": "1970-01-01T00:00:00.000000005Z",
+        "unix_nanos": " 5"
+      }
+    },
+    {
+      "name": "non_ascii_digit",
+      "value": {
+        "iso": "1970-01-01T00:00:00.000000005Z",
+        "unix_nanos": "٥"
+      }
+    },
+    {
+      "name": "json_number",
+      "value": {
+        "iso": "2023-11-14T22:14:20.000000000Z",
+        "unix_nanos": 1700000060000000000
+      }
+    },
+    {
+      "name": "bare_number",
+      "value": 1700000060000000000
+    },
+    {
+      "name": "iso_only",
+      "value": {
+        "iso": "2023-11-14T22:14:20.000000000Z"
+      }
+    },
+    {
+      "name": "unix_nanos_only",
+      "value": {
+        "unix_nanos": "1700000060000000000"
+      }
+    }
+  ],
+  "tolerated": [
+    {
+      "name": "leading_zeros_normalised",
+      "value": {
+        "iso": "1970-01-01T00:00:00.000000007Z",
+        "unix_nanos": "007"
+      },
+      "canonical": {
+        "iso": "1970-01-01T00:00:00.000000007Z",
+        "unix_nanos": "7"
+      }
+    },
+    {
+      "name": "iso_is_informational",
+      "value": {
+        "iso": "2000-01-01T00:00:00Z",
+        "unix_nanos": "1700000060000000000"
+      },
+      "canonical": {
+        "iso": "2023-11-14T22:14:20.000000000Z",
+        "unix_nanos": "1700000060000000000"
+      }
+    },
+    {
+      "name": "unknown_field",
+      "value": {
+        "iso": "1970-01-01T00:00:00.000000005Z",
+        "unix_nanos": "5",
+        "tz": "Asia/Kolkata"
+      },
+      "canonical": {
+        "iso": "1970-01-01T00:00:00.000000005Z",
+        "unix_nanos": "5"
+      }
+    }
+  ]
+}

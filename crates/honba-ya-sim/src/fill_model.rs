@@ -101,7 +101,7 @@ fn apply(side: OrderSide, price: f64, bps: f64) -> f64 {
 /// A standard normal draw from the seeded stream (Box-Muller).
 fn standard_normal(rng: &mut StdRng) -> f64 {
     // `u1` in `(0, 1]` so the logarithm is finite.
-    let u1 = 1.0 - rng.gen::<f64>();
-    let u2 = rng.gen::<f64>();
+    let u1 = 1.0 - rng.r#gen::<f64>();
+    let u2 = rng.r#gen::<f64>();
     (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
 }

@@ -1,0 +1,2651 @@
+{
+  "schema_version": 4,
+  "type": "StrategyConformance",
+  "description": "Scripted event streams run through the same strategy in Python and Rust (ADR 008). events are wire Messages; intents carry the ts_init they were submitted at; fills are wire Trades; observations are what contract_probe read from its context on each hook.",
+  "fill_model": "bar_close",
+  "scenarios": [
+    {
+      "name": "contract_probe_mixed_stream",
+      "description": "Every hook and context capability: start intent processed with the first event, on_fill intent processed with the next event, busy gating, all four order types, ts_init != ts_event (event 4), instrument lookup (lot 75, tick 0.05), cash, and an on_stop intent that is never executed.",
+      "strategy": "contract_probe",
+      "params": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        }
+      },
+      "initial_cash": 1000000.0,
+      "instruments": [
+        {
+          "instrument_id": {
+            "symbol": "NIFTY50",
+            "exchange": "NSE"
+          },
+          "kind": "index",
+          "currency": "INR",
+          "lot_size": 75.0,
+          "tick_size": 0.05
+        }
+      ],
+      "events": [
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "NIFTY50",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 99.5,
+            "high": 100.5,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000001000Z",
+              "unix_nanos": "1000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000001000Z",
+              "unix_nanos": "1000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000001000Z",
+            "unix_nanos": "1000"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "quote",
+            "instrument_id": {
+              "symbol": "NIFTY50",
+              "exchange": "NSE"
+            },
+            "bid_price": 100.5,
+            "ask_price": 101.0,
+            "bid_size": 50.0,
+            "ask_size": 75.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000002000Z",
+              "unix_nanos": "2000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000002000Z",
+              "unix_nanos": "2000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000002000Z",
+            "unix_nanos": "2000"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "trade",
+            "instrument_id": {
+              "symbol": "NIFTY50",
+              "exchange": "NSE"
+            },
+            "price": 101.0,
+            "size": 10.0,
+            "aggressor_side": "buyer",
+            "trade_id": "T-1",
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000003000Z",
+              "unix_nanos": "3000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000003000Z",
+              "unix_nanos": "3000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000003000Z",
+            "unix_nanos": "3000"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "NIFTY50",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 100.5,
+            "high": 102.5,
+            "low": 100.0,
+            "close": 102.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000004000Z",
+              "unix_nanos": "4000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000000Z",
+              "unix_nanos": "4005"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000000000Z",
+            "unix_nanos": "4005"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "quote",
+            "instrument_id": {
+              "symbol": "NIFTY50",
+              "exchange": "NSE"
+            },
+            "bid_price": 102.0,
+            "ask_price": 102.5,
+            "bid_size": 50.0,
+            "ask_size": 75.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000005000Z",
+              "unix_nanos": "5000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000005000Z",
+              "unix_nanos": "5000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000005000Z",
+            "unix_nanos": "5000"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "trade",
+            "instrument_id": {
+              "symbol": "NIFTY50",
+              "exchange": "NSE"
+            },
+            "price": 102.0,
+            "size": 5.0,
+            "aggressor_side": "seller",
+            "trade_id": "T-2",
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000006000Z",
+              "unix_nanos": "6000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000006000Z",
+              "unix_nanos": "6000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000006000Z",
+            "unix_nanos": "6000"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "trade",
+            "instrument_id": {
+              "symbol": "NIFTY50",
+              "exchange": "NSE"
+            },
+            "price": 102.5,
+            "size": 5.0,
+            "aggressor_side": "buyer",
+            "trade_id": "T-3",
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000007000Z",
+              "unix_nanos": "7000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000007000Z",
+              "unix_nanos": "7000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000007000Z",
+            "unix_nanos": "7000"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "NIFTY50",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 102.0,
+            "high": 102.0,
+            "low": 100.5,
+            "close": 101.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000008000Z",
+              "unix_nanos": "8000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000008000Z",
+              "unix_nanos": "8000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000008000Z",
+            "unix_nanos": "8000"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "NIFTY50",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 101.0,
+            "high": 101.5,
+            "low": 100.0,
+            "close": 100.5,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000009000Z",
+              "unix_nanos": "9000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000009000Z",
+              "unix_nanos": "9000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000009000Z",
+            "unix_nanos": "9000"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "NIFTY50",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 100.5,
+            "high": 101.0,
+            "low": 99.5,
+            "close": 100.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000010000Z",
+              "unix_nanos": "10000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000010000Z",
+              "unix_nanos": "10000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000010000Z",
+            "unix_nanos": "10000"
+          }
+        }
+      ],
+      "expected": {
+        "intents": [
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000001000Z",
+              "unix_nanos": "1000"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "NIFTY50",
+                "exchange": "NSE"
+              },
+              "side": "buy",
+              "quantity": 75.0,
+              "order_type": "market",
+              "price": null,
+              "trigger_price": null,
+              "time_in_force": "day"
+            }
+          },
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000002000Z",
+              "unix_nanos": "2000"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "NIFTY50",
+                "exchange": "NSE"
+              },
+              "side": "sell",
+              "quantity": 75.0,
+              "order_type": "stop_market",
+              "price": null,
+              "trigger_price": 99.5,
+              "time_in_force": "day"
+            }
+          },
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000003000Z",
+              "unix_nanos": "3000"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "NIFTY50",
+                "exchange": "NSE"
+              },
+              "side": "buy",
+              "quantity": 75.0,
+              "order_type": "stop_market",
+              "price": null,
+              "trigger_price": 101.05,
+              "time_in_force": "day"
+            }
+          },
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000005000Z",
+              "unix_nanos": "5000"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "NIFTY50",
+                "exchange": "NSE"
+              },
+              "side": "sell",
+              "quantity": 75.0,
+              "order_type": "limit",
+              "price": 102.5,
+              "trigger_price": null,
+              "time_in_force": "day"
+            }
+          },
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000006000Z",
+              "unix_nanos": "6000"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "NIFTY50",
+                "exchange": "NSE"
+              },
+              "side": "buy",
+              "quantity": 75.0,
+              "order_type": "stop_market",
+              "price": null,
+              "trigger_price": 102.05,
+              "time_in_force": "day"
+            }
+          },
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000007000Z",
+              "unix_nanos": "7000"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "NIFTY50",
+                "exchange": "NSE"
+              },
+              "side": "sell",
+              "quantity": 75.0,
+              "order_type": "stop_limit",
+              "price": 102.4,
+              "trigger_price": 102.45,
+              "time_in_force": "day"
+            }
+          },
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000008000Z",
+              "unix_nanos": "8000"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "NIFTY50",
+                "exchange": "NSE"
+              },
+              "side": "buy",
+              "quantity": 75.0,
+              "order_type": "market",
+              "price": null,
+              "trigger_price": null,
+              "time_in_force": "day"
+            }
+          },
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000009000Z",
+              "unix_nanos": "9000"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "NIFTY50",
+                "exchange": "NSE"
+              },
+              "side": "sell",
+              "quantity": 75.0,
+              "order_type": "market",
+              "price": null,
+              "trigger_price": null,
+              "time_in_force": "day"
+            }
+          },
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000010000Z",
+              "unix_nanos": "10000"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "NIFTY50",
+                "exchange": "NSE"
+              },
+              "side": "buy",
+              "quantity": 75.0,
+              "order_type": "market",
+              "price": null,
+              "trigger_price": null,
+              "time_in_force": "day"
+            }
+          }
+        ],
+        "fills": [
+          {
+            "order_id": "contract_probe-0",
+            "instrument_id": {
+              "symbol": "NIFTY50",
+              "exchange": "NSE"
+            },
+            "side": "buy",
+            "quantity": 75.0,
+            "price": 100.0,
+            "costs": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000001000Z",
+              "unix_nanos": "1000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000001000Z",
+              "unix_nanos": "1000"
+            }
+          },
+          {
+            "order_id": "contract_probe-1",
+            "instrument_id": {
+              "symbol": "NIFTY50",
+              "exchange": "NSE"
+            },
+            "side": "sell",
+            "quantity": 75.0,
+            "price": 100.0,
+            "costs": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000002000Z",
+              "unix_nanos": "2000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000002000Z",
+              "unix_nanos": "2000"
+            }
+          },
+          {
+            "order_id": "contract_probe-2",
+            "instrument_id": {
+              "symbol": "NIFTY50",
+              "exchange": "NSE"
+            },
+            "side": "buy",
+            "quantity": 75.0,
+            "price": 100.0,
+            "costs": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000003000Z",
+              "unix_nanos": "3000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000003000Z",
+              "unix_nanos": "3000"
+            }
+          },
+          {
+            "order_id": "contract_probe-3",
+            "instrument_id": {
+              "symbol": "NIFTY50",
+              "exchange": "NSE"
+            },
+            "side": "sell",
+            "quantity": 75.0,
+            "price": 102.0,
+            "costs": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000005000Z",
+              "unix_nanos": "5000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000005000Z",
+              "unix_nanos": "5000"
+            }
+          },
+          {
+            "order_id": "contract_probe-4",
+            "instrument_id": {
+              "symbol": "NIFTY50",
+              "exchange": "NSE"
+            },
+            "side": "buy",
+            "quantity": 75.0,
+            "price": 102.0,
+            "costs": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000006000Z",
+              "unix_nanos": "6000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000006000Z",
+              "unix_nanos": "6000"
+            }
+          },
+          {
+            "order_id": "contract_probe-5",
+            "instrument_id": {
+              "symbol": "NIFTY50",
+              "exchange": "NSE"
+            },
+            "side": "sell",
+            "quantity": 75.0,
+            "price": 102.0,
+            "costs": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000007000Z",
+              "unix_nanos": "7000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000007000Z",
+              "unix_nanos": "7000"
+            }
+          },
+          {
+            "order_id": "contract_probe-6",
+            "instrument_id": {
+              "symbol": "NIFTY50",
+              "exchange": "NSE"
+            },
+            "side": "buy",
+            "quantity": 75.0,
+            "price": 101.0,
+            "costs": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000008000Z",
+              "unix_nanos": "8000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000008000Z",
+              "unix_nanos": "8000"
+            }
+          },
+          {
+            "order_id": "contract_probe-7",
+            "instrument_id": {
+              "symbol": "NIFTY50",
+              "exchange": "NSE"
+            },
+            "side": "sell",
+            "quantity": 75.0,
+            "price": 100.5,
+            "costs": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000009000Z",
+              "unix_nanos": "9000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000009000Z",
+              "unix_nanos": "9000"
+            }
+          },
+          {
+            "order_id": "contract_probe-8",
+            "instrument_id": {
+              "symbol": "NIFTY50",
+              "exchange": "NSE"
+            },
+            "side": "buy",
+            "quantity": 75.0,
+            "price": 100.0,
+            "costs": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000010000Z",
+              "unix_nanos": "10000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000010000Z",
+              "unix_nanos": "10000"
+            }
+          }
+        ],
+        "observations": [
+          {
+            "hook": "on_start",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000000Z",
+              "unix_nanos": "0"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 100000000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_bar",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000001000Z",
+              "unix_nanos": "1000"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 100000000,
+              "currency": "INR"
+            },
+            "busy": true,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_fill",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000001000Z",
+              "unix_nanos": "1000"
+            },
+            "position": 75.0,
+            "cash": {
+              "amount": 99250000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_quote",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000002000Z",
+              "unix_nanos": "2000"
+            },
+            "position": 75.0,
+            "cash": {
+              "amount": 99250000,
+              "currency": "INR"
+            },
+            "busy": true,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_fill",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000002000Z",
+              "unix_nanos": "2000"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 100000000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_trade",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000003000Z",
+              "unix_nanos": "3000"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 100000000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_fill",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000003000Z",
+              "unix_nanos": "3000"
+            },
+            "position": 75.0,
+            "cash": {
+              "amount": 99250000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_bar",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000004005Z",
+              "unix_nanos": "4005"
+            },
+            "position": 75.0,
+            "cash": {
+              "amount": 99250000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_quote",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000005000Z",
+              "unix_nanos": "5000"
+            },
+            "position": 75.0,
+            "cash": {
+              "amount": 99250000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_fill",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000005000Z",
+              "unix_nanos": "5000"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 100015000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_trade",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000006000Z",
+              "unix_nanos": "6000"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 100015000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_fill",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000006000Z",
+              "unix_nanos": "6000"
+            },
+            "position": 75.0,
+            "cash": {
+              "amount": 99250000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_trade",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000007000Z",
+              "unix_nanos": "7000"
+            },
+            "position": 75.0,
+            "cash": {
+              "amount": 99250000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_fill",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000007000Z",
+              "unix_nanos": "7000"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 100015000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_bar",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000008000Z",
+              "unix_nanos": "8000"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 100015000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_fill",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000008000Z",
+              "unix_nanos": "8000"
+            },
+            "position": 75.0,
+            "cash": {
+              "amount": 99257500,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_bar",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000009000Z",
+              "unix_nanos": "9000"
+            },
+            "position": 75.0,
+            "cash": {
+              "amount": 99257500,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_fill",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000009000Z",
+              "unix_nanos": "9000"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 100011250,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_bar",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000010000Z",
+              "unix_nanos": "10000"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 100011250,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_fill",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000010000Z",
+              "unix_nanos": "10000"
+            },
+            "position": 75.0,
+            "cash": {
+              "amount": 99261250,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_stop",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000010000Z",
+              "unix_nanos": "10000"
+            },
+            "position": 75.0,
+            "cash": {
+              "amount": 99261250,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          }
+        ],
+        "positions": [
+          {
+            "instrument_id": {
+              "symbol": "NIFTY50",
+              "exchange": "NSE"
+            },
+            "quantity": 75.0
+          }
+        ],
+        "cash": {
+          "amount": 99261250,
+          "currency": "INR"
+        }
+      }
+    },
+    {
+      "name": "contract_probe_unknown_instrument",
+      "description": "Instrument lookup misses: the probe falls back to lot 1 and tick 0.01; a trade tick while busy submits nothing.",
+      "strategy": "contract_probe",
+      "params": {
+        "instrument_id": {
+          "symbol": "ACME",
+          "exchange": "NSE"
+        }
+      },
+      "initial_cash": 0.0,
+      "instruments": [],
+      "events": [
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "ACME",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 50.0,
+            "high": 50.0,
+            "low": 50.0,
+            "close": 50.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000000100Z",
+            "unix_nanos": "100"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "trade",
+            "instrument_id": {
+              "symbol": "ACME",
+              "exchange": "NSE"
+            },
+            "price": 50.5,
+            "size": 1.0,
+            "aggressor_side": "no_aggressor",
+            "trade_id": "T-7",
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000000200Z",
+              "unix_nanos": "200"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000200Z",
+              "unix_nanos": "200"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000000200Z",
+            "unix_nanos": "200"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "ACME",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 49.5,
+            "high": 49.5,
+            "low": 49.0,
+            "close": 49.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000000300Z",
+              "unix_nanos": "300"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000300Z",
+              "unix_nanos": "300"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000000300Z",
+            "unix_nanos": "300"
+          }
+        }
+      ],
+      "expected": {
+        "intents": [
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "ACME",
+                "exchange": "NSE"
+              },
+              "side": "buy",
+              "quantity": 1.0,
+              "order_type": "market",
+              "price": null,
+              "trigger_price": null,
+              "time_in_force": "day"
+            }
+          },
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000200Z",
+              "unix_nanos": "200"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "ACME",
+                "exchange": "NSE"
+              },
+              "side": "sell",
+              "quantity": 1.0,
+              "order_type": "stop_market",
+              "price": null,
+              "trigger_price": 49.9,
+              "time_in_force": "day"
+            }
+          },
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000300Z",
+              "unix_nanos": "300"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "ACME",
+                "exchange": "NSE"
+              },
+              "side": "buy",
+              "quantity": 1.0,
+              "order_type": "market",
+              "price": null,
+              "trigger_price": null,
+              "time_in_force": "day"
+            }
+          }
+        ],
+        "fills": [
+          {
+            "order_id": "contract_probe-0",
+            "instrument_id": {
+              "symbol": "ACME",
+              "exchange": "NSE"
+            },
+            "side": "buy",
+            "quantity": 1.0,
+            "price": 50.0,
+            "costs": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            }
+          },
+          {
+            "order_id": "contract_probe-1",
+            "instrument_id": {
+              "symbol": "ACME",
+              "exchange": "NSE"
+            },
+            "side": "sell",
+            "quantity": 1.0,
+            "price": 50.0,
+            "costs": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000000200Z",
+              "unix_nanos": "200"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000200Z",
+              "unix_nanos": "200"
+            }
+          },
+          {
+            "order_id": "contract_probe-2",
+            "instrument_id": {
+              "symbol": "ACME",
+              "exchange": "NSE"
+            },
+            "side": "buy",
+            "quantity": 1.0,
+            "price": 49.0,
+            "costs": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000000300Z",
+              "unix_nanos": "300"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000300Z",
+              "unix_nanos": "300"
+            }
+          }
+        ],
+        "observations": [
+          {
+            "hook": "on_start",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000000Z",
+              "unix_nanos": "0"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_bar",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "busy": true,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_fill",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            },
+            "position": 1.0,
+            "cash": {
+              "amount": -5000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_trade",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000200Z",
+              "unix_nanos": "200"
+            },
+            "position": 1.0,
+            "cash": {
+              "amount": -5000,
+              "currency": "INR"
+            },
+            "busy": true,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_fill",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000200Z",
+              "unix_nanos": "200"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_bar",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000300Z",
+              "unix_nanos": "300"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_fill",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000300Z",
+              "unix_nanos": "300"
+            },
+            "position": 1.0,
+            "cash": {
+              "amount": -4900,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_stop",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000300Z",
+              "unix_nanos": "300"
+            },
+            "position": 1.0,
+            "cash": {
+              "amount": -4900,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          }
+        ],
+        "positions": [
+          {
+            "instrument_id": {
+              "symbol": "ACME",
+              "exchange": "NSE"
+            },
+            "quantity": 1.0
+          }
+        ],
+        "cash": {
+          "amount": -4900,
+          "currency": "INR"
+        }
+      }
+    },
+    {
+      "name": "buy_and_hold",
+      "description": "Reference BuyAndHold: one market buy on the first bar.",
+      "strategy": "buy_and_hold",
+      "params": {
+        "instrument_id": {
+          "symbol": "RELIANCE",
+          "exchange": "NSE"
+        },
+        "quantity": 10.0
+      },
+      "initial_cash": 0.0,
+      "instruments": [],
+      "events": [
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "RELIANCE",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 2945.0,
+            "high": 2955.0,
+            "low": 2940.0,
+            "close": 2950.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000001000Z",
+              "unix_nanos": "1000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000001000Z",
+              "unix_nanos": "1000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000001000Z",
+            "unix_nanos": "1000"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "RELIANCE",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 2950.0,
+            "high": 2965.0,
+            "low": 2950.0,
+            "close": 2960.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000002000Z",
+              "unix_nanos": "2000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000002000Z",
+              "unix_nanos": "2000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000002000Z",
+            "unix_nanos": "2000"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "RELIANCE",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 2960.0,
+            "high": 2960.0,
+            "low": 2935.0,
+            "close": 2940.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000003000Z",
+              "unix_nanos": "3000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000003000Z",
+              "unix_nanos": "3000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000003000Z",
+            "unix_nanos": "3000"
+          }
+        }
+      ],
+      "expected": {
+        "intents": [
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000001000Z",
+              "unix_nanos": "1000"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "RELIANCE",
+                "exchange": "NSE"
+              },
+              "side": "buy",
+              "quantity": 10.0,
+              "order_type": "market",
+              "price": null,
+              "trigger_price": null,
+              "time_in_force": "day"
+            }
+          }
+        ],
+        "fills": [
+          {
+            "order_id": "buy_and_hold-0",
+            "instrument_id": {
+              "symbol": "RELIANCE",
+              "exchange": "NSE"
+            },
+            "side": "buy",
+            "quantity": 10.0,
+            "price": 2950.0,
+            "costs": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000001000Z",
+              "unix_nanos": "1000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000001000Z",
+              "unix_nanos": "1000"
+            }
+          }
+        ],
+        "observations": [],
+        "positions": [
+          {
+            "instrument_id": {
+              "symbol": "RELIANCE",
+              "exchange": "NSE"
+            },
+            "quantity": 10.0
+          }
+        ],
+        "cash": {
+          "amount": -2950000,
+          "currency": "INR"
+        }
+      }
+    },
+    {
+      "name": "sma_crossover",
+      "description": "Reference SmaCrossover (fast 2, slow 3): sell on the cross down at bar 5, buy on the cross up at bar 8. It trades crosses, not positions, so it sells while flat.",
+      "strategy": "sma_crossover",
+      "params": {
+        "instrument_id": {
+          "symbol": "INFY",
+          "exchange": "NSE"
+        },
+        "fast": 2,
+        "slow": 3,
+        "quantity": 5.0
+      },
+      "initial_cash": 0.0,
+      "instruments": [],
+      "events": [
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "INFY",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 10.0,
+            "high": 10.0,
+            "low": 10.0,
+            "close": 10.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000001000Z",
+              "unix_nanos": "1000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000001000Z",
+              "unix_nanos": "1000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000001000Z",
+            "unix_nanos": "1000"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "INFY",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 11.0,
+            "high": 11.0,
+            "low": 11.0,
+            "close": 11.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000002000Z",
+              "unix_nanos": "2000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000002000Z",
+              "unix_nanos": "2000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000002000Z",
+            "unix_nanos": "2000"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "INFY",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 12.0,
+            "high": 12.0,
+            "low": 12.0,
+            "close": 12.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000003000Z",
+              "unix_nanos": "3000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000003000Z",
+              "unix_nanos": "3000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000003000Z",
+            "unix_nanos": "3000"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "INFY",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 11.0,
+            "high": 11.0,
+            "low": 11.0,
+            "close": 11.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000004000Z",
+              "unix_nanos": "4000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000004000Z",
+              "unix_nanos": "4000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000004000Z",
+            "unix_nanos": "4000"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "INFY",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 10.0,
+            "high": 10.0,
+            "low": 10.0,
+            "close": 10.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000005000Z",
+              "unix_nanos": "5000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000005000Z",
+              "unix_nanos": "5000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000005000Z",
+            "unix_nanos": "5000"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "INFY",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 9.0,
+            "high": 9.0,
+            "low": 9.0,
+            "close": 9.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000006000Z",
+              "unix_nanos": "6000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000006000Z",
+              "unix_nanos": "6000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000006000Z",
+            "unix_nanos": "6000"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "INFY",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 10.0,
+            "high": 10.0,
+            "low": 10.0,
+            "close": 10.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000007000Z",
+              "unix_nanos": "7000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000007000Z",
+              "unix_nanos": "7000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000007000Z",
+            "unix_nanos": "7000"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "INFY",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 12.0,
+            "high": 12.0,
+            "low": 12.0,
+            "close": 12.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000008000Z",
+              "unix_nanos": "8000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000008000Z",
+              "unix_nanos": "8000"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000008000Z",
+            "unix_nanos": "8000"
+          }
+        }
+      ],
+      "expected": {
+        "intents": [
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000005000Z",
+              "unix_nanos": "5000"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "INFY",
+                "exchange": "NSE"
+              },
+              "side": "sell",
+              "quantity": 5.0,
+              "order_type": "market",
+              "price": null,
+              "trigger_price": null,
+              "time_in_force": "day"
+            }
+          },
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000008000Z",
+              "unix_nanos": "8000"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "INFY",
+                "exchange": "NSE"
+              },
+              "side": "buy",
+              "quantity": 5.0,
+              "order_type": "market",
+              "price": null,
+              "trigger_price": null,
+              "time_in_force": "day"
+            }
+          }
+        ],
+        "fills": [
+          {
+            "order_id": "sma_crossover-0",
+            "instrument_id": {
+              "symbol": "INFY",
+              "exchange": "NSE"
+            },
+            "side": "sell",
+            "quantity": 5.0,
+            "price": 10.0,
+            "costs": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000005000Z",
+              "unix_nanos": "5000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000005000Z",
+              "unix_nanos": "5000"
+            }
+          },
+          {
+            "order_id": "sma_crossover-1",
+            "instrument_id": {
+              "symbol": "INFY",
+              "exchange": "NSE"
+            },
+            "side": "buy",
+            "quantity": 5.0,
+            "price": 12.0,
+            "costs": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000008000Z",
+              "unix_nanos": "8000"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000008000Z",
+              "unix_nanos": "8000"
+            }
+          }
+        ],
+        "observations": [],
+        "positions": [],
+        "cash": {
+          "amount": -1000,
+          "currency": "INR"
+        }
+      }
+    },
+    {
+      "name": "contract_probe_fill_time_and_ts_init",
+      "description": "Two events share ts_init 100, so the second order (the on_fill protective stop) fills at max(order ts 100, previous fill ts 100 + 1) = 101; the trade tick with ts_event 200 != ts_init 210 submits a stop buy that is stamped ts_init 210 (and the clock reads 210), not 200. Bar events carry ts_event 95 != ts_init 100 likewise.",
+      "strategy": "contract_probe",
+      "params": {
+        "instrument_id": {
+          "symbol": "ACME",
+          "exchange": "NSE"
+        }
+      },
+      "initial_cash": 1000.0,
+      "instruments": [],
+      "events": [
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "ACME",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 50.0,
+            "high": 50.0,
+            "low": 50.0,
+            "close": 50.0,
+            "volume": 100.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000000095Z",
+              "unix_nanos": "95"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000000100Z",
+            "unix_nanos": "100"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "trade",
+            "instrument_id": {
+              "symbol": "ACME",
+              "exchange": "NSE"
+            },
+            "price": 51.0,
+            "size": 1.0,
+            "aggressor_side": "no_aggressor",
+            "trade_id": "T-1",
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000000090Z",
+              "unix_nanos": "90"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000000100Z",
+            "unix_nanos": "100"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "trade",
+            "instrument_id": {
+              "symbol": "ACME",
+              "exchange": "NSE"
+            },
+            "price": 52.0,
+            "size": 1.0,
+            "aggressor_side": "no_aggressor",
+            "trade_id": "T-2",
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000000200Z",
+              "unix_nanos": "200"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000210Z",
+              "unix_nanos": "210"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000000210Z",
+            "unix_nanos": "210"
+          }
+        }
+      ],
+      "expected": {
+        "intents": [
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "ACME",
+                "exchange": "NSE"
+              },
+              "side": "buy",
+              "quantity": 1.0,
+              "order_type": "market",
+              "price": null,
+              "trigger_price": null,
+              "time_in_force": "day"
+            }
+          },
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "ACME",
+                "exchange": "NSE"
+              },
+              "side": "sell",
+              "quantity": 1.0,
+              "order_type": "stop_market",
+              "price": null,
+              "trigger_price": 49.9,
+              "time_in_force": "day"
+            }
+          },
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000210Z",
+              "unix_nanos": "210"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "ACME",
+                "exchange": "NSE"
+              },
+              "side": "buy",
+              "quantity": 1.0,
+              "order_type": "stop_market",
+              "price": null,
+              "trigger_price": 52.01,
+              "time_in_force": "day"
+            }
+          }
+        ],
+        "fills": [
+          {
+            "order_id": "contract_probe-0",
+            "instrument_id": {
+              "symbol": "ACME",
+              "exchange": "NSE"
+            },
+            "side": "buy",
+            "quantity": 1.0,
+            "price": 50.0,
+            "costs": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            }
+          },
+          {
+            "order_id": "contract_probe-1",
+            "instrument_id": {
+              "symbol": "ACME",
+              "exchange": "NSE"
+            },
+            "side": "sell",
+            "quantity": 1.0,
+            "price": 50.0,
+            "costs": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000000101Z",
+              "unix_nanos": "101"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000101Z",
+              "unix_nanos": "101"
+            }
+          },
+          {
+            "order_id": "contract_probe-2",
+            "instrument_id": {
+              "symbol": "ACME",
+              "exchange": "NSE"
+            },
+            "side": "buy",
+            "quantity": 1.0,
+            "price": 50.0,
+            "costs": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000000210Z",
+              "unix_nanos": "210"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000210Z",
+              "unix_nanos": "210"
+            }
+          }
+        ],
+        "observations": [
+          {
+            "hook": "on_start",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000000Z",
+              "unix_nanos": "0"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 100000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_bar",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 100000,
+              "currency": "INR"
+            },
+            "busy": true,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_fill",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            },
+            "position": 1.0,
+            "cash": {
+              "amount": 95000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_trade",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            },
+            "position": 1.0,
+            "cash": {
+              "amount": 95000,
+              "currency": "INR"
+            },
+            "busy": true,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_fill",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 100000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_trade",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000210Z",
+              "unix_nanos": "210"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 100000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_fill",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000210Z",
+              "unix_nanos": "210"
+            },
+            "position": 1.0,
+            "cash": {
+              "amount": 95000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_stop",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000210Z",
+              "unix_nanos": "210"
+            },
+            "position": 1.0,
+            "cash": {
+              "amount": 95000,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          }
+        ],
+        "positions": [
+          {
+            "instrument_id": {
+              "symbol": "ACME",
+              "exchange": "NSE"
+            },
+            "quantity": 1.0
+          }
+        ],
+        "cash": {
+          "amount": 95000,
+          "currency": "INR"
+        }
+      }
+    },
+    {
+      "name": "contract_probe_fill_costs",
+      "description": "Non-zero fill costs (flat 0.5 + 625 bps of the notional): every fill carries cost = 0.5 + q*p*625/10000, a buy debits q*p + cost, a sell credits q*p - cost. Expected values derived by hand from ADR 008.",
+      "strategy": "contract_probe",
+      "params": {
+        "instrument_id": {
+          "symbol": "ACME",
+          "exchange": "NSE"
+        }
+      },
+      "initial_cash": 0.0,
+      "instruments": [],
+      "events": [
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "ACME",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 64.0,
+            "high": 64.0,
+            "low": 64.0,
+            "close": 64.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000000100Z",
+            "unix_nanos": "100"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "trade",
+            "instrument_id": {
+              "symbol": "ACME",
+              "exchange": "NSE"
+            },
+            "price": 50.5,
+            "size": 1.0,
+            "aggressor_side": "no_aggressor",
+            "trade_id": "T-7",
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000000200Z",
+              "unix_nanos": "200"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000200Z",
+              "unix_nanos": "200"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000000200Z",
+            "unix_nanos": "200"
+          }
+        },
+        {
+          "schema_version": 4,
+          "event": {
+            "type": "bar",
+            "bar_type": {
+              "instrument_id": {
+                "symbol": "ACME",
+                "exchange": "NSE"
+              },
+              "spec": {
+                "step": 1,
+                "aggregation": "minute",
+                "price_type": "last"
+              }
+            },
+            "open": 32.0,
+            "high": 32.0,
+            "low": 32.0,
+            "close": 32.0,
+            "volume": 1000.0,
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000000300Z",
+              "unix_nanos": "300"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000300Z",
+              "unix_nanos": "300"
+            }
+          },
+          "ts_init": {
+            "iso": "1970-01-01T00:00:00.000000300Z",
+            "unix_nanos": "300"
+          }
+        }
+      ],
+      "expected": {
+        "intents": [
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "ACME",
+                "exchange": "NSE"
+              },
+              "side": "buy",
+              "quantity": 1.0,
+              "order_type": "market",
+              "price": null,
+              "trigger_price": null,
+              "time_in_force": "day"
+            }
+          },
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000200Z",
+              "unix_nanos": "200"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "ACME",
+                "exchange": "NSE"
+              },
+              "side": "sell",
+              "quantity": 1.0,
+              "order_type": "stop_market",
+              "price": null,
+              "trigger_price": 63.9,
+              "time_in_force": "day"
+            }
+          },
+          {
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000300Z",
+              "unix_nanos": "300"
+            },
+            "intent": {
+              "instrument_id": {
+                "symbol": "ACME",
+                "exchange": "NSE"
+              },
+              "side": "buy",
+              "quantity": 1.0,
+              "order_type": "market",
+              "price": null,
+              "trigger_price": null,
+              "time_in_force": "day"
+            }
+          }
+        ],
+        "fills": [
+          {
+            "order_id": "contract_probe-0",
+            "instrument_id": {
+              "symbol": "ACME",
+              "exchange": "NSE"
+            },
+            "side": "buy",
+            "quantity": 1.0,
+            "price": 64.0,
+            "costs": {
+              "amount": 450,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            }
+          },
+          {
+            "order_id": "contract_probe-1",
+            "instrument_id": {
+              "symbol": "ACME",
+              "exchange": "NSE"
+            },
+            "side": "sell",
+            "quantity": 1.0,
+            "price": 64.0,
+            "costs": {
+              "amount": 450,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000000200Z",
+              "unix_nanos": "200"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000200Z",
+              "unix_nanos": "200"
+            }
+          },
+          {
+            "order_id": "contract_probe-2",
+            "instrument_id": {
+              "symbol": "ACME",
+              "exchange": "NSE"
+            },
+            "side": "buy",
+            "quantity": 1.0,
+            "price": 32.0,
+            "costs": {
+              "amount": 250,
+              "currency": "INR"
+            },
+            "ts_event": {
+              "iso": "1970-01-01T00:00:00.000000300Z",
+              "unix_nanos": "300"
+            },
+            "ts_init": {
+              "iso": "1970-01-01T00:00:00.000000300Z",
+              "unix_nanos": "300"
+            }
+          }
+        ],
+        "observations": [
+          {
+            "hook": "on_start",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000000Z",
+              "unix_nanos": "0"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_bar",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": 0,
+              "currency": "INR"
+            },
+            "busy": true,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_fill",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000100Z",
+              "unix_nanos": "100"
+            },
+            "position": 1.0,
+            "cash": {
+              "amount": -6850,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_trade",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000200Z",
+              "unix_nanos": "200"
+            },
+            "position": 1.0,
+            "cash": {
+              "amount": -6850,
+              "currency": "INR"
+            },
+            "busy": true,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_fill",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000200Z",
+              "unix_nanos": "200"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": -900,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_bar",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000300Z",
+              "unix_nanos": "300"
+            },
+            "position": 0.0,
+            "cash": {
+              "amount": -900,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 0
+          },
+          {
+            "hook": "on_fill",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000300Z",
+              "unix_nanos": "300"
+            },
+            "position": 1.0,
+            "cash": {
+              "amount": -4350,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          },
+          {
+            "hook": "on_stop",
+            "now": {
+              "iso": "1970-01-01T00:00:00.000000300Z",
+              "unix_nanos": "300"
+            },
+            "position": 1.0,
+            "cash": {
+              "amount": -4350,
+              "currency": "INR"
+            },
+            "busy": false,
+            "open_positions": 1
+          }
+        ],
+        "positions": [
+          {
+            "instrument_id": {
+              "symbol": "ACME",
+              "exchange": "NSE"
+            },
+            "quantity": 1.0
+          }
+        ],
+        "cash": {
+          "amount": -4350,
+          "currency": "INR"
+        }
+      },
+      "fill_costs": {
+        "flat": 0.5,
+        "bps": 625.0
+      }
+    }
+  ]
+}

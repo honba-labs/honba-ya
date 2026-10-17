@@ -1,0 +1,385 @@
+{
+  "schema_version": 4,
+  "type": "OrderIntent",
+  "cases": [
+    {
+      "name": "market_buy",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "buy",
+        "quantity": 75.0,
+        "order_type": "market",
+        "price": null,
+        "trigger_price": null,
+        "time_in_force": "day"
+      }
+    },
+    {
+      "name": "limit_sell",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "sell",
+        "quantity": 25.0,
+        "order_type": "limit",
+        "price": 22100.5,
+        "trigger_price": null,
+        "time_in_force": "gtc"
+      }
+    },
+    {
+      "name": "stop_buy",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "buy",
+        "quantity": 75.0,
+        "order_type": "stop_market",
+        "price": null,
+        "trigger_price": 22050.0,
+        "time_in_force": "day"
+      }
+    },
+    {
+      "name": "stop_limit_sell",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "sell",
+        "quantity": 75.0,
+        "order_type": "stop_limit",
+        "price": 21940.0,
+        "trigger_price": 21950.0,
+        "time_in_force": "ioc"
+      }
+    },
+    {
+      "name": "trailing_stop_sell_amount",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "sell",
+        "quantity": 75.0,
+        "order_type": "trailing_stop",
+        "price": null,
+        "trigger_price": null,
+        "time_in_force": "day",
+        "trail_amount": 50.0
+      }
+    },
+    {
+      "name": "trailing_stop_buy_percent",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "buy",
+        "quantity": 75.0,
+        "order_type": "trailing_stop",
+        "price": null,
+        "trigger_price": null,
+        "time_in_force": "gtc",
+        "trail_percent": 1.5
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "limit_without_price",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "buy",
+        "quantity": 75.0,
+        "order_type": "limit",
+        "price": null,
+        "trigger_price": null,
+        "time_in_force": "day"
+      }
+    },
+    {
+      "name": "stop_market_without_trigger",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "buy",
+        "quantity": 75.0,
+        "order_type": "stop_market",
+        "price": null,
+        "trigger_price": null,
+        "time_in_force": "day"
+      }
+    },
+    {
+      "name": "stop_market_with_limit_price",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "buy",
+        "quantity": 75.0,
+        "order_type": "stop_market",
+        "price": 22000.0,
+        "trigger_price": 22050.0,
+        "time_in_force": "day"
+      }
+    },
+    {
+      "name": "stop_limit_without_trigger",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "sell",
+        "quantity": 75.0,
+        "order_type": "stop_limit",
+        "price": 21940.0,
+        "trigger_price": null,
+        "time_in_force": "day"
+      }
+    },
+    {
+      "name": "market_with_price",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "buy",
+        "quantity": 75.0,
+        "order_type": "market",
+        "price": 22000.0,
+        "trigger_price": null,
+        "time_in_force": "day"
+      }
+    },
+    {
+      "name": "zero_quantity",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "buy",
+        "quantity": 0.0,
+        "order_type": "market",
+        "price": null,
+        "trigger_price": null,
+        "time_in_force": "day"
+      }
+    },
+    {
+      "name": "no_order_side",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "no_order_side",
+        "quantity": 75.0,
+        "order_type": "market",
+        "price": null,
+        "trigger_price": null,
+        "time_in_force": "day"
+      }
+    },
+    {
+      "name": "unknown_field",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "buy",
+        "quantity": 75.0,
+        "order_type": "market",
+        "price": null,
+        "trigger_price": null,
+        "time_in_force": "day",
+        "extra": 1
+      }
+    },
+    {
+      "name": "legacy_stop_name_not_canonical",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "buy",
+        "quantity": 75.0,
+        "order_type": "stop",
+        "price": null,
+        "trigger_price": 22050.0,
+        "time_in_force": "day"
+      }
+    },
+    {
+      "name": "quantity_as_string",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "buy",
+        "quantity": "75.0",
+        "order_type": "market",
+        "price": null,
+        "trigger_price": null,
+        "time_in_force": "day"
+      }
+    },
+    {
+      "name": "trailing_stop_without_trail",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "sell",
+        "quantity": 75.0,
+        "order_type": "trailing_stop",
+        "price": null,
+        "trigger_price": null,
+        "time_in_force": "day"
+      }
+    },
+    {
+      "name": "trailing_stop_with_both_trails",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "sell",
+        "quantity": 75.0,
+        "order_type": "trailing_stop",
+        "price": null,
+        "trigger_price": null,
+        "time_in_force": "day",
+        "trail_amount": 50.0,
+        "trail_percent": 1.5
+      }
+    },
+    {
+      "name": "trailing_stop_with_price",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "sell",
+        "quantity": 75.0,
+        "order_type": "trailing_stop",
+        "price": 22000.0,
+        "trigger_price": null,
+        "time_in_force": "day",
+        "trail_amount": 50.0
+      }
+    },
+    {
+      "name": "trailing_stop_with_trigger",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "sell",
+        "quantity": 75.0,
+        "order_type": "trailing_stop",
+        "price": null,
+        "trigger_price": 22000.0,
+        "time_in_force": "day",
+        "trail_amount": 50.0
+      }
+    },
+    {
+      "name": "trailing_stop_zero_amount",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "sell",
+        "quantity": 75.0,
+        "order_type": "trailing_stop",
+        "price": null,
+        "trigger_price": null,
+        "time_in_force": "day",
+        "trail_amount": 0.0
+      }
+    },
+    {
+      "name": "trailing_stop_percent_100",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "sell",
+        "quantity": 75.0,
+        "order_type": "trailing_stop",
+        "price": null,
+        "trigger_price": null,
+        "time_in_force": "day",
+        "trail_percent": 100.0
+      }
+    },
+    {
+      "name": "market_with_trail_amount",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "sell",
+        "quantity": 75.0,
+        "order_type": "market",
+        "price": null,
+        "trigger_price": null,
+        "time_in_force": "day",
+        "trail_amount": 50.0
+      }
+    },
+    {
+      "name": "limit_with_trail_percent",
+      "value": {
+        "instrument_id": {
+          "symbol": "NIFTY50",
+          "exchange": "NSE"
+        },
+        "side": "sell",
+        "quantity": 75.0,
+        "order_type": "limit",
+        "price": 22000.0,
+        "trigger_price": null,
+        "time_in_force": "day",
+        "trail_percent": 1.5
+      }
+    }
+  ],
+  "invalid_text": [
+    {
+      "name": "duplicate_quantity",
+      "text": "{\"instrument_id\":{\"symbol\":\"NIFTY50\",\"exchange\":\"NSE\"},\"side\":\"buy\",\"quantity\":-1.0,\"order_type\":\"market\",\"price\":null,\"trigger_price\":null,\"time_in_force\":\"day\",\"quantity\":75.0}"
+    }
+  ]
+}

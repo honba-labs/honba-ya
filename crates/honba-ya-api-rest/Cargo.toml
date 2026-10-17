@@ -7,6 +7,9 @@ repository.workspace = true
 rust-version.workspace = true
 description = "REST API server for the Honba platform (axum)"
 
+[lib]
+name = "honba_api_rest"
+
 [dependencies]
 honba-api.workspace = true
 honba-messages.workspace = true

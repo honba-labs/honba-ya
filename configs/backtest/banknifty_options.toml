@@ -1,0 +1,25 @@
+# Backtest configuration: intraday BANKNIFTY signal driving an options overlay.
+# Schema: honba_config::BacktestRunConfig; checked by crates/honba-config/tests/configs.rs.
+
+seed = 7
+
+[strategy]
+api_version = "1.0.0"
+name = "banknifty_options"
+source_hash = "unverified:banknifty_options"
+universe = { explicit = [{ symbol = "BANKNIFTY", exchange = "NSE" }] }
+subscriptions = { instruments = [{ symbol = "BANKNIFTY", exchange = "NSE" }], quotes = true }
+driving_timeframe = { interval = 5, aggregation = "minute" }
+warmup_bars = 75
+schedules = { session_open = "09:15:00+05:30", square_off = "15:15:00+05:30" }
+
+[data.local]
+root = "data/catalog"
+
+[execution]
+fill_model = "bar_fill_through"
+slippage_multiplier = 1.5
+
+[account]
+starting_cash = 1000000.0
+currency = "INR"

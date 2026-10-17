@@ -7,6 +7,9 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Async runtime shell around the synchronous Honba event kernel"
 
+[lib]
+name = "honba_async"
+
 [dependencies]
 honba-messages.workspace = true
 honba-engine.workspace = true

@@ -1,0 +1,65 @@
+{
+  "fixture_version": 1,
+  "type": "WarmupGate",
+  "description": "Runner warm-up gate shared by Python and Rust (StrategyManifest.warmup_bars). The strategy under test submits a market buy of 1 for the event's instrument on every bar, plus one buy of the first instrument in on_start. The execution port accepts orders and never fills. A driving bar is a bar event whose ts_init differs from the previous bar event's; the first warmup_bars driving bars (and every event before the first bar) are warm-up: their intents are validated, then released in the context and recorded as suppressed, never sent as orders, and they consume no order id. Each expected entry is [ts_init, symbol] (suppressed) or [ts_init, order_id, symbol] (submitted).",
+  "strategy_name": "warmup",
+  "scenarios": [
+    {
+      "name": "single_instrument",
+      "warmup_bars": 3,
+      "events": [
+        ["bar", "A", 1],
+        ["bar", "A", 2],
+        ["bar", "A", 3],
+        ["bar", "A", 4],
+        ["bar", "A", 5]
+      ],
+      "suppressed": [[1, "A"], [1, "A"], [2, "A"], [3, "A"]],
+      "submitted": [[4, "warmup-0", "A"], [5, "warmup-1", "A"]]
+    },
+    {
+      "name": "two_instruments_share_a_driving_bar",
+      "warmup_bars": 1,
+      "events": [
+        ["bar", "A", 10],
+        ["bar", "B", 10],
+        ["bar", "A", 20],
+        ["bar", "B", 20]
+      ],
+      "suppressed": [[10, "A"], [10, "A"], [10, "B"]],
+      "submitted": [[20, "warmup-0", "A"], [20, "warmup-1", "B"]]
+    },
+    {
+      "name": "quotes_do_not_count_and_are_gated_before_the_first_bar",
+      "warmup_bars": 1,
+      "events": [
+        ["quote", "A", 5],
+        ["bar", "A", 10],
+        ["quote", "A", 15],
+        ["bar", "A", 20]
+      ],
+      "suppressed": [[5, "A"], [10, "A"]],
+      "submitted": [[20, "warmup-0", "A"]]
+    },
+    {
+      "name": "no_warmup",
+      "warmup_bars": 0,
+      "events": [
+        ["bar", "A", 1],
+        ["bar", "A", 2]
+      ],
+      "suppressed": [],
+      "submitted": [[1, "warmup-0", "A"], [1, "warmup-1", "A"], [2, "warmup-2", "A"]]
+    },
+    {
+      "name": "warmup_longer_than_the_data",
+      "warmup_bars": 5,
+      "events": [
+        ["bar", "A", 1],
+        ["bar", "A", 2]
+      ],
+      "suppressed": [[1, "A"], [1, "A"], [2, "A"]],
+      "submitted": []
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "cases": [
+    {"name": "williams_r_3", "indicator": "williams_r", "input": "bars5", "params": {"period": 3},
+     "expected": [null, null, -80.0, -16.666666666666668, -50.0]},
+    {"name": "williams_r_1", "indicator": "williams_r", "input": "bars5", "params": {"period": 1},
+     "expected": [-50.0, -33.333333333333336, -75.0, -33.333333333333336, -66.66666666666667]},
+    {"name": "stochastic_k_3_2", "indicator": "stochastic", "input": "bars5",
+     "params": {"period": 3, "d_period": 2},
+     "expected": [null, null, 20.0, 83.33333333333333, 50.0]},
+    {"name": "stochastic_d_3_2", "indicator": "stochastic", "input": "bars5",
+     "params": {"period": 3, "d_period": 2, "output": "d"},
+     "expected": [null, null, null, 51.666666666666664, 66.66666666666666]},
+    {"name": "stochastic_k_default_d", "indicator": "stochastic", "input": "bars5",
+     "params": {"period": 3},
+     "expected": [null, null, 20.0, 83.33333333333333, 50.0]},
+    {"name": "williams_r_5_empty", "indicator": "williams_r", "input": "empty", "params": {"period": 5},
+     "expected": []}
+  ],
+  "description": "Hand-computed golden vectors for the OHLC oscillators exposed through ohlc_indicator_series (Williams %R, Stochastic). Run by crates/honba-api-wasm/tests/ohlc_conformance.rs.",
+  "fixture_version": 1,
+  "inputs": {
+    "bars5": {"high": [10.0, 12.0, 11.0, 13.0, 12.0], "low": [8.0, 9.0, 7.0, 10.0, 9.0], "close": [9.0, 11.0, 8.0, 12.0, 10.0]},
+    "empty": {"high": [], "low": [], "close": []}
+  },
+  "tolerance": {"relative": 1e-12},
+  "type": "OhlcSeries"
+}

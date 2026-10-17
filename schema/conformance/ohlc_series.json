@@ -1,0 +1,296 @@
+{
+  "cases": [
+    {
+      "expected": [
+        null,
+        null,
+        2.1666666666666665,
+        2.694444444444444,
+        2.7962962962962963,
+        3.1975308641975304,
+        3.1316872427983533,
+        3.587791495198902,
+        3.725194330132601,
+        3.4001295534217335,
+        3.600086368947822,
+        3.066724245965215
+      ],
+      "indicator": "atr",
+      "input": "bars12",
+      "name": "atr_3_bars12",
+      "params": {
+        "period": 3
+      }
+    },
+    {
+      "expected": [
+        1.75,
+        2.25,
+        2.5,
+        3.75,
+        3.0,
+        4.0,
+        3.0,
+        4.5,
+        4.0,
+        2.75,
+        4.0,
+        2.0
+      ],
+      "indicator": "atr",
+      "input": "bars12",
+      "name": "atr_1_bars12",
+      "params": {
+        "period": 1
+      }
+    },
+    {
+      "expected": [
+        null,
+        null,
+        null,
+        null,
+        2.65,
+        2.92,
+        2.936,
+        3.2488,
+        3.3990400000000003,
+        3.269232,
+        3.4153856000000005,
+        3.1323084800000003
+      ],
+      "indicator": "atr",
+      "input": "bars12",
+      "name": "atr_5_bars12",
+      "params": {
+        "period": 5
+      }
+    },
+    {
+      "expected": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        3.125
+      ],
+      "indicator": "atr",
+      "input": "bars12",
+      "name": "atr_12_bars12_first_value_on_last_bar",
+      "params": {
+        "period": 12
+      }
+    },
+    {
+      "expected": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "indicator": "atr",
+      "input": "bars12",
+      "name": "atr_13_bars12_all_warmup",
+      "params": {
+        "period": 13
+      }
+    },
+    {
+      "expected": [
+        null,
+        1.0,
+        5.625,
+        3.3125,
+        2.15625
+      ],
+      "indicator": "atr",
+      "input": "gap_up",
+      "name": "atr_2_gap_up",
+      "params": {
+        "period": 2
+      }
+    },
+    {
+      "expected": [
+        null,
+        null,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "indicator": "atr",
+      "input": "flat",
+      "name": "atr_3_flat_is_zero",
+      "params": {
+        "period": 3
+      }
+    },
+    {
+      "expected": [
+        1.0
+      ],
+      "indicator": "atr",
+      "input": "single",
+      "name": "atr_1_single",
+      "params": {
+        "period": 1
+      }
+    },
+    {
+      "expected": [
+        null
+      ],
+      "indicator": "atr",
+      "input": "single",
+      "name": "atr_3_single_all_warmup",
+      "params": {
+        "period": 3
+      }
+    },
+    {
+      "expected": [],
+      "indicator": "atr",
+      "input": "empty",
+      "name": "atr_14_empty",
+      "params": {
+        "period": 14
+      }
+    }
+  ],
+  "description": "Full OHLC-input indicator series, as returned by honba-api-wasm `ohlc_indicator_series(name, params_json, high, low, close)`. Output has the input's length; null means NaN (warm-up, period - 1 leading values for atr). Expected values were generated once from the Python indicator honba.strategies.indicators Atr(period, include_first_bar=True) (Wilder smoothing; first bar's true range is high - low; first value is the mean of the first `period` true ranges), which equals honba_indicators::Atr exactly. NOTE: the Python default (include_first_bar=False) skips the first bar and warms up for period + 1 bars; the wasm export follows the Rust/Jesse variant. Inputs use multiples of 0.25 so they are exact in binary floating point.",
+  "fixture_version": 1,
+  "inputs": {
+    "bars12": {
+      "close": [
+        100,
+        101.5,
+        100.25,
+        103,
+        102.75,
+        99.5,
+        98,
+        101,
+        104.25,
+        103.5,
+        106,
+        105.25
+      ],
+      "high": [
+        101,
+        102.25,
+        102,
+        104,
+        103.5,
+        102,
+        99.5,
+        102.5,
+        105,
+        105,
+        107.5,
+        106
+      ],
+      "low": [
+        99.25,
+        100,
+        99.5,
+        101.5,
+        100.5,
+        98.75,
+        96.5,
+        98.25,
+        101.75,
+        102.25,
+        103.75,
+        104
+      ]
+    },
+    "empty": {
+      "close": [],
+      "high": [],
+      "low": []
+    },
+    "flat": {
+      "close": [
+        5,
+        5,
+        5,
+        5,
+        5,
+        5
+      ],
+      "high": [
+        5,
+        5,
+        5,
+        5,
+        5,
+        5
+      ],
+      "low": [
+        5,
+        5,
+        5,
+        5,
+        5,
+        5
+      ]
+    },
+    "gap_up": {
+      "close": [
+        9.5,
+        10.25,
+        20,
+        20.5,
+        21
+      ],
+      "high": [
+        10,
+        10.5,
+        20.5,
+        21,
+        21.25
+      ],
+      "low": [
+        9,
+        9.75,
+        19.5,
+        20,
+        20.25
+      ]
+    },
+    "single": {
+      "close": [
+        2
+      ],
+      "high": [
+        2.5
+      ],
+      "low": [
+        1.5
+      ]
+    }
+  },
+  "tolerance": {
+    "exact": "expected values that are integer-valued must match exactly",
+    "nan": "expected null requires NaN",
+    "relative": 1e-12,
+    "rule": "otherwise |actual-expected| <= relative * max(1, |expected|)"
+  },
+  "type": "OhlcSeries"
+}

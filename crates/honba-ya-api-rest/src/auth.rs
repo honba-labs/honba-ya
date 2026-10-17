@@ -363,7 +363,7 @@ impl AuthLayer {
         }
     }
 
-    fn required_scope(method: &str, path: &str) -> Option<&'static str> {
+    pub(crate) fn required_scope(method: &str, path: &str) -> Option<&'static str> {
         match scope_for(method, path) {
             Some(RouteScope::Required(scope)) => Some(scope),
             // Public, a route the table does not know (the router answers 404/405 for it, and
@@ -586,42 +586,9 @@ impl<S: Clone + Send + Sync + 'static> AuthRouterExt for Router<S> {
     }
 }
 
-fn sha256_hex(input: &str) -> String {
+pub(crate) fn sha256_hex(input: &str) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(input.as_bytes());
     hex::encode(hasher.finalize())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_sha256_hex() {
-        let hash = sha256_hex("test");
-        assert_eq!(hash.len(), 64);
-    }
-
-    #[test]
-    fn test_required_scope() {
-        assert_eq!(AuthLayer::required_scope("GET", "/capabilities"), None);
-        assert_eq!(
-            AuthLayer::required_scope("GET", "/instruments"),
-            Some("read:market")
-        );
-        assert_eq!(
-            AuthLayer::required_scope("GET", "/bars/ABC"),
-            Some("read:market")
-        );
-        assert_eq!(
-            AuthLayer::required_scope("POST", "/orders"),
-            Some("write:orders")
-        );
-        assert_eq!(
-            AuthLayer::required_scope("PUT", "/trading-state"),
-            Some("operator")
-        );
-        assert_eq!(AuthLayer::required_scope("GET", "/unknown"), None);
-    }
 }

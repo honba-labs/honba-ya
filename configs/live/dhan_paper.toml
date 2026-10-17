@@ -1,0 +1,12 @@
+# DhanHQ Paper / Sandbox configuration
+# Used for testing strategies against Dhan adapter in simulation mode.
+
+[adapter]
+name = "dhan"
+mode = "paper"
+client_id = "PAPER_DHAN_USER"
+access_token = "paper_token_valid_for_testing"
+timeout_seconds = 10.0
+orders_per_second = 10
+orders_burst = 25
+data_per_second = 5

@@ -1,0 +1,282 @@
+{
+  "schema_version": 4,
+  "type": "ScreenerFilterPredicate",
+  "cases": [
+    {
+      "name": "crosses_above_metric_ref",
+      "value": {
+        "key": "SMA50",
+        "op": "crosses_above",
+        "value": {
+          "key": "SMA200"
+        },
+        "timeframe": "1D"
+      }
+    },
+    {
+      "name": "crosses_below_number",
+      "value": {
+        "key": "RSI",
+        "op": "crosses_below",
+        "value": 30,
+        "timeframe": "1D"
+      }
+    },
+    {
+      "name": "gt_metric_ref_with_dimensions",
+      "value": {
+        "key": "close",
+        "op": "gt",
+        "value": {
+          "key": "price_earnings_ttm",
+          "period": "TTM",
+          "timeframe": "1W"
+        }
+      }
+    },
+    {
+      "name": "gte_number",
+      "value": {
+        "key": "market_cap_basic",
+        "op": "gte",
+        "value": 10000000000
+      }
+    },
+    {
+      "name": "lt_string_scalar",
+      "value": {
+        "key": "maturity_date",
+        "op": "lt",
+        "value": "2030-01-01"
+      }
+    },
+    {
+      "name": "between_two_numbers",
+      "value": {
+        "key": "price_earnings_ttm",
+        "op": "between",
+        "value": [
+          10,
+          20.5
+        ],
+        "period": "TTM"
+      }
+    },
+    {
+      "name": "in_list",
+      "value": {
+        "key": "exchange",
+        "op": "in",
+        "value": [
+          "NSE",
+          "BSE"
+        ]
+      }
+    },
+    {
+      "name": "not_in_empty_list",
+      "value": {
+        "key": "sector",
+        "op": "not_in",
+        "value": []
+      }
+    },
+    {
+      "name": "eq_null",
+      "value": {
+        "key": "credit_rating",
+        "op": "eq",
+        "value": null
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "crosses_above_string",
+      "value": {
+        "key": "SMA50",
+        "op": "crosses_above",
+        "value": "200"
+      }
+    },
+    {
+      "name": "crosses_above_bool",
+      "value": {
+        "key": "SMA50",
+        "op": "crosses_above",
+        "value": true
+      }
+    },
+    {
+      "name": "crosses_above_null",
+      "value": {
+        "key": "SMA50",
+        "op": "crosses_above",
+        "value": null
+      }
+    },
+    {
+      "name": "crosses_above_list",
+      "value": {
+        "key": "SMA50",
+        "op": "crosses_above",
+        "value": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "crosses_below_ref_unknown_field",
+      "value": {
+        "key": "SMA50",
+        "op": "crosses_below",
+        "value": {
+          "key": "SMA200",
+          "bogus": 1
+        }
+      }
+    },
+    {
+      "name": "crosses_below_ref_missing_key",
+      "value": {
+        "key": "SMA50",
+        "op": "crosses_below",
+        "value": {
+          "timeframe": "1D"
+        }
+      }
+    },
+    {
+      "name": "gt_null",
+      "value": {
+        "key": "SMA50",
+        "op": "gt",
+        "value": null
+      }
+    },
+    {
+      "name": "gt_list",
+      "value": {
+        "key": "SMA50",
+        "op": "gt",
+        "value": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "gte_ref_key_not_string",
+      "value": {
+        "key": "SMA50",
+        "op": "gte",
+        "value": {
+          "key": 200
+        }
+      }
+    },
+    {
+      "name": "between_one_bound",
+      "value": {
+        "key": "SMA50",
+        "op": "between",
+        "value": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "between_three_bounds",
+      "value": {
+        "key": "SMA50",
+        "op": "between",
+        "value": [
+          1,
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "between_scalar",
+      "value": {
+        "key": "SMA50",
+        "op": "between",
+        "value": 5
+      }
+    },
+    {
+      "name": "between_string_bound",
+      "value": {
+        "key": "SMA50",
+        "op": "between",
+        "value": [
+          1,
+          "2"
+        ]
+      }
+    },
+    {
+      "name": "between_metric_ref",
+      "value": {
+        "key": "SMA50",
+        "op": "between",
+        "value": {
+          "key": "SMA200"
+        }
+      }
+    },
+    {
+      "name": "in_scalar",
+      "value": {
+        "key": "SMA50",
+        "op": "in",
+        "value": "NSE"
+      }
+    },
+    {
+      "name": "not_in_object",
+      "value": {
+        "key": "SMA50",
+        "op": "not_in",
+        "value": {
+          "key": "SMA200"
+        }
+      }
+    },
+    {
+      "name": "unknown_field",
+      "value": {
+        "key": "SMA50",
+        "op": "gt",
+        "value": 1,
+        "extra": true
+      }
+    },
+    {
+      "name": "unknown_op",
+      "value": {
+        "key": "SMA50",
+        "op": "above",
+        "value": 1
+      }
+    },
+    {
+      "name": "missing_value",
+      "value": {
+        "key": "SMA50",
+        "op": "gt"
+      }
+    }
+  ],
+  "invalid_text": [
+    {
+      "name": "duplicate_value_key",
+      "text": "{\"key\": \"SMA50\", \"op\": \"gt\", \"value\": 1, \"value\": {\"key\": \"SMA200\"}}"
+    },
+    {
+      "name": "nan_threshold",
+      "text": "{\"key\": \"SMA50\", \"op\": \"crosses_above\", \"value\": NaN}"
+    }
+  ]
+}

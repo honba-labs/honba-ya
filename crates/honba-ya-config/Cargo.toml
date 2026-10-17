@@ -7,6 +7,9 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Run-configuration types for the Honba platform (docs/archive/plan.md E0-S4)"
 
+[lib]
+name = "honba_config"
+
 [dependencies]
 honba-messages.workspace = true
 honba-strategy.workspace = true

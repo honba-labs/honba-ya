@@ -7,6 +7,9 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Test fixtures, feeds, and helpers for Honba"
 
+[lib]
+name = "honba_testing"
+
 [dependencies]
 honba-messages.workspace = true
 honba-entities.workspace = true

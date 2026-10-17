@@ -1,0 +1,29 @@
+{
+  "schema_version": 4,
+  "type": "InstrumentId",
+  "cases": [
+    {
+      "name": "nse_equity",
+      "value": {
+        "symbol": "RELIANCE",
+        "exchange": "NSE"
+      }
+    },
+    {
+      "name": "bse_index",
+      "value": {
+        "symbol": "SENSEX",
+        "exchange": "BSE"
+      }
+    }
+  ],
+  "invalid_text": [
+    {
+      "name": "duplicate_symbol",
+      "text": "{\"symbol\":\"RELIANCE\",\"exchange\":\"NSE\",\"symbol\":\"TCS\"}"
+    }
+  ],
+  "tolerated": [
+    {"name": "unknown_field", "value": {"symbol": "RELIANCE", "exchange": "NSE", "isin": "INE002A01018"}, "canonical": {"symbol": "RELIANCE", "exchange": "NSE"}}
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "schema_version": 4,
+  "type": "Message",
+  "cases": [
+    {
+      "name": "order_filled",
+      "value": {
+        "schema_version": 4,
+        "event": {
+          "type": "order_filled",
+          "order_id": "O-1",
+          "last_qty": 75.0,
+          "last_px": 22000.0,
+          "ts_event": {
+            "iso": "2023-11-14T22:14:20.000000000Z",
+            "unix_nanos": "1700000060000000000"
+          }
+        },
+        "ts_init": {
+          "iso": "2023-11-14T22:14:20.000000010Z",
+          "unix_nanos": "1700000060000000010"
+        }
+      }
+    },
+    {
+      "name": "quote",
+      "value": {
+        "schema_version": 4,
+        "event": {
+          "type": "quote",
+          "instrument_id": {
+            "symbol": "NIFTY50",
+            "exchange": "NSE"
+          },
+          "bid_price": 22000.0,
+          "ask_price": 22001.0,
+          "bid_size": 50.0,
+          "ask_size": 75.0,
+          "ts_event": {
+            "iso": "2023-11-14T22:14:20.000000000Z",
+            "unix_nanos": "1700000060000000000"
+          },
+          "ts_init": {
+            "iso": "2023-11-14T22:14:20.000000000Z",
+            "unix_nanos": "1700000060000000000"
+          }
+        },
+        "ts_init": {
+          "iso": "2023-11-14T22:14:20.000000001Z",
+          "unix_nanos": "1700000060000000001"
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "future_schema_version",
+      "value": {
+        "schema_version": 5,
+        "event": {
+          "type": "order_cancelled",
+          "order_id": "O-3",
+          "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}
+        },
+        "ts_init": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}
+      }
+    },
+    {
+      "name": "pre_integer_money_schema_version",
+      "value": {
+        "schema_version": 2,
+        "event": {
+          "type": "order_cancelled",
+          "order_id": "O-3",
+          "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}
+        },
+        "ts_init": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}
+      }
+    },
+    {"name": "schema_version_1", "value": {"schema_version": 1, "event": {"type": "order_filled", "order_id": "O-1", "last_qty": 75.0, "last_px": 22000.0, "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}}, "ts_init": {"iso": "2023-11-14T22:14:20.000000010Z", "unix_nanos": "1700000060000000010"}}},
+    {
+      "name": "missing_schema_version",
+      "value": {
+        "event": {
+          "type": "order_cancelled",
+          "order_id": "O-3",
+          "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}
+        },
+        "ts_init": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}
+      }
+    }
+  ],
+  "invalid_text": [
+    {
+      "name": "duplicate_key_in_nested_event",
+      "text": "{\"schema_version\":4,\"event\":{\"type\":\"order_cancelled\",\"order_id\":\"O-1\",\"order_id\":\"O-2\",\"ts_event\":1},\"ts_init\":1}"
+    }
+  ],
+  "tolerated": [
+    {"name": "unknown_envelope_and_event_fields", "value": {"schema_version": 4, "event": {"type": "order_filled", "order_id": "O-1", "last_qty": 75.0, "last_px": 22000.0, "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}, "venue_fill_id": "F-9"}, "ts_init": {"iso": "2023-11-14T22:14:20.000000010Z", "unix_nanos": "1700000060000000010"}, "trace_id": "abc"}, "canonical": {"schema_version": 4, "event": {"type": "order_filled", "order_id": "O-1", "last_qty": 75.0, "last_px": 22000.0, "ts_event": {"iso": "2023-11-14T22:14:20.000000000Z", "unix_nanos": "1700000060000000000"}}, "ts_init": {"iso": "2023-11-14T22:14:20.000000010Z", "unix_nanos": "1700000060000000010"}}}
+  ]
+}
