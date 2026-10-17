@@ -1,0 +1,23 @@
+[package]
+name = "honba-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Simulation and paper execution models for Honba"
+
+[dependencies]
+honba-messages.workspace = true
+honba-entities.workspace = true
+honba-engine.workspace = true
+# Generic cost schedules only: the `india` pack must never be enabled here (core crate rule),
+# so this is a direct path dependency with default features off rather than workspace inheritance.
+honba-market = { path = "../honba-market", default-features = false }
+thiserror.workspace = true
+chrono.workspace = true
+rand.workspace = true
+
+
+[dev-dependencies]
+serde_json.workspace = true

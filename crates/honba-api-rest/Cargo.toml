@@ -1,0 +1,52 @@
+[package]
+name = "honba-api-rest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "REST API server for the Honba platform (axum)"
+
+[dependencies]
+honba-api.workspace = true
+honba-messages.workspace = true
+honba-entities.workspace = true
+honba-feed.workspace = true
+honba-ports.workspace = true
+honba-strategy.workspace = true
+honba-engine.workspace = true
+honba-sim.workspace = true
+honba-analytics.workspace = true
+honba-config.workspace = true
+honba-market.workspace = true
+honba-portfolio.workspace = true
+honba-risk.workspace = true
+honba-sweep.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+axum = "0.7"
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.5", features = ["trace", "cors", "compression-gzip"] }
+tracing.workspace = true
+anyhow.workspace = true
+schemars.workspace = true
+async-trait.workspace = true
+async-stream.workspace = true
+futures.workspace = true
+tokio-stream.workspace = true
+http-body-util.workspace = true
+serde_urlencoded = "0.7"
+# Run ids: OS entropy at the edge (ADR 0017 decision 2); chrono formats manifest timestamps.
+getrandom = "0.3"
+chrono.workspace = true
+toml = "0.8"
+hex = "0.4"
+sha2 = "0.10"
+
+[dev-dependencies]
+arrow.workspace = true
+parquet.workspace = true
+tempfile = "3"
+honba-testing.workspace = true

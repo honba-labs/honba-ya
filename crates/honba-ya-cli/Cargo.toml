@@ -1,0 +1,19 @@
+[package]
+name = "honba-ya-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "honba"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+axum.workspace = true
+honba-ya-api.workspace = true
+honba-ya-backtest.workspace = true

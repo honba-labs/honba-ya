@@ -1,0 +1,17 @@
+[package]
+name = "honba-testing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Test fixtures, feeds, and helpers for Honba"
+
+[dependencies]
+honba-messages.workspace = true
+honba-entities.workspace = true
+honba-engine.workspace = true
+honba-ports.workspace = true
+honba-sim.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["rt", "macros"] }

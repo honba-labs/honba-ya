@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/honba-ya-api",
+  "crates/honba-ya-ws",
+  "crates/honba-ya-persistence",
+  "crates/honba-ya-backtest",
+  "crates/honba-ya-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "AGPL-3.0"
+repository = "https://github.com/your-org/honba-ya"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+rust_decimal = "1"
+async-trait = "0.1"
+futures = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+axum = "0.7"
+clap = { version = "4", features = ["derive"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "postgres", "chrono"] }
+
+honba-ya-api          = { path = "crates/honba-ya-api" }
+honba-ya-ws           = { path = "crates/honba-ya-ws" }
+honba-ya-persistence  = { path = "crates/honba-ya-persistence" }
+honba-ya-backtest     = { path = "crates/honba-ya-backtest" }
+honba-ya-cli          = { path = "crates/honba-ya-cli" }
+honba-kokoro-types    = { path = "../honba-kokoro/crates/honba-kokoro-types" }
+honba-kokoro-risk     = { path = "../honba-kokoro/crates/honba-kokoro-risk" }
+honba-nou-llm         = { path = "../honba-nou/crates/honba-nou-llm" }
+honba-me-core         = { path = "../honba-me/crates/honba-me-core" }
+honba-te-core         = { path = "../honba-te/crates/honba-te-core" }
+honba-te-router       = { path = "../honba-te/crates/honba-te-router" }
