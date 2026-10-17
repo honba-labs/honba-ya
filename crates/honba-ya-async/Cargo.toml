@@ -1,5 +1,5 @@
 [package]
-name = "honba-async"
+name = "honba-ya-async"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

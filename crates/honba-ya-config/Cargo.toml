@@ -1,20 +1,20 @@
 [package]
-name = "honba-engine"
+name = "honba-ya-config"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Event kernel: clock, queue, dispatch, and engine traits"
+description = "Run-configuration types for the Honba platform (docs/archive/plan.md E0-S4)"
 
 [dependencies]
 honba-messages.workspace = true
-honba-entities.workspace = true
+honba-strategy.workspace = true
 honba-risk.workspace = true
-thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+schemars = { workspace = true }
 
 [dev-dependencies]
-honba-sim.workspace = true
-honba-market.workspace = true
+serde_json.workspace = true
+toml.workspace = true

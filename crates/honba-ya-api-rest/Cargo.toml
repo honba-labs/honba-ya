@@ -1,5 +1,5 @@
 [package]
-name = "honba-api-rest"
+name = "honba-ya-api-rest"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
