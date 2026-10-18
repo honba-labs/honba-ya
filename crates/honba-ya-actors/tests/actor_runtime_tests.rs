@@ -1,0 +1,192 @@
+use async_trait::async_trait;
+use chrono::Utc;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::{mpsc, oneshot};
+
+use honba_actors::*;
+use honba_core::*;
+use honba_mon::{OtrConfig, RiskEngine, RiskLimits, RiskRefusal};
+use honba_te_core::{BrokerError, MockBrokerExecutor};
+
+struct SimpleBreakoutStrategy {
+    symbol: InstrumentId,
+    threshold: Price,
+    placed: bool,
+}
+
+#[async_trait]
+impl Strategy for SimpleBreakoutStrategy {
+    fn name(&self) -> &str {
+        "SimpleBreakoutStrategy"
+    }
+
+    fn algo_id(&self) -> &str {
+        "algo-breakout-1"
+    }
+
+    async fn on_tick(&mut self, tick: &Tick) -> Vec<OrderRequest> {
+        if self.placed {
+            return Vec::new();
+        }
+
+        if let Some(price) = tick.last_price() {
+            if price >= self.threshold {
+                self.placed = true;
+                return vec![OrderRequest::new(
+                    self.symbol.clone(),
+                    OrderSide::Buy,
+                    OrderType::Limit(price),
+                    Quantity::from_u64(10),
+                    self.algo_id(),
+                )];
+            }
+        }
+        Vec::new()
+    }
+}
+
+#[tokio::test]
+async fn test_actor_runtime_end_to_end_pipeline() {
+    let inst = InstrumentId::new(Exchange::Nse, "RELIANCE");
+    let threshold = Price::from_rupees("2500.00").unwrap();
+
+    let strategy = SimpleBreakoutStrategy {
+        symbol: inst.clone(),
+        threshold,
+        placed: false,
+    };
+
+    let limits = RiskLimits {
+        max_notional_per_order: Some(rust_decimal::Decimal::from(1_000_000)),
+        ..Default::default()
+    };
+    let risk_engine = RiskEngine::new(limits, OtrConfig::default());
+    let broker = Arc::new(MockBrokerExecutor::new(true));
+
+    let supervisor = Supervisor::spawn(strategy, risk_engine, broker, 64);
+    let mut tick_rx = supervisor.resubscribe_ticks();
+
+    // 1. Send tick below threshold -> no order
+    let t1 = Tick::Ltp {
+        instrument: inst.clone(),
+        price: Price::from_rupees("2490.00").unwrap(),
+        volume: Quantity::from_u64(100),
+        exchange_ts: Utc::now(),
+        receive_ts: Utc::now(),
+    };
+    supervisor
+        .market_data_sender()
+        .send(MarketDataMsg::IngestTick(t1.clone()))
+        .await
+        .unwrap();
+
+    let r_t1 = tick_rx.recv().await.unwrap();
+    assert_eq!(r_t1.instrument(), &inst);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // 2. Send tick meeting threshold -> triggers order -> passes risk -> fills at broker
+    let t2 = Tick::Ltp {
+        instrument: inst.clone(),
+        price: Price::from_rupees("2505.00").unwrap(),
+        volume: Quantity::from_u64(150),
+        exchange_ts: Utc::now(),
+        receive_ts: Utc::now(),
+    };
+    supervisor
+        .market_data_sender()
+        .send(MarketDataMsg::IngestTick(t2.clone()))
+        .await
+        .unwrap();
+
+    let r_t2 = tick_rx.recv().await.unwrap();
+    assert_eq!(
+        r_t2.last_price(),
+        Some(Price::from_rupees("2505.00").unwrap())
+    );
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // 3. Graceful staged drain and shutdown
+    supervisor
+        .shutdown_gracefully(Duration::from_secs(2))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn test_risk_actor_blocks_out_of_band_orders() {
+    let inst = InstrumentId::new(Exchange::Nse, "TCS");
+    let limits = RiskLimits::default();
+    let risk_engine = RiskEngine::new(limits, OtrConfig::default());
+    let broker = Arc::new(MockBrokerExecutor::new(false));
+
+    let (risk_tx, risk_rx) = mpsc::channel(16);
+    let (exec_tx, exec_rx) = mpsc::channel(16);
+
+    let risk_actor = RiskActor::new(risk_engine, risk_rx, exec_tx);
+    let exec_actor = ExecutionActor::new(broker, exec_rx, None, None);
+
+    let risk_handle = tokio::spawn(async move { risk_actor.run().await });
+    let exec_handle = tokio::spawn(async move { exec_actor.run().await });
+
+    // Order with empty algo_id should be refused by SEBI algo-id check
+    let bad_req = OrderRequest::new(
+        inst.clone(),
+        OrderSide::Buy,
+        OrderType::Limit(Price::from_rupees("3500.00").unwrap()),
+        Quantity::from_u64(10),
+        "", // missing algo_id
+    );
+
+    let (reply_tx, reply_rx) = oneshot::channel();
+    risk_tx
+        .send(RiskMsg::EvaluateOrder {
+            request: bad_req,
+            now: Utc::now(),
+            reply_to: reply_tx,
+        })
+        .await
+        .unwrap();
+
+    let res = reply_rx.await.unwrap();
+    assert!(matches!(
+        res,
+        Err(BrokerError::RiskRefusal(RiskRefusal::InvalidOrder { .. }))
+    ));
+
+    // Global kill switch test
+    risk_tx
+        .send(RiskMsg::HaltGlobal {
+            reason: "emergency halt".into(),
+        })
+        .await
+        .unwrap();
+
+    let valid_req = OrderRequest::new(
+        inst,
+        OrderSide::Buy,
+        OrderType::Limit(Price::from_rupees("3500.00").unwrap()),
+        Quantity::from_u64(10),
+        "algo-valid-1",
+    );
+
+    let (reply_tx2, reply_rx2) = oneshot::channel();
+    risk_tx
+        .send(RiskMsg::EvaluateOrder {
+            request: valid_req,
+            now: Utc::now(),
+            reply_to: reply_tx2,
+        })
+        .await
+        .unwrap();
+
+    let res2 = reply_rx2.await.unwrap();
+    assert!(matches!(
+        res2,
+        Err(BrokerError::RiskRefusal(RiskRefusal::GlobalHalted { .. }))
+    ));
+
+    // Shutdown
+    risk_tx.send(RiskMsg::Shutdown).await.unwrap();
+    let _ = tokio::join!(risk_handle, exec_handle);
+}

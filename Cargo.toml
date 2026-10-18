@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+  "crates/honba-ya-actors",
   "crates/honba-ya-api",
   "crates/honba-ya-api-rest",
   "crates/honba-ya-async",
@@ -31,6 +32,7 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 rust_decimal = "1"
+rust_decimal_macros = "1"
 async-trait = "0.1"
 async-stream = "0.3"
 futures = "0.3"
@@ -48,6 +50,10 @@ rand = "0.8"
 tokio-stream = "0.1"
 http-body-util = "0.1"
 
+honba-core            = { path = "../honba-core" }
+honba-mon             = { path = "../honba-mon" }
+
+honba-ya-actors       = { path = "crates/honba-ya-actors" }
 honba-ya-api          = { path = "crates/honba-ya-api" }
 honba-ya-api-rest     = { path = "crates/honba-ya-api-rest" }
 honba-ya-async        = { path = "crates/honba-ya-async" }
@@ -62,6 +68,7 @@ honba-ya-testing      = { path = "crates/honba-ya-testing" }
 honba-ya-ws           = { path = "crates/honba-ya-ws" }
 
 # Aliases
+honba-actors          = { package = "honba-ya-actors", path = "crates/honba-ya-actors" }
 honba-api             = { package = "honba-ya-api", path = "crates/honba-ya-api" }
 honba-api-rest        = { package = "honba-ya-api-rest", path = "crates/honba-ya-api-rest" }
 honba-async           = { package = "honba-ya-async", path = "crates/honba-ya-async" }

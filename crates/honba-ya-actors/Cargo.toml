@@ -1,0 +1,30 @@
+[package]
+name = "honba-ya-actors"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Asynchronous actor runtime and supervision tree for market data, strategies, risk gate, and execution"
+
+[lib]
+name = "honba_actors"
+
+[dependencies]
+honba-core.workspace = true
+honba-mon.workspace = true
+honba-me-core.workspace = true
+honba-te-core.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+chrono.workspace = true
+rust_decimal.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
