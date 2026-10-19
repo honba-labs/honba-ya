@@ -1,8 +1,8 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 use std::path::Path;
 
-use honba_feed::{write_tick_file, ParquetBarSource, ParquetTickStore, TICK_DIR};
+use honba_feed::{ParquetBarSource, ParquetTickStore, TICK_DIR, write_tick_file};
 use honba_market::india::exchange::resolve_instrument;
 
 /// Reads an NDJSON ticks file (ADR 0030) and writes it as `{out}/ticks/ticks.parquet`, so a

@@ -1,8 +1,8 @@
 //! CORS is off unless origins are allow-listed, over the real router including preflight.
 
 use axum::body::Body;
-use axum::http::{header, Method, Request, StatusCode};
-use honba_api_rest::{api_router_with, api_router_with_config, ApiConfig, AppState};
+use axum::http::{Method, Request, StatusCode, header};
+use honba_api_rest::{ApiConfig, AppState, api_router_with, api_router_with_config};
 use tower::util::ServiceExt;
 
 fn preflight(origin: &str) -> Request<Body> {
@@ -21,14 +21,16 @@ async fn preflight_is_refused_without_an_allow_list() {
         .oneshot(preflight("https://app.example"))
         .await
         .unwrap();
-    assert!(res
-        .headers()
-        .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
-        .is_none());
-    assert!(res
-        .headers()
-        .get(header::ACCESS_CONTROL_ALLOW_METHODS)
-        .is_none());
+    assert!(
+        res.headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none()
+    );
+    assert!(
+        res.headers()
+            .get(header::ACCESS_CONTROL_ALLOW_METHODS)
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -52,8 +54,9 @@ async fn preflight_is_answered_for_an_allow_listed_origin_only() {
         .oneshot(preflight("https://evil.example"))
         .await
         .unwrap();
-    assert!(res
-        .headers()
-        .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
-        .is_none());
+    assert!(
+        res.headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none()
+    );
 }

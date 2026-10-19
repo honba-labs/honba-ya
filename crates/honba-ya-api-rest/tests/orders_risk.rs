@@ -4,14 +4,14 @@
 //!
 //! No network and no wall clock: the state is an in-memory dataset plus one instrument.
 
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use axum::Router;
-use honba_api_rest::{api_router_with, AppState};
+use honba_api_rest::{AppState, api_router_with};
 use honba_entities::{Currency, Instrument, InstrumentKind};
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
 use honba_messages::{Exchange, InstrumentId, TradingState, UnixNanos};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 fn instrument_id() -> InstrumentId {
@@ -232,10 +232,12 @@ async fn approval_queue_holds_placements() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["data"]["status"], json!("queued"));
     assert_eq!(body["data"]["queue_position"], json!(1));
-    assert!(body["data"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("approval queue"));
+    assert!(
+        body["data"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("approval queue")
+    );
 
     // GET /approval/queue returns the queued order
     let (status, body) = call(app.clone(), Method::GET, "/approval/queue", None).await;
@@ -670,10 +672,12 @@ async fn a_keyed_risk_refusal_is_a_rejected_row_and_a_repeat_returns_the_same_42
         rows[0]["reject_reason"]["code"],
         json!("risk_lot_multiple_violation")
     );
-    assert!(rows[0]["reject_reason"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("lot_multiple"));
+    assert!(
+        rows[0]["reject_reason"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("lot_multiple")
+    );
 
     // The repeat is the same refusal (status, code, context), not a 200 row and not a new row.
     let (again_status, again) = call(app.clone(), Method::POST, "/orders", Some(refused)).await;

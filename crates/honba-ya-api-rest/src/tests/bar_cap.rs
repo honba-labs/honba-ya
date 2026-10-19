@@ -1,4 +1,4 @@
-use crate::market::{check_row_cap, MAX_BAR_ROWS};
+use crate::market::{MAX_BAR_ROWS, check_row_cap};
 
 #[test]
 fn the_cap_is_one_hundred_thousand_rows() {

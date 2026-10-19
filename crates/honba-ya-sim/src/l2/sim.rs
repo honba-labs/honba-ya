@@ -5,15 +5,15 @@ use honba_engine::{
     AlgoError, EngineOutput, ExecutionEngine, Handler, LegacyDrains, OrderRejection, Result,
 };
 use honba_entities::{Currency, ExecutionEvent, Money, Trade};
+use honba_market::MarketProfile;
 use honba_market::costs::{CostSchedule, MarketSegment};
 use honba_market::settlement::MarginModel;
-use honba_market::MarketProfile;
 use honba_messages::{
     Event, InstrumentId, Order, OrderId, OrderSide, OrderType, QuoteTick, TimeInForce, TradeTick,
     UnixNanos,
 };
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use std::sync::Arc;
 
 use super::book::L2Book;

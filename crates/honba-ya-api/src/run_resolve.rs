@@ -249,7 +249,7 @@ impl SweepRequest {
                     "params",
                     "not_an_object",
                     "params must be a non-empty JSON object of name to [low, high, step]",
-                ))
+                ));
             }
         };
         let trials = match self.trials {

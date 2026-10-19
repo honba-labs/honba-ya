@@ -6,7 +6,7 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use honba_api::ENDPOINTS;
-use honba_api_rest::{api_router, unscoped_routes, ROUTE_SCOPES};
+use honba_api_rest::{ROUTE_SCOPES, api_router, unscoped_routes};
 use tower::util::ServiceExt;
 
 #[test]

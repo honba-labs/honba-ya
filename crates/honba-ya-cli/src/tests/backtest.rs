@@ -3,7 +3,7 @@
 use honba_entities::{Currency, Trade};
 use honba_messages::{Exchange, InstrumentId, OrderId, OrderSide, UnixNanos};
 
-use crate::backtest::{equity_curve, pair_fills, BacktestConfig};
+use crate::backtest::{BacktestConfig, equity_curve, pair_fills};
 
 fn any_instrument() -> InstrumentId {
     InstrumentId::new("X", Exchange::new("NSE"))

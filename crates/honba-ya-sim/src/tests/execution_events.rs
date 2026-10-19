@@ -131,9 +131,10 @@ fn scripted_only_acks_when_the_script_says_so() {
     assert_eq!(exec.working_orders(), vec!["a".to_string()]);
     // A venue action on an order the venue does not hold is an error.
     assert!(exec.venue("b", VenueAction::Expire, t(4)).is_err());
-    assert!(exec
-        .venue("a", VenueAction::Fill { quantity: 5.0 }, t(4))
-        .is_err());
+    assert!(
+        exec.venue("a", VenueAction::Fill { quantity: 5.0 }, t(4))
+            .is_err()
+    );
 }
 
 #[test]

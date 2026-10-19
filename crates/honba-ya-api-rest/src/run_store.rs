@@ -13,14 +13,14 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use chrono::{DateTime, SecondsFormat};
 use honba_api::{
-    ResolvedRequest, RunId, RunIdGenerator, RunKind, RunManifest, RunStatus, MANIFEST_VERSION,
+    MANIFEST_VERSION, ResolvedRequest, RunId, RunIdGenerator, RunKind, RunManifest, RunStatus,
 };
 use honba_messages::{ErrorCode, ErrorDetail, Message, SCHEMA_VERSION};
 use honba_strategy::StrategyIr;
 use serde_json::json;
 
 use crate::journal::NdjsonJournal;
-use crate::retention::{evictions, RetentionPolicy};
+use crate::retention::{RetentionPolicy, evictions};
 
 const MANIFEST: &str = "manifest.json";
 const MANIFEST_TMP: &str = "manifest.json.tmp";

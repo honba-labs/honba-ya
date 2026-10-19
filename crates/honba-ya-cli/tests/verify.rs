@@ -5,7 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 fn verify(name: &str, manifest: &Value) -> Output {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("honba-cli-verify");

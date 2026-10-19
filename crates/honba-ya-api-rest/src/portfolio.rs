@@ -19,7 +19,7 @@ use honba_api::{PortfolioAccountsResponse, PortfolioHoldingsResponse, PortfolioP
 use honba_entities::PortfolioSnapshot;
 use honba_messages::{ErrorCode, ErrorDetail, InstrumentId, UnixNanos};
 use honba_portfolio::{
-    value, AccountState, HeldPosition, Marks, PortfolioError as ValuationError, PortfolioState,
+    AccountState, HeldPosition, Marks, PortfolioError as ValuationError, PortfolioState, value,
 };
 use serde_json::json;
 use tracing::error;

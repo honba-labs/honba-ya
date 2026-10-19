@@ -1,6 +1,6 @@
 use honba_api::ENDPOINTS;
 
-use crate::{capability_manifest, NOT_IMPLEMENTED_ENDPOINTS};
+use crate::{NOT_IMPLEMENTED_ENDPOINTS, capability_manifest};
 
 #[test]
 fn the_manifest_is_derived_from_the_registry() {

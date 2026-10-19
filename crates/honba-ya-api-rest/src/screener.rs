@@ -8,15 +8,15 @@ use std::sync::Arc;
 
 use axum::{extract::State, response::Response};
 use honba_api::{
-    check_scan_budget, check_screener_rows, ScreenerQuery, ScreenerResponse, ScreenerResultRow,
+    ScreenerQuery, ScreenerResponse, ScreenerResultRow, check_scan_budget, check_screener_rows,
 };
 use honba_ports::BarRequest;
 
-use crate::market::{
-    check_row_cap, instrument_not_found, port_failure, success, unprocessable, ApiQuery,
-    MAX_BAR_ROWS,
-};
 use crate::AppState;
+use crate::market::{
+    ApiQuery, MAX_BAR_ROWS, check_row_cap, instrument_not_found, port_failure, success,
+    unprocessable,
+};
 
 /// `GET /screener/scan`: the universe instruments passing the filter, in instrument-id order.
 ///

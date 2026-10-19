@@ -1,6 +1,6 @@
 //! Unit tests for `crate::dispatch`: target building and argument rejection.
 
-use crate::dispatch::{build_target, DispatchError};
+use crate::dispatch::{DispatchError, build_target};
 
 #[test]
 fn a_target_without_a_query_is_the_path() {

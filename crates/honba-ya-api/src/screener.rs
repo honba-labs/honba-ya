@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 
 use honba_entities::{ScreenerFilterGroup, Timeframe};
 use honba_indicators::screener::{
-    evaluate_group, group_metric_keys, group_timeframes, latest_metrics, validate_group,
-    ScreenerError,
+    ScreenerError, evaluate_group, group_metric_keys, group_timeframes, latest_metrics,
+    validate_group,
 };
 use honba_messages::{
     Bar, BarAggregation, BarSpecification, ErrorCode, ErrorDetail, InstrumentId, UnixNanos,
@@ -67,7 +67,7 @@ fn timeframe_matches(tf: &Timeframe, spec: &BarSpecification) -> bool {
         Timeframe::D1 => (1, Some(86_400)),
         Timeframe::W1 => (1, Some(604_800)),
         Timeframe::Month1 => {
-            return spec.aggregation() == BarAggregation::Month && spec.step() == 1
+            return spec.aggregation() == BarAggregation::Month && spec.step() == 1;
         }
     };
     let unit = match spec.aggregation() {
@@ -160,7 +160,9 @@ pub fn check_screener_rows(rows: usize) -> Result<(), ErrorDetail> {
     Err(too_many(
         "universe",
         MAX_SCREENER_ROWS,
-        format!("the scan matched {rows} instruments, over the limit of {MAX_SCREENER_ROWS}; narrow the universe or the filter"),
+        format!(
+            "the scan matched {rows} instruments, over the limit of {MAX_SCREENER_ROWS}; narrow the universe or the filter"
+        ),
     ))
 }
 

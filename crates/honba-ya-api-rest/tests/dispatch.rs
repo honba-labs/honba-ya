@@ -3,15 +3,15 @@
 
 use std::fs::File;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use arrow::array::{ArrayRef, Float64Array, Int64Array};
 use arrow::record_batch::RecordBatch;
-use honba_api_rest::{api_router_with, dispatch, AppState, DispatchError};
+use honba_api_rest::{AppState, DispatchError, api_router_with, dispatch};
 use honba_feed::import::parquet_source::bar_schema;
 use parquet::arrow::ArrowWriter;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 

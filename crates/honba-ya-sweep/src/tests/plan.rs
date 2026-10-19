@@ -7,8 +7,8 @@ use honba_strategy::{BuyAndHold, Strategy};
 
 use super::{any_instrument, buy_and_hold_params, report};
 use crate::{
-    default_initial_cash, Fitness, SharpeFitness, StrategyFactory, StrategySpec, SweepError,
-    SweepPlan, TrialParams, DEFAULT_MAX_CONCURRENCY, DEFAULT_PERIODS_PER_YEAR,
+    DEFAULT_MAX_CONCURRENCY, DEFAULT_PERIODS_PER_YEAR, Fitness, SharpeFitness, StrategyFactory,
+    StrategySpec, SweepError, SweepPlan, TrialParams, default_initial_cash,
 };
 
 struct Fixed;

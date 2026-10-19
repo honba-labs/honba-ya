@@ -7,8 +7,8 @@ use honba_messages::{
 use serde_json::json;
 
 use crate::{
-    instrument_json, parse_instrument_id, parse_timeframe, BarsQuery, DepthQuery, InstrumentsQuery,
-    QuotesQuery, DEFAULT_DEPTH_LEVELS, DEFAULT_TIMEFRAME, MAX_DEPTH_LEVELS,
+    BarsQuery, DEFAULT_DEPTH_LEVELS, DEFAULT_TIMEFRAME, DepthQuery, InstrumentsQuery,
+    MAX_DEPTH_LEVELS, QuotesQuery, instrument_json, parse_instrument_id, parse_timeframe,
 };
 
 fn spec(step: usize, agg: BarAggregation) -> BarSpecification {

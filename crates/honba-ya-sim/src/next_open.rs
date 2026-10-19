@@ -16,14 +16,14 @@ use honba_entities::{Currency, ExecutionEvent, Money, Trade};
 use honba_market::costs::{CostSchedule, MarketSegment};
 use honba_market::settlement::MarginModel;
 use honba_messages::{Bar, Event, InstrumentId, Order, OrderId, OrderSide, OrderType, UnixNanos};
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use std::sync::Arc;
 
 use crate::cost::ScheduleFillCost;
 use crate::fill_model::{FillModel, NoSlippage, SlippageModel};
 use crate::latency::{LatencyModel, NoLatency};
-use crate::margin::{square_off_order, MisPositions};
+use crate::margin::{MisPositions, square_off_order};
 
 /// Quantities closer than this are equal (float residue from fractional fills).
 const QTY_EPS: f64 = 1e-9;

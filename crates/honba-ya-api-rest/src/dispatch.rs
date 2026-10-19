@@ -8,9 +8,9 @@
 use std::fmt;
 
 use axum::{
-    body::Body,
-    http::{header, Method, Request},
     Router,
+    body::Body,
+    http::{Method, Request, header},
 };
 use serde_json::Value;
 use tower::util::ServiceExt;

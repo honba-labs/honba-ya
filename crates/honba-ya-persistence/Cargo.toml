@@ -9,3 +9,15 @@ name = "honba_persistence"
 
 [dependencies]
 sqlx.workspace = true
+honba-core = { path = "../../../honba-core" }
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+rust_decimal.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

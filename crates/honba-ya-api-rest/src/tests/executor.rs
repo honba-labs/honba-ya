@@ -9,9 +9,9 @@ use honba_api::{
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
 use honba_messages::{
     BarAggregation, BarSpecification, ErrorCode, ErrorDetail, Event, Exchange, InstrumentId,
-    Message, PriceType, UnixNanos, SCHEMA_VERSION,
+    Message, PriceType, SCHEMA_VERSION, UnixNanos,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::{BacktestExecutor, StrategyRegistry};
 
@@ -164,10 +164,12 @@ fn a_run_journals_bars_orders_and_fills_at_the_current_schema_version() {
     assert_eq!(kinds.iter().filter(|k| *k == "bar").count(), 80);
     assert!(kinds.iter().any(|k| k == "order"), "{kinds:?}");
     assert!(kinds.iter().any(|k| k == "order_filled"), "{kinds:?}");
-    assert!(journal
-        .records
-        .iter()
-        .all(|m| m.schema_version() == SCHEMA_VERSION));
+    assert!(
+        journal
+            .records
+            .iter()
+            .all(|m| m.schema_version() == SCHEMA_VERSION)
+    );
     assert_eq!(SCHEMA_VERSION, 4);
     assert!(
         journal.flushed,
@@ -210,9 +212,11 @@ fn the_outcome_has_metrics_and_stated_assumptions() {
     assert!(metrics.net_pnl.is_finite() && metrics.sharpe.is_finite());
     assert!((0.0..=1.0).contains(&metrics.max_drawdown));
     assert!((metrics.total_return - metrics.net_pnl / 1_000_000.0).abs() < 1e-9);
-    assert!(assumptions["not_modelled"]
-        .as_array()
-        .is_some_and(|a| !a.is_empty()));
+    assert!(
+        assumptions["not_modelled"]
+            .as_array()
+            .is_some_and(|a| !a.is_empty())
+    );
     assert!(assumptions["timing"].is_string());
 }
 

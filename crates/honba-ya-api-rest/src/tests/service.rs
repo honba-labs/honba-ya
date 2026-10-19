@@ -3,12 +3,12 @@
 use std::sync::Mutex;
 use std::time::Duration;
 
-use honba_api::{compile_strategy, StrategyCatalog};
+use honba_api::{StrategyCatalog, compile_strategy};
 use honba_messages::{BarAggregation, ErrorCode, Exchange, InstrumentId};
 use honba_strategy::{StrategyManifest, Subscriptions, TimeframeSpec, Universe};
 
 use crate::service::resolve_strategy;
-use crate::{RunServiceConfig, StrategyRegistry, DEFAULT_MAX_QUEUED, DEFAULT_SHUTDOWN_GRACE};
+use crate::{DEFAULT_MAX_QUEUED, DEFAULT_SHUTDOWN_GRACE, RunServiceConfig, StrategyRegistry};
 
 fn tcs() -> InstrumentId {
     InstrumentId::new("TCS", Exchange::new("NSE"))

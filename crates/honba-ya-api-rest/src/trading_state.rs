@@ -10,9 +10,9 @@
 
 use std::sync::Arc;
 
+use axum::Extension;
 use axum::extract::State;
 use axum::response::Response;
-use axum::Extension;
 use honba_api::{TradingStateChange, TradingStateRequest, TradingStateResponse};
 use tracing::info;
 

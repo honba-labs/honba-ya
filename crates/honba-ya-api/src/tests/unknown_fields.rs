@@ -2,7 +2,7 @@
 //! are inputs (unknown fields rejected).
 
 use serde::de::DeserializeOwned;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::{
     BacktestMetrics, BacktestRequest, BacktestResponse, BarsQuery, BarsResponse, Capabilities,

@@ -4,14 +4,14 @@
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use honba_api_rest::{api_router_with, api_router_with_config, ApiConfig, AppState};
+use honba_api_rest::{ApiConfig, AppState, api_router_with, api_router_with_config};
 use honba_entities::{Currency, Instrument, InstrumentKind};
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
 use honba_messages::{
     Bar, BarAggregation, BarSpecification, BarType, ErrorCode, Exchange, InstrumentId, PriceType,
     UnixNanos,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 fn iid() -> InstrumentId {

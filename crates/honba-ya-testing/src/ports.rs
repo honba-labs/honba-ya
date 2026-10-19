@@ -534,13 +534,13 @@ pub async fn check_master_contract<M: InstrumentMaster + ?Sized>(master: &M) -> 
             return Err(violation(format!(
                 "get_instrument({}) returned a different instrument than list_instruments()",
                 first.id()
-            )))
+            )));
         }
         None => {
             return Err(violation(format!(
                 "get_instrument({}) returned Ok(None) for an instrument list_instruments() reports",
                 first.id()
-            )))
+            )));
         }
     }
 
@@ -646,13 +646,13 @@ pub async fn check_secret_contract<S: SecretStore + ?Sized>(store: &S) -> PortRe
         Some(_) => {
             return Err(violation(format!(
                 "get_secret({CONTRACT_PROBE_KEY}) returned an empty value"
-            )))
+            )));
         }
         None => {
             return Err(violation(format!(
                 "get_secret({CONTRACT_PROBE_KEY}) returned Ok(None); seed the store with \
                  {CONTRACT_PROBE_SECRET} under that key"
-            )))
+            )));
         }
     }
 

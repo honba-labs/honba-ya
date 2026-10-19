@@ -3,9 +3,9 @@
 use serde_json::json;
 
 use crate::{
-    compile_strategy, BacktestMetrics, ErrorCode, ErrorDetail, ResolvedBacktest, ResolvedRequest,
+    BacktestMetrics, ErrorCode, ErrorDetail, MANIFEST_VERSION, ResolvedBacktest, ResolvedRequest,
     ResolvedSweep, RunEvent, RunId, RunIdGenerator, RunKind, RunManifest, RunStatus,
-    StrategyCatalog, MANIFEST_VERSION,
+    StrategyCatalog, compile_strategy,
 };
 use honba_messages::UnixNanos;
 
@@ -149,10 +149,12 @@ fn a_manifest_pins_inputs_and_leaks_no_paths() {
     assert_eq!(value["request"]["bar_spec"], json!("1d"));
     assert_eq!(value["request"]["initial_capital"], json!(1_000_000.0));
     assert_eq!(value["seed"], json!(42));
-    assert!(value["strategy_id"]
-        .as_str()
-        .unwrap()
-        .starts_with("sha256:"));
+    assert!(
+        value["strategy_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:")
+    );
     let text = value.to_string();
     for forbidden in ["data_root", "journals", "catalog", "/home", "/tmp"] {
         assert!(!text.contains(forbidden), "manifest mentions {forbidden}");

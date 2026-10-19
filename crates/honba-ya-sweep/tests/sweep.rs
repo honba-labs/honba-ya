@@ -22,8 +22,8 @@ use honba_strategy::{
     DynStrategy, LedgerContext, OrderIntent, Strategy, StrategyContext, StrategyRunner,
 };
 use honba_sweep::{
-    run, run_one, run_trial, SharpeFitness, StrategyFactory, StrategySpec, SweepError, SweepPlan,
-    TrialOutcome, TrialParams, TrialReport,
+    SharpeFitness, StrategyFactory, StrategySpec, SweepError, SweepPlan, TrialOutcome, TrialParams,
+    TrialReport, run, run_one, run_trial,
 };
 
 const FIRST_TS: u64 = 1_000_000_000;
@@ -292,10 +292,12 @@ async fn a_sweep_returns_one_outcome_per_trial_in_trial_order() {
     assert_eq!(report.outcomes().len(), 5);
     let ids: Vec<usize> = report.outcomes().iter().map(trial_id_of).collect();
     assert_eq!(ids, vec![0, 1, 2, 3, 4]);
-    assert!(report
-        .outcomes()
-        .iter()
-        .all(|outcome| matches!(outcome, TrialOutcome::Completed(_))));
+    assert!(
+        report
+            .outcomes()
+            .iter()
+            .all(|outcome| matches!(outcome, TrialOutcome::Completed(_)))
+    );
     assert_eq!(report.reports().count(), 5);
     assert_eq!(report.ranking().len(), 5);
     assert!(!report.is_empty());

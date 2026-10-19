@@ -3,7 +3,7 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use honba_api::ENDPOINTS;
-use honba_api_rest::{api_router, NOT_IMPLEMENTED_ENDPOINTS};
+use honba_api_rest::{NOT_IMPLEMENTED_ENDPOINTS, api_router};
 use serde_json::Value;
 use tower::util::ServiceExt;
 

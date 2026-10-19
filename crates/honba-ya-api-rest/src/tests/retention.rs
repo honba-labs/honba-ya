@@ -3,7 +3,7 @@
 
 use honba_api::RunId;
 
-use crate::{evictions, RetentionPolicy};
+use crate::{RetentionPolicy, evictions};
 
 const DAY: u64 = 86_400_000;
 const NOW: u64 = 100 * DAY;

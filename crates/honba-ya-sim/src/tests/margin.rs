@@ -2,15 +2,15 @@
 
 use honba_engine::{ExecutionEngine, Handler};
 use honba_entities::{InstrumentKind, PositionSide};
-use honba_market::settlement::PercentageMarginModel;
 use honba_market::NullMarketProfile;
+use honba_market::settlement::PercentageMarginModel;
 use honba_messages::{
     Bar, BarAggregation, BarSpecification, BarType, Event, Exchange, InstrumentId, Order, OrderId,
     OrderSide, OrderType, PriceType, Product, TimeInForce, UnixNanos,
 };
 
-use crate::margin::{default_session_close_ts, is_intraday, MarginQuery, MisPositions};
 use crate::BarFillEngine;
+use crate::margin::{MarginQuery, MisPositions, default_session_close_ts, is_intraday};
 
 fn iid(symbol: &str) -> InstrumentId {
     InstrumentId::new(symbol, Exchange::new("TEST"))

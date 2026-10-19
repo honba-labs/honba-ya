@@ -4,7 +4,7 @@ use honba_messages::{BarAggregation, Exchange, InstrumentId};
 use honba_strategy::{StrategyManifest, Subscriptions, TimeframeSpec, Universe};
 use serde_json::json;
 
-use crate::{verify_strategy, ErrorCode};
+use crate::{ErrorCode, verify_strategy};
 
 fn tcs() -> InstrumentId {
     InstrumentId::new("TCS", Exchange::new("NSE"))

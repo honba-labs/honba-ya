@@ -18,7 +18,7 @@ use tokio::task::JoinSet;
 use crate::error::{Result, SweepError};
 use crate::plan::SweepPlan;
 use crate::report::{SweepReport, TrialOutcome, TrialReport};
-use crate::trial::{guard_trial, run_trial_with, TrialConfig};
+use crate::trial::{TrialConfig, guard_trial, run_trial_with};
 
 /// Runs every trial in `plan` over the shared `data`, at most `max_concurrency`
 /// at a time.

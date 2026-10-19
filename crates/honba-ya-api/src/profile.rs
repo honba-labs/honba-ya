@@ -5,9 +5,9 @@
 
 use std::collections::BTreeMap;
 
+use schemars::JsonSchema;
 use schemars::r#gen::SchemaGenerator;
 use schemars::schema::{Metadata, Schema, SchemaObject};
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

@@ -8,15 +8,15 @@ use std::time::Duration;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::{sse::Event, IntoResponse, Response, Sse},
+    response::{IntoResponse, Response, Sse, sse::Event},
 };
 use honba_api::{BacktestEventsQuery, RunKind, RunStatus, StreamFrame};
 use honba_messages::{ErrorCode, ErrorDetail, Message};
 use serde_json::json;
 use tokio::time::interval;
 
-use crate::market::failure;
 use crate::AppState;
+use crate::market::failure;
 
 const DEFAULT_TICK_MS: u64 = 25;
 const KEEP_ALIVE_SECS: u64 = 15;
@@ -33,7 +33,10 @@ pub(crate) struct JournalChunk {
 /// Returns a chunk of records, the next `from_seq` to use, and whether EOF was reached.
 /// A trailing partial line is never returned; the byte offset is preserved so the next
 /// read sees the same partial line.
-pub(crate) fn read_journal_from(path: &StdPath, from_seq: u64) -> Result<JournalChunk, ErrorDetail> {
+pub(crate) fn read_journal_from(
+    path: &StdPath,
+    from_seq: u64,
+) -> Result<JournalChunk, ErrorDetail> {
     let file = std::fs::File::open(path).map_err(|e| io_error("journal_open", &e))?;
     let mut reader = BufReader::with_capacity(64 * 1024, file);
 

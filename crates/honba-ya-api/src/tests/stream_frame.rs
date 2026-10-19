@@ -1,8 +1,8 @@
 //! Unit tests for the run event stream frame and its resume DTO (E11-S4, ADR 0021).
 
 use honba_messages::{
-    ErrorCode, ErrorDetail, Event, Exchange, InstrumentId, Message, QuoteTick, UnixNanos,
-    SCHEMA_VERSION,
+    ErrorCode, ErrorDetail, Event, Exchange, InstrumentId, Message, QuoteTick, SCHEMA_VERSION,
+    UnixNanos,
 };
 use serde_json::json;
 

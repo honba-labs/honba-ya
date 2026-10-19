@@ -246,9 +246,11 @@ fn cancel_race_cancel_enqueued_first_wins() {
     step(&mut engine, 1);
     step(&mut engine, 2);
     // The fill at the same ts comes too late: the venue no longer holds the order.
-    assert!(venue
-        .venue("O-1", VenueAction::Fill { quantity: 3.0 }, ts(2))
-        .is_err());
+    assert!(
+        venue
+            .venue("O-1", VenueAction::Fill { quantity: 3.0 }, ts(2))
+            .is_err()
+    );
     engine.finish().unwrap();
 
     assert_eq!(

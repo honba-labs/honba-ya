@@ -63,14 +63,16 @@ fn risk_section_parses() {
 
 #[test]
 fn risk_unknown_field_rejected() {
-    assert!(serde_json::from_str::<BacktestRunConfig>(&base_json(
-        r#", "risk": {"max_notinal": 5.0}"#
-    ))
-    .is_err());
-    assert!(serde_json::from_str::<BacktestRunConfig>(&base_json(
-        r#", "risk": {"order_rate": {"max_orders": 1, "window_ms": 1, "burst": 1}}"#
-    ))
-    .is_err());
+    assert!(
+        serde_json::from_str::<BacktestRunConfig>(&base_json(r#", "risk": {"max_notinal": 5.0}"#))
+            .is_err()
+    );
+    assert!(
+        serde_json::from_str::<BacktestRunConfig>(&base_json(
+            r#", "risk": {"order_rate": {"max_orders": 1, "window_ms": 1, "burst": 1}}"#
+        ))
+        .is_err()
+    );
 }
 
 #[test]

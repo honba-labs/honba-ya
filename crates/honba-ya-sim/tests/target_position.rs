@@ -59,10 +59,12 @@ fn target_position_run() {
     assert_eq!(entry.quantity(), 100.0);
 
     // The target is re-emitted before the order fills: serialisation defers it.
-    assert!(controller
-        .submit_target_position(&snapshot(&aaa, sim.position(&aaa)), 100.0, None, t(1))
-        .unwrap()
-        .is_none());
+    assert!(
+        controller
+            .submit_target_position(&snapshot(&aaa, sim.position(&aaa)), 100.0, None, t(1))
+            .unwrap()
+            .is_none()
+    );
 
     sim.submit(entry).unwrap();
     step(&mut sim, "AAA", 2, 110.0); // fills at day 2's open, 110

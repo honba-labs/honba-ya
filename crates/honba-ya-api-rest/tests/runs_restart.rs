@@ -245,12 +245,13 @@ fn retention_keeps_old_runs_inside_the_count_and_young_runs_beyond_it() {
     let live = submit_backtest(&s, 4); // pending, never evicted
 
     // Count rule alone protects: keep 3 newest of 3 terminal.
-    assert!(s
-        .apply_retention(&RetentionPolicy {
+    assert!(
+        s.apply_retention(&RetentionPolicy {
             keep_runs: 3,
             keep_days: 30
         })
-        .is_empty());
+        .is_empty()
+    );
     // keep_runs 1: old and young(101-day-old too) both beyond the count and older than 30d.
     let evicted = s.apply_retention(&RetentionPolicy {
         keep_runs: 1,

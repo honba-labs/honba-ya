@@ -26,7 +26,9 @@ pub enum LlmDecisionError {
     #[error("original quantity must be positive, got {0}")]
     NonPositiveOriginalQuantity(f64),
     /// An LLM attempted to increase quantity (forbidden by `schema_rejects_increase`).
-    #[error("LLM decision cannot increase quantity: original {original}, decided {decided} (schema_rejects_increase)")]
+    #[error(
+        "LLM decision cannot increase quantity: original {original}, decided {decided} (schema_rejects_increase)"
+    )]
     QuantityIncreased {
         /// The proposed original quantity.
         original: f64,
@@ -45,7 +47,9 @@ pub enum LlmDecisionError {
         decided: f64,
     },
     /// A size-down decision must strictly reduce the quantity (0 < decided < original).
-    #[error("size-down decision must have 0 < decided < original: original {original}, decided {decided}")]
+    #[error(
+        "size-down decision must have 0 < decided < original: original {original}, decided {decided}"
+    )]
     InvalidSizeDownQuantity {
         /// Original quantity.
         original: f64,

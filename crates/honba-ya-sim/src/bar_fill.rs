@@ -9,8 +9,8 @@ use honba_market::settlement::MarginModel;
 use honba_messages::{
     Event, InstrumentId, Order, OrderId, OrderSide, OrderType, Product, UnixNanos,
 };
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 use crate::cost::ScheduleFillCost;
 use crate::fill_model::{FillModel, NoSlippage, SlippageModel};
@@ -384,7 +384,7 @@ impl BarFillEngine {
             None => {
                 return Err(AlgoError::Component(
                     "no observed price to square off an MIS position".into(),
-                ))
+                ));
             }
         };
         for (seq, instrument) in held.iter().enumerate() {

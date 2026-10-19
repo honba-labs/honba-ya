@@ -8,8 +8,8 @@ use honba_messages::{
     OrderStatus, UnixNanos, VenueOrderId,
 };
 use honba_risk::{
-    check_state, DurableRiskState, FillFingerprint, FillLedger, InFlightOrder, RiskCheck,
-    RiskDecision, RiskLimits, RiskRequest, RiskStage,
+    DurableRiskState, FillFingerprint, FillLedger, InFlightOrder, RiskCheck, RiskDecision,
+    RiskLimits, RiskRequest, RiskStage, check_state,
 };
 
 use crate::audit::{AuditKind, AuditLog, AuditRecord};

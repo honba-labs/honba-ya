@@ -274,7 +274,7 @@ fn read_document(path: &Path) -> Result<PortfolioDocument> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(PortfolioDocument::default())
+            return Ok(PortfolioDocument::default());
         }
         Err(e) => return Err(e.into()),
     };

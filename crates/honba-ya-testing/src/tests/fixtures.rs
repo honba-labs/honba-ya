@@ -2,7 +2,7 @@
 
 use honba_messages::{BarAggregation, Exchange, PriceType, UnixNanos};
 
-use crate::fixtures::{any_instrument, flat_bar, instrument, minute_bar_type, TEST_EXCHANGE};
+use crate::fixtures::{TEST_EXCHANGE, any_instrument, flat_bar, instrument, minute_bar_type};
 
 #[test]
 fn instrument_uses_the_test_exchange() {

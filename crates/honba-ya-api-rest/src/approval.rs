@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use honba_api::OrdersRequest;
 use honba_messages::{ErrorCode, ErrorDetail, OrderId};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// The approval queue for order placements (E5-S4).
 ///

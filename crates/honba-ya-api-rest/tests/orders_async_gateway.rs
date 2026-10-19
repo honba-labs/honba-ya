@@ -6,13 +6,13 @@ use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use honba_api_rest::{api_router_with, AppState, GatewayVenue};
+use honba_api_rest::{AppState, GatewayVenue, api_router_with};
 use honba_entities::{Currency, Instrument, InstrumentKind};
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
 use honba_messages::UnixNanos;
 use honba_ports::PortError;
 use honba_testing::ScriptedGateway;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 fn state(gw: &ScriptedGateway) -> AppState {

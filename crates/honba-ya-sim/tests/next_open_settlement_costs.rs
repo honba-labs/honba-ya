@@ -81,11 +81,7 @@ fn a_round_trip_with_t_plus_one_and_costs_conserves_cash() {
             let n = Money::mul_qty(f.quantity(), f.price(), Currency::Inr)
                 .unwrap()
                 .minor();
-            if f.side() == OrderSide::Buy {
-                -n
-            } else {
-                n
-            }
+            if f.side() == OrderSide::Buy { -n } else { n }
         })
         .sum();
     assert_eq!(sim.cash().minor(), 100_000 + signed - paid);

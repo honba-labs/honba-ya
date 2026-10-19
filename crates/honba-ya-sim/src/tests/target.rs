@@ -52,15 +52,19 @@ fn target_delta_computed() {
     assert_eq!(sell.quantity(), 150.0);
 
     // Already at target: no order.
-    assert!(sizing
-        .order(&held(&id, 75.0), 75.0, "tp-3", None, t(3))
-        .unwrap()
-        .is_none());
+    assert!(
+        sizing
+            .order(&held(&id, 75.0), 75.0, "tp-3", None, t(3))
+            .unwrap()
+            .is_none()
+    );
 
     // A contradicting side hint is refused, never silently flipped.
-    assert!(sizing
-        .order(&flat, 100.0, "tp-4", Some(OrderSide::Sell), t(4))
-        .is_err());
+    assert!(
+        sizing
+            .order(&flat, 100.0, "tp-4", Some(OrderSide::Sell), t(4))
+            .is_err()
+    );
 }
 
 #[test]
@@ -118,10 +122,12 @@ fn controller_defers_while_an_order_is_outstanding() {
     assert!(controller.is_busy(&id));
 
     // A second target while the first is working is deferred, not doubled.
-    assert!(controller
-        .submit_target_position(&flat, 100.0, None, t(2))
-        .unwrap()
-        .is_none());
+    assert!(
+        controller
+            .submit_target_position(&flat, 100.0, None, t(2))
+            .unwrap()
+            .is_none()
+    );
 
     // Releasing frees the instrument for the next target.
     controller.release(&id);

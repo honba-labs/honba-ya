@@ -3,8 +3,8 @@
 use honba_engine::DataFeed;
 use honba_messages::{AggressorSide, Event, UnixNanos};
 
-use crate::fixtures::{flat_bar, instrument};
 use crate::VecFeed;
+use crate::fixtures::{flat_bar, instrument};
 
 #[test]
 fn empty_feed_yields_nothing() {

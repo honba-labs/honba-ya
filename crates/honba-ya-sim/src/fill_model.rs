@@ -6,8 +6,8 @@
 //! the acceptance contract is byte-identical fill ledgers for a fixed seed.
 
 use honba_messages::OrderSide;
-use rand::rngs::StdRng;
 use rand::Rng;
+use rand::rngs::StdRng;
 
 /// Applies slippage to the desired price of a fill.
 ///

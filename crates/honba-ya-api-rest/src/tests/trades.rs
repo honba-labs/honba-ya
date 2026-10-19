@@ -127,9 +127,11 @@ fn records_that_are_not_fills_are_skipped() {
             ns(3),
         ),
     ];
-    assert!(trades_from_journal(&records, Currency::Inr)
-        .unwrap()
-        .is_empty());
+    assert!(
+        trades_from_journal(&records, Currency::Inr)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]

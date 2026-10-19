@@ -1,11 +1,11 @@
 //! `/profile` routes: per-user isolation, revisions, sub-resources and the "any valid token"
 //! auth rule. The user is the token's `token_id`, or `default` when auth is off.
 
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use axum::Router;
-use honba_api_rest::{api_router_with, api_router_with_config, ApiConfig, AppState};
-use serde_json::{json, Value};
+use honba_api_rest::{ApiConfig, AppState, api_router_with, api_router_with_config};
+use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 // sha256("test") and sha256("other")

@@ -75,7 +75,7 @@ pub mod handle;
 pub use clocks::{HistoricClock, LiveClock};
 pub use command::Command;
 pub use error::{AsyncError, Result};
-pub use handle::{BoxedFeed, EngineHandle, DEFAULT_COMMAND_CAPACITY};
+pub use handle::{BoxedFeed, DEFAULT_COMMAND_CAPACITY, EngineHandle};
 pub use honba_engine::TradingState;
 
 #[cfg(test)]

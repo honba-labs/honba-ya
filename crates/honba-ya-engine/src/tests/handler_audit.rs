@@ -71,10 +71,12 @@ fn default_drain_audit_is_empty() {
     engine.start().unwrap();
     engine.inject(bar(1));
     engine.finish().unwrap();
-    assert!(engine
-        .audit()
-        .iter()
-        .all(|r| matches!(r.kind, AuditKind::EventDispatched { .. })));
+    assert!(
+        engine
+            .audit()
+            .iter()
+            .all(|r| matches!(r.kind, AuditKind::EventDispatched { .. }))
+    );
 }
 
 #[test]

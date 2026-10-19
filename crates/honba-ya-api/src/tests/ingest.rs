@@ -1,6 +1,6 @@
 //! `POST /bars` batch validation.
 
-use crate::{check_ingest_batch, BarsIngestRequest, ErrorCode, MAX_INGEST_BARS};
+use crate::{BarsIngestRequest, ErrorCode, MAX_INGEST_BARS, check_ingest_batch};
 
 fn reason(len: usize) -> Option<String> {
     check_ingest_batch(len).err().map(|d| {
@@ -22,10 +22,10 @@ fn a_batch_must_be_non_empty_and_bounded() {
 
 #[test]
 fn the_request_rejects_unknown_fields_and_invalid_bars() {
-    assert!(serde_json::from_value::<BarsIngestRequest>(
-        serde_json::json!({"bars": [], "extra": 1})
-    )
-    .is_err());
+    assert!(
+        serde_json::from_value::<BarsIngestRequest>(serde_json::json!({"bars": [], "extra": 1}))
+            .is_err()
+    );
     assert!(
         serde_json::from_value::<BarsIngestRequest>(serde_json::json!({"bars": [{}]})).is_err()
     );

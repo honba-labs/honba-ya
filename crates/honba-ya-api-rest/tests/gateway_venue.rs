@@ -9,8 +9,8 @@ use honba_api_rest::GatewayVenue;
 use honba_engine::ExecutionEngine;
 use honba_entities::ExecutionEvent;
 use honba_messages::{Order, OrderId, OrderSide, OrderType, TimeInForce, UnixNanos};
-use honba_testing::fixtures::any_instrument;
 use honba_testing::ScriptedGateway;
+use honba_testing::fixtures::any_instrument;
 
 const POLL: Duration = Duration::from_millis(5);
 
@@ -192,12 +192,14 @@ async fn cancel_reports_the_unfilled_remainder_at_the_given_time() {
     venue.cancel("C-1", UnixNanos::from_u64(99)).unwrap();
     let evs = events(&mut venue, 1).await;
     match &evs[..] {
-        [ExecutionEvent::Cancelled {
-            order_id,
-            quantity,
-            ts,
-            ..
-        }] => {
+        [
+            ExecutionEvent::Cancelled {
+                order_id,
+                quantity,
+                ts,
+                ..
+            },
+        ] => {
             assert_eq!(order_id.as_str(), "C-1");
             assert_eq!(*quantity, 6.0);
             assert_eq!(ts.as_u64(), 99);

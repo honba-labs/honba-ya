@@ -218,10 +218,11 @@ fn cancel_is_allowed_when_halted() {
     run(&mut engine, &[(10.0, 1), (10.0, 2), (10.0, 3)]);
 
     assert_eq!(*venue.cancelled.lock().unwrap(), vec!["O-1".to_string()]);
-    assert!(engine
-        .audit()
-        .iter()
-        .any(|r| matches!(&r.kind, AuditKind::CancelRequested { order_id } if order_id == "O-1")));
+    assert!(
+        engine.audit().iter().any(
+            |r| matches!(&r.kind, AuditKind::CancelRequested { order_id } if order_id == "O-1")
+        )
+    );
 }
 
 #[test]

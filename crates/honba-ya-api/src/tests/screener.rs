@@ -4,10 +4,10 @@ use honba_messages::{
     Bar, BarAggregation, BarSpecification, BarType, ErrorCode, ErrorDetail, Exchange, InstrumentId,
     PriceType, UnixNanos,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::{
-    check_scan_budget, ScreenerQuery, MAX_SCREENER_BARS, MAX_SCREENER_ROWS, MAX_SCREENER_UNIVERSE,
+    MAX_SCREENER_BARS, MAX_SCREENER_ROWS, MAX_SCREENER_UNIVERSE, ScreenerQuery, check_scan_budget,
 };
 
 fn query(filters: Option<Value>, universe: Option<Value>) -> ScreenerQuery {

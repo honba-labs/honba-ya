@@ -2,12 +2,15 @@
 
 use async_trait::async_trait;
 use chrono::Utc;
+use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, warn};
 
 use honba_core::{Bar, FillReport, OrderRequest, Tick};
 
 use crate::messages::{ActorStatus, RiskMsg, StrategyMsg};
+use crate::metrics::MetricsCollector;
+use crate::tracing_spans::span_order_generated;
 
 /// Contract implemented by trading strategies (momentum, mean-reversion, ML/LLM-driven).
 #[async_trait]
@@ -39,6 +42,7 @@ pub struct StrategyActor<S: Strategy> {
     rx: mpsc::Receiver<StrategyMsg>,
     risk_tx: mpsc::Sender<RiskMsg>,
     status: ActorStatus,
+    metrics: Option<Arc<MetricsCollector>>,
 }
 
 impl<S: Strategy> StrategyActor<S> {
@@ -53,7 +57,14 @@ impl<S: Strategy> StrategyActor<S> {
             rx,
             risk_tx,
             status: ActorStatus::Starting,
+            metrics: None,
         }
+    }
+
+    /// Attach Prometheus metrics collector.
+    pub fn with_metrics(mut self, metrics: Arc<MetricsCollector>) -> Self {
+        self.metrics = Some(metrics);
+        self
     }
 
     /// Access the underlying strategy.
@@ -101,6 +112,14 @@ impl<S: Strategy> StrategyActor<S> {
     }
 
     async fn submit_to_risk(&self, req: OrderRequest) {
+        // Structured tracing span: OrderGenerated
+        let gen_span = span_order_generated(&req);
+        let _enter = gen_span.enter();
+
+        if let Some(ref m) = self.metrics {
+            m.record_order_generation(&req);
+        }
+
         let (reply_tx, reply_rx) = oneshot::channel();
         let eval_msg = RiskMsg::EvaluateOrder {
             request: req.clone(),

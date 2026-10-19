@@ -5,7 +5,7 @@ use honba_messages::{
     Exchange, InstrumentId, Order, OrderId, OrderSide, OrderType, TimeInForce, UnixNanos,
 };
 use honba_sim::PaperExecution;
-use honba_testing::{assert_close, assert_close_slice, Recorder, VecFeed};
+use honba_testing::{Recorder, VecFeed, assert_close, assert_close_slice};
 
 fn order(id: &str, side: OrderSide, qty: f64) -> Order {
     Order::new(

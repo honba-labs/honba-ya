@@ -1,11 +1,11 @@
 //! `POST /strategies` (compile) and `GET /strategies` (list) through the real router.
 
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use axum::Router;
 use honba_api::{CompiledStrategy, StrategiesResponse, StrategyCatalog};
-use honba_api_rest::{api_router, api_router_with, AppState};
-use serde_json::{json, Value};
+use honba_api_rest::{AppState, api_router, api_router_with};
+use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 fn manifest(name: &str, hash: &str) -> Value {

@@ -4,8 +4,8 @@
 //! queue at the touch. Both delays are drawn from the simulator's seeded
 //! [`StdRng`], so the same seed gives the same delays.
 
-use rand::rngs::StdRng;
 use rand::Rng;
+use rand::rngs::StdRng;
 
 /// The seeded delay an order sees before it is acknowledged, and before it can
 /// reach the front of a price queue.

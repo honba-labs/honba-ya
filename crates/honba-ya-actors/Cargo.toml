@@ -15,6 +15,7 @@ honba-core.workspace = true
 honba-mon.workspace = true
 honba-me-core.workspace = true
 honba-te-core.workspace = true
+honba-ya-persistence.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
 futures.workspace = true
@@ -25,6 +26,9 @@ tracing.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
+prometheus.workspace = true
+axum.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+tracing-subscriber = { workspace = true }

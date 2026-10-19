@@ -3,8 +3,8 @@
 
 mod support;
 
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use honba_api::{BacktestRequest, RunKind, RunStatus};
@@ -46,9 +46,11 @@ fn submit_poll_journal() {
         .unwrap();
     assert!(records.iter().any(|m| matches!(m.event(), Event::Bar(_))));
     assert!(records.iter().any(|m| matches!(m.event(), Event::Order(_))));
-    assert!(records
-        .iter()
-        .any(|m| matches!(m.event(), Event::OrderFilled { .. })));
+    assert!(
+        records
+            .iter()
+            .any(|m| matches!(m.event(), Event::OrderFilled { .. }))
+    );
     let manifest_on_disk = std::fs::read_to_string(
         scratch
             .journals()

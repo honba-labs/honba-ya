@@ -16,7 +16,7 @@ use honba_messages::{
 use honba_sim::{
     BarFillEngine, Behavior, NextOpenSim, PaperExecution, ScriptedExecution, VenueAction,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const EPS: f64 = 1e-9;
 

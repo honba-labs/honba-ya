@@ -59,9 +59,10 @@ fn set_price_applies_to_later_submissions_only() {
 fn never_rejects_and_cancel_is_a_no_op() {
     let mut exec = PaperExecution::new(1.0);
     for i in 0..3 {
-        assert!(exec
-            .submit(market(&format!("O-{i}"), OrderSide::Buy, 1.0, 1))
-            .is_ok());
+        assert!(
+            exec.submit(market(&format!("O-{i}"), OrderSide::Buy, 1.0, 1))
+                .is_ok()
+        );
     }
     assert!(exec.cancel("O-0", UnixNanos::from_u64(1)).is_ok());
     assert_eq!(exec.drain_fills().unwrap().len(), 3);

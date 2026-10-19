@@ -100,11 +100,7 @@ fn order(step: &Value) -> Order {
 }
 
 fn side_str(s: OrderSide) -> &'static str {
-    if s == OrderSide::Buy {
-        "buy"
-    } else {
-        "sell"
-    }
+    if s == OrderSide::Buy { "buy" } else { "sell" }
 }
 
 /// The vectors' test cost model: `flat + (notional * bps + 5000) / 10000` per side, in minor

@@ -2,15 +2,15 @@
 //! and 5). Every method blocks; the route layer calls them through `spawn_blocking`.
 
 use std::collections::VecDeque;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use honba_api::{
-    unknown_strategy, BacktestRequest, BacktestResponse, JournalWriter, ResolvedRequest,
-    RunExecutor, RunId, RunJob, StrategyCatalog, SweepRequest,
+    BacktestRequest, BacktestResponse, JournalWriter, ResolvedRequest, RunExecutor, RunId, RunJob,
+    StrategyCatalog, SweepRequest, unknown_strategy,
 };
 use honba_messages::{ErrorCode, ErrorDetail};
 use honba_strategy::StrategyIr;

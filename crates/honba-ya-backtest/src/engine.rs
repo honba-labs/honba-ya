@@ -270,6 +270,8 @@ impl<S: Strategy> BacktestEngine<S> {
             quantity: order.quantity,
             algo_id: order.algo_id.clone(),
             timestamp,
+            correlation_id: order.correlation_id,
+            client_id: order.client_id.clone(),
         };
 
         // Update Research-Live Parity: notify RiskEngine & Strategy

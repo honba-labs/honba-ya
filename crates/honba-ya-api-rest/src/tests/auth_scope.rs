@@ -2,7 +2,7 @@
 
 use honba_api::ENDPOINTS;
 
-use crate::{scope_for, unscoped_routes, RouteScope, ROUTE_SCOPES};
+use crate::{ROUTE_SCOPES, RouteScope, scope_for, unscoped_routes};
 
 /// The scopes ADR 0023 §2 defines; no route may name any other.
 const SCOPES: &[&str] = &[

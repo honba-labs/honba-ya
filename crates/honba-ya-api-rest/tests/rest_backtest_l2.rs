@@ -6,10 +6,10 @@ mod support;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use axum::Router;
-use honba_api_rest::{api_router_with, AppState, RunServiceConfig};
+use honba_api_rest::{AppState, RunServiceConfig, api_router_with};
 use honba_config::{ExecutionConfig, FillModel};
 use honba_feed::InMemoryTickReader;
 use honba_messages::{Exchange, InstrumentId, QuoteTick, UnixNanos};

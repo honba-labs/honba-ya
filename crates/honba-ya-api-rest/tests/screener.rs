@@ -1,15 +1,15 @@
 //! `GET /screener/scan` through the real router, over an in-memory daily-bar dataset.
 //! No network, no wall clock.
 
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use axum::Router;
-use honba_api_rest::{api_router_with, build_target, AppState};
+use honba_api_rest::{AppState, api_router_with, build_target};
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
 use honba_messages::{
     BarAggregation, BarSpecification, Exchange, InstrumentId, PriceType, UnixNanos,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 const DAY: u64 = 86_400_000_000_000;

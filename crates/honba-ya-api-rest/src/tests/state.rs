@@ -8,7 +8,7 @@ use honba_ports::BarRequest;
 use serde_json::Value;
 use tower::util::ServiceExt;
 
-use crate::{api_router, AppState};
+use crate::{AppState, api_router};
 
 async fn call(method: &str, uri: &str) -> (StatusCode, Vec<u8>) {
     let res = api_router()
@@ -31,23 +31,27 @@ async fn call(method: &str, uri: &str) -> (StatusCode, Vec<u8>) {
 #[tokio::test]
 async fn the_default_state_serves_an_empty_catalogue() {
     let state = AppState::default();
-    assert!(state
-        .instruments
-        .list_instruments()
-        .await
-        .unwrap()
-        .is_empty());
+    assert!(
+        state
+            .instruments
+            .list_instruments()
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
 async fn a_state_built_from_a_reader_shares_it_between_both_ports() {
     let state = AppState::from_reader(DatasetReader::from_dataset(Default::default()));
-    assert!(state
-        .instruments
-        .list_instruments()
-        .await
-        .unwrap()
-        .is_empty());
+    assert!(
+        state
+            .instruments
+            .list_instruments()
+            .await
+            .unwrap()
+            .is_empty()
+    );
     let id = honba_messages::InstrumentId::new("X", honba_messages::Exchange::new("NSE"));
     let spec = honba_api::parse_timeframe("1m").unwrap();
     let request = BarRequest::new(id, spec, None, None).unwrap();

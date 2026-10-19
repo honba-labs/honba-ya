@@ -11,7 +11,7 @@ use honba_messages::{
     BarAggregation, BarSpecification, ErrorCode, ErrorDetail, Exchange, InstrumentId, PriceType,
     UnixNanos,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::requests::{BarsQuery, DepthQuery, InstrumentsQuery, QuotesQuery};
 

@@ -11,12 +11,11 @@ use crate::auth::AuthRouterExt;
 use axum::handler::Handler as _;
 use axum::http::{HeaderValue, Method};
 use axum::{
-    async_trait,
-    extract::{rejection::JsonRejection, FromRequest, Path, Request, State},
+    Router, async_trait,
+    extract::{FromRequest, Path, Request, State, rejection::JsonRejection},
     http::StatusCode,
     response::{IntoResponse, Json, Response},
     routing::{delete, get, post, put},
-    Router,
 };
 use honba_api::{
     ApiResponse, Capabilities, CapabilitiesResponse, CompiledStrategy, ErrorCode, ErrorDetail,
@@ -48,6 +47,7 @@ mod portfolio_store;
 mod profile;
 mod profile_store;
 mod registry;
+mod reports;
 mod retention;
 mod run_store;
 mod runs;
@@ -59,13 +59,18 @@ mod trades;
 mod trading_state;
 mod user_doc;
 
+use crate::reports::{
+    get_concentration_risk, get_equity_curve, get_fees_report, get_ledger, get_order_fills,
+    get_portfolio_snapshots, get_position_audit, get_tax_report, get_weighted_average_cost,
+};
+
 pub use approval::ApprovalQueue;
 pub use auth::{
-    scope_for, unscoped_routes, AuthConfig, AuthLayer, FileTokenStore, RouteScope, TokenInfo,
-    ROUTE_SCOPES,
+    AuthConfig, AuthLayer, FileTokenStore, ROUTE_SCOPES, RouteScope, TokenInfo, scope_for,
+    unscoped_routes,
 };
 pub use bar_pump::BarPumpReport;
-pub use dispatch::{build_target, dispatch, dispatch_stream, DispatchError};
+pub use dispatch::{DispatchError, build_target, dispatch, dispatch_stream};
 pub use exec::ExecutionVenue;
 pub use executor::BacktestExecutor;
 pub use gateway_venue::GatewayVenue;
@@ -77,12 +82,12 @@ pub use portfolio_store::{
     PortfolioAccountRecord, PortfolioDocument, PortfolioError, PortfolioHeldPosition,
     PortfolioStore,
 };
-pub use profile_store::{Module, Profile, ProfileError, ProfileStore, Source, DEFAULT_USER_ID};
+pub use profile_store::{DEFAULT_USER_ID, Module, Profile, ProfileError, ProfileStore, Source};
 pub use registry::StrategyRegistry;
-pub use retention::{evictions, RetentionPolicy};
+pub use retention::{RetentionPolicy, evictions};
 pub use run_store::{OsEntropy, RecoveryReport, RunClock, RunEntropy, RunStore, SystemClock};
 pub use service::{
-    RunService, RunServiceConfig, ShutdownReport, DEFAULT_MAX_QUEUED, DEFAULT_SHUTDOWN_GRACE,
+    DEFAULT_MAX_QUEUED, DEFAULT_SHUTDOWN_GRACE, RunService, RunServiceConfig, ShutdownReport,
 };
 pub use state::AppState;
 pub use streams::get_backtest_events;
@@ -208,6 +213,15 @@ pub fn api_router_with_config(state: AppState, config: &ApiConfig) -> Router {
         .route("/portfolio/positions", get(portfolio::get_positions))
         .route("/portfolio/holdings", get(portfolio::get_holdings))
         .route("/portfolio/trades", get(portfolio::get_trades))
+        .route("/reports/ledger", get(get_ledger))
+        .route("/reports/tax", get(get_tax_report))
+        .route("/reports/snapshots", get(get_portfolio_snapshots))
+        .route("/reports/audit", get(get_position_audit))
+        .route("/reports/concentration", get(get_concentration_risk))
+        .route("/reports/wac", get(get_weighted_average_cost))
+        .route("/reports/fees", get(get_fees_report))
+        .route("/reports/equity-curve", get(get_equity_curve))
+        .route("/reports/fills/:order_id", get(get_order_fills))
         .route("/strategies", post(post_strategies).get(get_strategies))
         .route("/strategies/verify", post(post_verify_strategy))
         .route("/backtests", post(runs::post_backtests))

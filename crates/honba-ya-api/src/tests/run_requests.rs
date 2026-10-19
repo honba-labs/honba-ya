@@ -3,8 +3,8 @@
 use serde_json::json;
 
 use crate::{
-    unknown_strategy, BacktestRequest, ErrorCode, ErrorDetail, SweepRequest,
-    DEFAULT_INITIAL_CAPITAL,
+    BacktestRequest, DEFAULT_INITIAL_CAPITAL, ErrorCode, ErrorDetail, SweepRequest,
+    unknown_strategy,
 };
 
 fn full() -> BacktestRequest {

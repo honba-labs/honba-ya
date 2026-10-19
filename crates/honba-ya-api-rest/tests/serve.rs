@@ -2,7 +2,7 @@
 //! process, called with a plain TCP client, stopped through the shutdown future.
 //! No external network and no wall clock.
 
-use honba_api_rest::{serve, AppState};
+use honba_api_rest::{AppState, serve};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};

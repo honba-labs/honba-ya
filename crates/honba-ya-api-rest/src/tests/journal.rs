@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 use honba_messages::{
-    ErrorCode, Event, Exchange, InstrumentId, Message, QuoteTick, UnixNanos, SCHEMA_VERSION,
+    ErrorCode, Event, Exchange, InstrumentId, Message, QuoteTick, SCHEMA_VERSION, UnixNanos,
 };
 
 use crate::{JournalWriter, NdjsonJournal};

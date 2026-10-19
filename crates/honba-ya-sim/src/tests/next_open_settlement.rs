@@ -48,10 +48,12 @@ fn settlement_defaults_to_same_session_availability() {
 
 #[test]
 fn negative_settlement_days_are_refused() {
-    assert!(NextOpenSim::new(inr(1))
-        .unwrap()
-        .with_settlement_days(-1)
-        .is_err());
+    assert!(
+        NextOpenSim::new(inr(1))
+            .unwrap()
+            .with_settlement_days(-1)
+            .is_err()
+    );
     let mut s = NextOpenSim::new(inr(1)).unwrap();
     assert!(s.set_settlement_days(-1).is_err());
     assert_eq!(s.settlement_days(), 0);

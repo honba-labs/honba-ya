@@ -1,11 +1,11 @@
 //! Unit tests for `crate::fill_model` (E3-S2).
 
 use honba_messages::OrderSide;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
-use crate::fill_model::{NoSlippage, SlippageKind, SlippageModel};
 use crate::FillModel;
+use crate::fill_model::{NoSlippage, SlippageKind, SlippageModel};
 
 fn seeded(seed: u64) -> StdRng {
     StdRng::seed_from_u64(seed)

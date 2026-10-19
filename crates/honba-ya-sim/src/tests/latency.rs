@@ -1,10 +1,10 @@
 //! Unit tests for `crate::latency` (E3-S2).
 
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
-use crate::latency::{depth_survival_discount, NoLatency, SeededLatency};
 use crate::LatencyModel;
+use crate::latency::{NoLatency, SeededLatency, depth_survival_discount};
 
 fn seeded(seed: u64) -> StdRng {
     StdRng::seed_from_u64(seed)

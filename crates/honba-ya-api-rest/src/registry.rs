@@ -50,7 +50,9 @@ impl StrategyRegistry {
         Some(match name {
             "buy_and_hold" => Box::new(BuyAndHold::new(instrument, QUANTITY)),
             "rsi_reversal" => Box::new(RsiReversal::new(instrument, 14, 30.0, 70.0, QUANTITY)),
-            "sma_crossover" | "sma_cross" => Box::new(SmaCrossover::new(instrument, 3, 8, QUANTITY)),
+            "sma_crossover" | "sma_cross" => {
+                Box::new(SmaCrossover::new(instrument, 3, 8, QUANTITY))
+            }
             _ => return None,
         })
     }

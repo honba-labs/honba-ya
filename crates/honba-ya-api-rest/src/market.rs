@@ -10,14 +10,14 @@ use std::sync::Arc;
 
 use axum::{
     async_trait,
-    extract::{rejection::QueryRejection, FromRequestParts, Path, Query, State},
-    http::{request::Parts, StatusCode},
+    extract::{FromRequestParts, Path, Query, State, rejection::QueryRejection},
+    http::{StatusCode, request::Parts},
     response::{IntoResponse, Json, Response},
 };
 use honba_api::{
-    instrument_json, parse_instrument_id, ApiResponse, BarsQuery, BarsResponse, DepthLevel,
-    DepthQuery, DepthResponse, ErrorCode, ErrorDetail, InstrumentsQuery, InstrumentsResponse,
-    QuotesQuery, QuotesResponse, ResponseEnvelope,
+    ApiResponse, BarsQuery, BarsResponse, DepthLevel, DepthQuery, DepthResponse, ErrorCode,
+    ErrorDetail, InstrumentsQuery, InstrumentsResponse, QuotesQuery, QuotesResponse,
+    ResponseEnvelope, instrument_json, parse_instrument_id,
 };
 use honba_ports::{BarRequest, PortError};
 use serde::de::DeserializeOwned;
@@ -269,7 +269,7 @@ pub(crate) async fn get_quotes(
                         ErrorCode::MarketDataUnavailable,
                         format!("no quote for {id} at the requested time"),
                     ),
-                )
+                );
             }
             Err(error) => return port_failure(error),
         }

@@ -15,9 +15,9 @@ use honba_ports::{
 };
 use honba_testing::fixtures::{any_instrument, instrument};
 use honba_testing::{
-    check_clock_contract, check_feed_contract, check_gateway_contract, check_master_contract,
-    check_secret_contract, check_sink_contract, FixedClock, MapInstrumentMaster, RecordingSink,
-    StubGateway, StubSecretStore, VecMessageFeed, CONTRACT_PROBE_KEY, CONTRACT_PROBE_SECRET,
+    CONTRACT_PROBE_KEY, CONTRACT_PROBE_SECRET, FixedClock, MapInstrumentMaster, RecordingSink,
+    StubGateway, StubSecretStore, VecMessageFeed, check_clock_contract, check_feed_contract,
+    check_gateway_contract, check_master_contract, check_secret_contract, check_sink_contract,
 };
 
 fn message(ts: u64) -> Message {

@@ -61,11 +61,7 @@ fn side(s: &str) -> OrderSide {
 }
 
 fn side_str(s: OrderSide) -> &'static str {
-    if s == OrderSide::Buy {
-        "buy"
-    } else {
-        "sell"
-    }
+    if s == OrderSide::Buy { "buy" } else { "sell" }
 }
 
 fn order(step: &Value) -> Order {

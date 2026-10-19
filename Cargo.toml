@@ -43,6 +43,7 @@ axum = "0.7"
 clap = { version = "4", features = ["derive"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "postgres", "chrono"] }
 schemars = { version = "0.8", features = ["derive"] }
+prometheus = "0.14"
 arrow = "53"
 parquet = { version = "53", features = ["arrow"] }
 toml = "0.8"
@@ -96,6 +97,7 @@ honba-me-feed          = { path = "../honba-me/crates/honba-me-feed" }
 honba-market           = { package = "honba-me-market", path = "../honba-me/crates/honba-me-market" }
 honba-feed             = { package = "honba-me-feed", path = "../honba-me/crates/honba-me-feed" }
 
+honba-nou-agent        = { path = "../honba-nou/crates/honba-nou-agent" }
 honba-nou-llm          = { path = "../honba-nou/crates/honba-nou-llm" }
 honba-nou-analytics    = { path = "../honba-nou/crates/honba-nou-analytics" }
 honba-nou-strategy     = { path = "../honba-nou/crates/honba-nou-strategy" }

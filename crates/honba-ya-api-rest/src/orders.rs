@@ -50,7 +50,7 @@ use honba_messages::{
 use honba_risk::{ProfileRulesSource, RiskCheck, RiskDecision, RiskRequest, RiskStage};
 use serde_json::json;
 
-use crate::market::{failure, success, ApiQuery};
+use crate::market::{ApiQuery, failure, success};
 use crate::state::AppState;
 
 fn is_terminal(status: OrderStatus) -> bool {

@@ -5,12 +5,12 @@
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use honba_api::{
-    compile_strategy, ResolvedBacktest, ResolvedRequest, ResolvedSweep, RunKind, RunManifest,
-    StrategyCatalog,
+    ResolvedBacktest, ResolvedRequest, ResolvedSweep, RunKind, RunManifest, StrategyCatalog,
+    compile_strategy,
 };
 use honba_api_rest::{RunClock, RunEntropy, RunStore};
 use honba_messages::{ErrorDetail, Event, Exchange, InstrumentId, Message, QuoteTick, UnixNanos};

@@ -71,15 +71,19 @@ fn a_failed_sweep_response_round_trips_its_error() {
 #[test]
 fn payloads_from_before_the_error_field_still_parse() {
     let old = json!({"run_id": "r", "status": "completed"});
-    assert!(serde_json::from_value::<BacktestResponse>(old)
-        .unwrap()
-        .error
-        .is_none());
+    assert!(
+        serde_json::from_value::<BacktestResponse>(old)
+            .unwrap()
+            .error
+            .is_none()
+    );
     let old = json!({"job_id": "j", "status": "running"});
-    assert!(serde_json::from_value::<SweepResponse>(old)
-        .unwrap()
-        .error
-        .is_none());
+    assert!(
+        serde_json::from_value::<SweepResponse>(old)
+            .unwrap()
+            .error
+            .is_none()
+    );
 }
 
 #[test]

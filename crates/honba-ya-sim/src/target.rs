@@ -178,11 +178,7 @@ impl TargetPosition {
                 qty = qty.signum() * qty.abs().min(clip);
             }
         }
-        if qty.abs() <= QTY_EPS {
-            0.0
-        } else {
-            qty
-        }
+        if qty.abs() <= QTY_EPS { 0.0 } else { qty }
     }
 
     /// The market order that moves `current` to `target`, or `None` when already at target.

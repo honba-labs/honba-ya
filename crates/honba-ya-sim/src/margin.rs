@@ -15,8 +15,8 @@
 //! drives the session open.
 
 use honba_entities::{InstrumentKind, PositionSide};
-use honba_market::settlement::{MarginModel, MarginRequirement};
 use honba_market::MarketProfile;
+use honba_market::settlement::{MarginModel, MarginRequirement};
 use honba_messages::{
     InstrumentId, Order, OrderId, OrderSide, OrderType, Product, TimeInForce, UnixNanos,
 };

@@ -1,4 +1,4 @@
-//! Actor supervision tree managing lifecycles, health monitoring, and graceful drain/shutdown.
+//! Actor supervision tree and lifecycle manager for the Honba platform.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -8,15 +8,17 @@ use tracing::{error, info, warn};
 
 use honba_core::Tick;
 use honba_mon::RiskEngine;
+use honba_persistence::SqliteAuditLedger;
 use honba_te_core::BrokerExecutor;
 
 use crate::execution::ExecutionActor;
 use crate::market_data::MarketDataActor;
 use crate::messages::{ActorStatus, ExecutionMsg, MarketDataMsg, RiskMsg, StrategyMsg};
+use crate::metrics::MetricsCollector;
 use crate::risk::RiskActor;
 use crate::strategy::{Strategy, StrategyActor};
 
-/// Supervisor managing actor tasks and coordinating graceful shutdown.
+/// Supervisor coordinating the lifecycle, message routing, and graceful staged shutdown of all actors.
 pub struct Supervisor {
     market_data_tx: mpsc::Sender<MarketDataMsg>,
     strategy_tx: mpsc::Sender<StrategyMsg>,
@@ -78,6 +80,60 @@ impl Supervisor {
         }
     }
 
+    /// Spawn supervision tree equipped with Prometheus metrics and SEBI regulatory audit ledger.
+    pub fn spawn_with_observability<S: Strategy + 'static>(
+        strategy: S,
+        risk_engine: RiskEngine,
+        broker: Arc<dyn BrokerExecutor>,
+        channel_capacity: usize,
+        metrics: Arc<MetricsCollector>,
+        audit_ledger: Arc<SqliteAuditLedger>,
+    ) -> Self {
+        let (md_tx, md_rx) = mpsc::channel(channel_capacity);
+        let (strat_tx, strat_rx) = mpsc::channel(channel_capacity);
+        let (risk_tx, risk_rx) = mpsc::channel(channel_capacity);
+        let (exec_tx, exec_rx) = mpsc::channel(channel_capacity);
+
+        // 1. MarketDataActor
+        let (md_actor, broadcast_rx) =
+            MarketDataActor::new(md_rx, vec![strat_tx.clone()], channel_capacity);
+        let md_handle = tokio::spawn(async move { md_actor.run().await });
+
+        // 2. StrategyActor
+        let strat_actor = StrategyActor::new(strategy, strat_rx, risk_tx.clone())
+            .with_metrics(Arc::clone(&metrics));
+        let strat_handle = tokio::spawn(async move { strat_actor.run().await });
+
+        // 3. RiskActor
+        let risk_actor = RiskActor::new(risk_engine, risk_rx, exec_tx.clone())
+            .with_metrics(Arc::clone(&metrics))
+            .with_audit_ledger(Arc::clone(&audit_ledger));
+        let risk_handle = tokio::spawn(async move { risk_actor.run().await });
+
+        // 4. ExecutionActor
+        let exec_actor = ExecutionActor::new(
+            broker,
+            exec_rx,
+            Some(risk_tx.clone()),
+            Some(strat_tx.clone()),
+        )
+        .with_metrics(Arc::clone(&metrics))
+        .with_audit_ledger(Arc::clone(&audit_ledger));
+        let exec_handle = tokio::spawn(async move { exec_actor.run().await });
+
+        Self {
+            market_data_tx: md_tx,
+            strategy_tx: strat_tx,
+            risk_tx,
+            execution_tx: exec_tx,
+            broadcast_rx,
+            md_handle,
+            strat_handle,
+            risk_handle,
+            exec_handle,
+        }
+    }
+
     /// Access market data sender to inject live ticks or manage subscriptions.
     pub fn market_data_sender(&self) -> &mpsc::Sender<MarketDataMsg> {
         &self.market_data_tx
@@ -104,11 +160,6 @@ impl Supervisor {
     }
 
     /// Perform a graceful staged shutdown and drain across all actors.
-    ///
-    /// 1. Shut down MarketDataActor (stop accepting ticks)
-    /// 2. Shut down StrategyActor (drain pending calculations)
-    /// 3. Shut down RiskActor (drain evaluations)
-    /// 4. Shut down ExecutionActor (drain open broker requests)
     pub async fn shutdown_gracefully(self, timeout: Duration) -> Result<(), String> {
         info!("Supervisor starting staged graceful drain and shutdown");
 

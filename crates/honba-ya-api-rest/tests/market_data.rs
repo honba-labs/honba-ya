@@ -8,17 +8,17 @@ use std::sync::Arc;
 
 use arrow::array::{ArrayRef, Float64Array, Int64Array};
 use arrow::record_batch::RecordBatch;
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use axum::Router;
-use honba_api_rest::{api_router_with, AppState};
+use honba_api_rest::{AppState, api_router_with};
 use honba_feed::import::parquet_source::bar_schema;
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
 use honba_messages::{
     BarAggregation, BarSpecification, Exchange, InstrumentId, PriceType, UnixNanos,
 };
 use parquet::arrow::ArrowWriter;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 const MINUTE: u64 = 60_000_000_000;
@@ -445,10 +445,12 @@ async fn depth_is_a_404_market_data_unavailable_because_the_dataset_has_bars_onl
         StatusCode::NOT_FOUND,
         "market_data_unavailable",
     );
-    assert!(body["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("order book"));
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("order book")
+    );
     let (status, body) = get(app(), "/depth/TCS.NSE?depth=10").await;
     assert_error(
         status,

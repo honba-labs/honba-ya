@@ -48,7 +48,9 @@ pub(crate) fn export(
         && mcp_output.is_none()
         && docs_output.is_none()
     {
-        println!("Note: no --typescript/--client/--openapi/--pyi/--mcp/--docs dirs given; only domain_schema.json emitted. Pass one to generate that artifact.");
+        println!(
+            "Note: no --typescript/--client/--openapi/--pyi/--mcp/--docs dirs given; only domain_schema.json emitted. Pass one to generate that artifact."
+        );
     }
     Ok(())
 }

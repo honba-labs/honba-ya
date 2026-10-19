@@ -2,16 +2,16 @@
 //! `submitted` until the market advances, then fills at the next bar open and the
 //! ledger position follows. No network, no wall clock: event time is the bar's `ts_event`.
 
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use axum::Router;
-use honba_api_rest::{api_router_with, AppState};
+use honba_api_rest::{AppState, api_router_with};
 use honba_entities::{Currency, Instrument, InstrumentKind};
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
 use honba_messages::{
     Bar, BarAggregation, BarSpecification, BarType, Exchange, InstrumentId, PriceType, UnixNanos,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 fn iid() -> InstrumentId {
@@ -134,11 +134,12 @@ async fn close_after_a_fill_flattens_the_position() {
     // The close order is still working: position is the (conservative) sum.
     st.advance_market(&[bar(2_000, 103.0)]).unwrap();
     assert!(st.orders.positions().is_empty());
-    assert!(st
-        .orders
-        .list()
-        .iter()
-        .all(|o| serde_json::to_value(o).unwrap()["status"] == "filled"));
+    assert!(
+        st.orders
+            .list()
+            .iter()
+            .all(|o| serde_json::to_value(o).unwrap()["status"] == "filled")
+    );
 }
 
 #[tokio::test]
@@ -244,15 +245,19 @@ async fn simulator_rejections_carry_a_stable_code_and_the_reason() {
     let limit = row(&st, "l1");
     assert_eq!(limit["status"], "rejected");
     assert_eq!(limit["reject_reason"]["code"], "order_rejected");
-    assert!(limit["reject_reason"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("unsupported_order_type"));
+    assert!(
+        limit["reject_reason"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("unsupported_order_type")
+    );
     let sell = row(&st, "s1");
     assert_eq!(sell["reject_reason"]["code"], "order_rejected");
-    assert!(sell["reject_reason"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("no_position"));
+    assert!(
+        sell["reject_reason"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("no_position")
+    );
     assert!(sell.get("filled_qty").is_none());
 }

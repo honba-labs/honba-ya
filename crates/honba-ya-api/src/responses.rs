@@ -4,10 +4,14 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use honba_entities::{PortfolioAccount, PortfolioHolding, PortfolioPosition, Position, Trade};
+use honba_entities::{
+    Currency, PortfolioAccount, PortfolioHolding, PortfolioPosition, Position, Trade,
+};
 use std::collections::BTreeMap;
 
-use honba_messages::{Bar, ErrorDetail, InstrumentId, Message, Order, QuoteTick};
+use honba_messages::{
+    Bar, ErrorDetail, InstrumentId, Message, Order, OrderSide, QuoteTick, UnixNanos,
+};
 use honba_strategy::StrategyIr;
 
 use crate::capabilities::Capabilities;
@@ -283,4 +287,417 @@ pub struct TradingStateChange {
     pub state: honba_messages::TradingState,
     /// The trading state before this request.
     pub previous: honba_messages::TradingState,
+}
+
+/// Ledger entry for transaction journal (trades, fees, transfers, adjustments).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LedgerEntry {
+    /// Unique entry id.
+    pub id: String,
+    /// Event timestamp (Unix nanos).
+    pub ts_event: UnixNanos,
+    /// Human-readable date.
+    pub date: String,
+    /// Entry category.
+    pub category: String,
+    /// Description.
+    pub description: String,
+    /// Settlement currency.
+    pub currency: Currency,
+    /// Amount (positive = credit, negative = debit).
+    pub amount: f64,
+    /// Amount in USD (optional).
+    pub amount_usd: Option<f64>,
+    /// Running balance after this entry.
+    pub balance: f64,
+    /// Balance in USD (optional).
+    pub balance_usd: Option<f64>,
+    /// Wallet/account name.
+    pub wallet: Option<String>,
+    /// Instrument (optional).
+    pub instrument: Option<String>,
+    /// Side for trades (optional).
+    pub side: Option<OrderSide>,
+    /// Fees for this entry (optional).
+    pub fees: Option<f64>,
+}
+
+/// Ledger history response.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LedgerHistoryResponse {
+    /// Ledger entries.
+    pub entries: Vec<LedgerEntry>,
+    /// Total count.
+    pub total_count: u64,
+}
+
+/// Tax transaction for STCG/LTCG reporting.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TaxTransaction {
+    /// Unique transaction id.
+    pub id: String,
+    /// Event timestamp (Unix nanos).
+    pub ts_event: UnixNanos,
+    /// Human-readable sell date.
+    pub date: String,
+    /// Instrument name.
+    pub instrument: String,
+    /// Symbol.
+    pub symbol: String,
+    /// Exchange.
+    pub exchange: String,
+    /// Side (buy/sell).
+    pub side: OrderSide,
+    /// Quantity.
+    pub quantity: f64,
+    /// Buy price.
+    pub buy_price: f64,
+    /// Sell price.
+    pub sell_price: f64,
+    /// Buy date.
+    pub buy_date: String,
+    /// Sell date.
+    pub sell_date: String,
+    /// Holding period in days.
+    pub holding_period_days: u64,
+    /// Gross gain/loss.
+    pub gain_loss: f64,
+    /// Gross gain/loss in USD (optional).
+    pub gain_loss_usd: Option<f64>,
+    /// Short-term capital gain.
+    pub stcg: f64,
+    /// Long-term capital gain.
+    pub ltcg: f64,
+    /// Securities Transaction Tax.
+    pub stt: f64,
+    /// Stamp duty.
+    pub stamp_duty: f64,
+    /// Exchange charges.
+    pub exchange_charges: f64,
+    /// SEBI fees.
+    pub sebi_fees: f64,
+    /// GST.
+    pub gst: f64,
+    /// Total charges.
+    pub total_charges: f64,
+    /// Net gain/loss after charges.
+    pub net_gain_loss: f64,
+    /// Tax liability.
+    pub tax_liability: f64,
+    /// Category (STCG/LTCG/Exempt).
+    pub category: String,
+}
+
+/// Tax report response.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TaxReportResponse {
+    /// Tax transactions.
+    pub transactions: Vec<TaxTransaction>,
+    /// Total count.
+    pub total_count: u64,
+    /// Summary totals.
+    pub summary: TaxReportSummary,
+}
+
+/// Tax report summary.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TaxReportSummary {
+    /// Total STCG.
+    pub total_stcg: f64,
+    /// Total LTCG.
+    pub total_ltcg: f64,
+    /// Total STT.
+    pub total_stt: f64,
+    /// Total stamp duty.
+    pub total_stamp_duty: f64,
+    /// Total exchange charges.
+    pub total_exchange_charges: f64,
+    /// Total SEBI fees.
+    pub total_sebi_fees: f64,
+    /// Total GST.
+    pub total_gst: f64,
+    /// Total net gain/loss.
+    pub total_net_gain_loss: f64,
+    /// Total tax liability.
+    pub total_tax_liability: f64,
+}
+
+/// Portfolio snapshot entry (historical).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SnapshotEntry {
+    /// Snapshot id.
+    pub id: String,
+    /// Timestamp (Unix nanos).
+    pub ts_event: UnixNanos,
+    /// Human-readable date.
+    pub date: String,
+    /// Total equity.
+    pub total_equity: f64,
+    /// Total cash.
+    pub total_cash: f64,
+    /// Positions value.
+    pub positions_value: f64,
+    /// Unrealized PnL.
+    pub unrealized_pnl: f64,
+    /// Realized PnL.
+    pub realized_pnl: f64,
+    /// Day change.
+    pub day_change: f64,
+    /// Day change percentage.
+    pub day_change_pct: f64,
+    /// Number of accounts.
+    pub accounts: u32,
+    /// Number of positions.
+    pub positions: u32,
+}
+
+/// Portfolio snapshots response.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PortfolioSnapshotsResponse {
+    /// Snapshot entries.
+    pub snapshots: Vec<SnapshotEntry>,
+    /// Total count.
+    pub total_count: u64,
+}
+
+/// Position audit trail entry.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AuditEntry {
+    /// Entry id.
+    pub id: String,
+    /// Timestamp (Unix nanos).
+    pub ts_event: UnixNanos,
+    /// Human-readable date.
+    pub date: String,
+    /// Instrument.
+    pub instrument: String,
+    /// Side.
+    pub side: OrderSide,
+    /// Quantity change.
+    pub quantity_change: f64,
+    /// Price.
+    pub price: f64,
+    /// Position after change.
+    pub position_after: f64,
+    /// Average price after.
+    pub avg_price_after: f64,
+    /// Realized PnL from this change.
+    pub realized_pnl: f64,
+    /// Order id that caused the change.
+    pub order_id: String,
+    /// Change reason.
+    pub reason: String,
+}
+
+/// Position audit trail response.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PositionAuditTrailResponse {
+    /// Audit entries.
+    pub entries: Vec<AuditEntry>,
+    /// Total count.
+    pub total_count: u64,
+}
+
+/// Concentration risk entry.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ConcentrationEntry {
+    /// Instrument.
+    pub instrument: String,
+    /// Symbol.
+    pub symbol: String,
+    /// Exchange.
+    pub exchange: String,
+    /// Market value.
+    pub market_value: f64,
+    /// Percentage of portfolio.
+    pub pct_of_portfolio: f64,
+    /// Quantity.
+    pub quantity: f64,
+    /// Average price.
+    pub avg_price: f64,
+    /// Current mark.
+    pub mark: f64,
+    /// Unrealized PnL.
+    pub unrealized_pnl: f64,
+    /// Realized PnL.
+    pub realized_pnl: f64,
+    /// Sector (optional).
+    pub sector: Option<String>,
+}
+
+/// Concentration risk response.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ConcentrationRiskResponse {
+    /// Concentration entries.
+    pub entries: Vec<ConcentrationEntry>,
+    /// Total portfolio value.
+    pub total_portfolio_value: f64,
+    /// Herfindahl-Hirschman Index.
+    pub hhi: f64,
+    /// Top 5 concentration.
+    pub top5_concentration: f64,
+    /// Top 10 concentration.
+    pub top10_concentration: f64,
+}
+
+/// Weighted average cost entry.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WACEntry {
+    /// Instrument.
+    pub instrument: String,
+    /// Symbol.
+    pub symbol: String,
+    /// Exchange.
+    pub exchange: String,
+    /// Quantity.
+    pub quantity: f64,
+    /// Weighted average cost.
+    pub weighted_avg_cost: f64,
+    /// Current mark.
+    pub mark: f64,
+    /// Market value.
+    pub market_value: f64,
+    /// Unrealized PnL.
+    pub unrealized_pnl: f64,
+    /// Realized PnL.
+    pub realized_pnl: f64,
+    /// Total cost basis.
+    pub total_cost_basis: f64,
+    /// Total proceeds.
+    pub total_proceeds: f64,
+}
+
+/// Weighted average cost response.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WeightedAverageCostResponse {
+    /// WAC entries.
+    pub entries: Vec<WACEntry>,
+}
+
+/// Fees report entry.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FeeEntry {
+    /// Entry id.
+    pub id: String,
+    /// Timestamp (Unix nanos).
+    pub ts_event: UnixNanos,
+    /// Human-readable date.
+    pub date: String,
+    /// Fee type.
+    pub fee_type: String,
+    /// Instrument (optional).
+    pub instrument: Option<String>,
+    /// Amount.
+    pub amount: f64,
+    /// Currency.
+    pub currency: Currency,
+    /// Related order id (optional).
+    pub order_id: Option<String>,
+}
+
+/// Fees report response.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FeesReportResponse {
+    /// Fee entries.
+    pub entries: Vec<FeeEntry>,
+    /// Total count.
+    pub total_count: u64,
+    /// Summary by fee type.
+    pub by_type: Vec<FeeTypeSummary>,
+}
+
+/// Fee type summary.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FeeTypeSummary {
+    /// Fee type.
+    pub fee_type: String,
+    /// Total amount.
+    pub total_amount: f64,
+    /// Count.
+    pub count: u64,
+}
+
+/// Portfolio value chart point (equity curve).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct EquityPoint {
+    /// Timestamp (Unix nanos).
+    pub ts_event: UnixNanos,
+    /// Human-readable date.
+    pub date: String,
+    /// Equity value.
+    pub equity: f64,
+    /// Cash.
+    pub cash: f64,
+    /// Positions value.
+    pub positions_value: f64,
+    /// Unrealized PnL.
+    pub unrealized_pnl: f64,
+    /// Realized PnL.
+    pub realized_pnl: f64,
+    /// Drawdown from peak.
+    pub drawdown: f64,
+    /// Drawdown percentage.
+    pub drawdown_pct: f64,
+}
+
+/// Portfolio value chart response.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PortfolioValueChartResponse {
+    /// Equity curve points.
+    pub points: Vec<EquityPoint>,
+    /// Summary metrics.
+    pub summary: EquityCurveSummary,
+}
+
+/// Equity curve summary.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct EquityCurveSummary {
+    /// Starting equity.
+    pub start_equity: f64,
+    /// Ending equity.
+    pub end_equity: f64,
+    /// Total return.
+    pub total_return: f64,
+    /// Total return percentage.
+    pub total_return_pct: f64,
+    /// Max drawdown.
+    pub max_drawdown: f64,
+    /// Max drawdown percentage.
+    pub max_drawdown_pct: f64,
+    /// Sharpe ratio (if available).
+    pub sharpe: Option<f64>,
+}
+
+/// Fill entry (fill-level detail for an order).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FillEntry {
+    /// Fill id.
+    pub id: String,
+    /// Order id.
+    pub order_id: String,
+    /// Timestamp (Unix nanos).
+    pub ts_event: UnixNanos,
+    /// Human-readable date.
+    pub date: String,
+    /// Instrument.
+    pub instrument: String,
+    /// Side.
+    pub side: OrderSide,
+    /// Fill quantity.
+    pub quantity: f64,
+    /// Fill price.
+    pub price: f64,
+    /// Costs.
+    pub costs: f64,
+    /// Currency.
+    pub currency: Currency,
+}
+
+/// Order fills response.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct OrderFillsResponse {
+    /// Fill entries.
+    pub fills: Vec<FillEntry>,
+    /// Total count.
+    pub total_count: u64,
 }

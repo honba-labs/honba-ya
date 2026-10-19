@@ -5,7 +5,7 @@ use axum::http::{Method, Request, StatusCode};
 use honba_entities::{Currency, Instrument, InstrumentKind};
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
 use honba_messages::{Exchange, InstrumentId, UnixNanos};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 use crate::state::AppState;

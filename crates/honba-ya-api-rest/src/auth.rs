@@ -3,11 +3,11 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use axum::{
+    Router,
     extract::{Request, State},
-    http::{header::AUTHORIZATION, HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header::AUTHORIZATION},
     middleware::Next,
     response::{IntoResponse, Json, Response},
-    Router,
 };
 use honba_api::ApiResponse;
 use honba_messages::{ErrorCode, ErrorDetail, ResponseEnvelope};

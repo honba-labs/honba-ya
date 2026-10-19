@@ -21,10 +21,10 @@ pub use bar_fill::{BarFillEngine, FillCosts, FillCostsError};
 pub use cost::ScheduleFillCost;
 pub use fill_model::{FillModel, NoSlippage, SlippageKind, SlippageModel};
 pub use l2::{L2Book, L2Sim};
-pub use latency::{depth_survival_discount, LatencyModel, NoLatency, SeededLatency};
+pub use latency::{LatencyModel, NoLatency, SeededLatency, depth_survival_discount};
 pub use lot::{lot_aligned_size, split_order};
 pub use margin::{
-    default_session_close_ts, is_intraday, square_off_order, MarginQuery, MisPositions,
+    MarginQuery, MisPositions, default_session_close_ts, is_intraday, square_off_order,
 };
 pub use next_open::{FillCostFn, NextOpenSim};
 pub use paper::{OrderLedger, PaperExecution};

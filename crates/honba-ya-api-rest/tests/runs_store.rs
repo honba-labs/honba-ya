@@ -254,10 +254,12 @@ fn journal_reads_are_a_prefix_of_complete_records() {
     let m = submit_backtest(&store, 1);
     let id = m.run_id.as_str();
     // Pending, nothing written yet: empty, not an error.
-    assert!(store
-        .read_journal(id, RunKind::Backtest)
-        .unwrap()
-        .is_empty());
+    assert!(
+        store
+            .read_journal(id, RunKind::Backtest)
+            .unwrap()
+            .is_empty()
+    );
 
     store.transition(&m.run_id, |m, at| m.start(at)).unwrap();
     let mut j = store.open_journal(&m.run_id).unwrap();
@@ -446,9 +448,11 @@ fn cancel_running_cancels_a_run_that_outlived_the_grace() {
     assert_eq!(m.status, RunStatus::Cancelled);
     assert_eq!(m.finished_at.as_deref(), Some("2026-10-08T00:00:10.000Z"));
     // The late worker cannot overwrite it.
-    assert!(store
-        .transition(&running.run_id, |m, at| {
-            m.complete_backtest(metrics(), json!({}), at)
-        })
-        .is_err());
+    assert!(
+        store
+            .transition(&running.run_id, |m, at| {
+                m.complete_backtest(metrics(), json!({}), at)
+            })
+            .is_err()
+    );
 }

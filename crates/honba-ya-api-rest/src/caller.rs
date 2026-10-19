@@ -6,8 +6,8 @@
 //! share this extractor rather than each resolving the owner their own way (ADR 0032 §1).
 
 use axum::extract::FromRequestParts;
-use axum::http::request::Parts;
 use axum::http::StatusCode;
+use axum::http::request::Parts;
 use axum::response::Response;
 use honba_messages::{ErrorCode, ErrorDetail};
 

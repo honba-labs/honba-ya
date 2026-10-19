@@ -6,9 +6,7 @@
 //! - Declared exchange holidays (Republic Day, Diwali, Independence Day, etc.)
 //! - Special trading sessions such as annual Diwali **Muhurat trading** (18:15 to 19:15 IST)
 
-use chrono::{
-    DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveTime, Utc, Weekday,
-};
+use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveTime, Utc, Weekday};
 use std::collections::HashSet;
 
 /// Session window on a trading date.
