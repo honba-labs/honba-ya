@@ -287,6 +287,8 @@ pub const ROUTE_SCOPES: &[(&str, &str, RouteScope)] = &[
         "/approval/reject",
         RouteScope::Required("write:orders"),
     ),
+    ("GET", "/ws", RouteScope::Public),
+    ("GET", "/ws/market", RouteScope::Public),
 ];
 
 /// The scope required for a concrete request, or `None` when the route is not in

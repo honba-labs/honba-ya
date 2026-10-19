@@ -39,7 +39,7 @@ futures = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 uuid = { version = "1", features = ["v4", "serde"] }
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
 clap = { version = "4", features = ["derive"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "postgres", "chrono"] }
 schemars = { version = "0.8", features = ["derive"] }

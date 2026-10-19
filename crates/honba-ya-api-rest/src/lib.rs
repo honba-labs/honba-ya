@@ -58,6 +58,7 @@ mod streams;
 mod trades;
 mod trading_state;
 mod user_doc;
+pub mod ws;
 
 use crate::reports::{
     get_concentration_risk, get_equity_curve, get_fees_report, get_ledger, get_order_fills,
@@ -91,6 +92,7 @@ pub use service::{
 };
 pub use state::AppState;
 pub use streams::get_backtest_events;
+pub use ws::ws_handler;
 
 /// JSON body extractor whose rejections are the standard error envelope
 /// (`validation_invalid_request`) rather than axum's plain-text message.
@@ -239,6 +241,8 @@ pub fn api_router_with_config(state: AppState, config: &ApiConfig) -> Router {
         .route("/approval/reject", post(orders::post_reject_order))
         .route("/screener/scan", get(screener::get_screener_scan))
         .route("/journals/:id", get(runs::get_journal_by_id))
+        .route("/ws", get(ws_handler))
+        .route("/ws/market", get(ws_handler))
         .fallback(unknown_route)
         .method_not_allowed_fallback(unsupported_method)
         .with_state(state)

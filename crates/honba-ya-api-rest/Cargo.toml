@@ -29,7 +29,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-axum = "0.7"
+axum.workspace = true
 tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["trace", "cors", "compression-gzip"] }
 tracing.workspace = true
@@ -53,3 +53,4 @@ arrow.workspace = true
 parquet.workspace = true
 tempfile = "3"
 honba-testing.workspace = true
+tokio-tungstenite = "0.24"
