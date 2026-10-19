@@ -66,7 +66,7 @@ enum Commands {
         #[arg(long)]
         data_dir: PathBuf,
         /// Address to listen on
-        #[arg(long, default_value = "127.0.0.1:8080")]
+        #[arg(long, default_value = "127.0.0.1:8000")]
         addr: SocketAddr,
         /// Allow this browser origin to read the API (CORS); repeatable. Default: none
         #[arg(long = "cors-origin")]

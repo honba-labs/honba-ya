@@ -101,7 +101,7 @@ fn serve_defaults_to_loopback_and_needs_a_data_dir() {
         } => {
             assert!(cors_origin.is_empty());
             assert_eq!(data_dir, PathBuf::from("bars"));
-            assert_eq!(addr, "127.0.0.1:8080".parse().unwrap());
+            assert_eq!(addr, "127.0.0.1:8000".parse().unwrap());
         }
         _ => panic!("expected serve"),
     }
