@@ -294,6 +294,11 @@ impl Drop for TempDir {
 }
 
 fn write_parquet(path: &Path, count: u64) {
+    write_parquet_from(path, 0, count);
+}
+
+/// Writes `count` one-minute bars starting `start` minutes after `T0`.
+fn write_parquet_from(path: &Path, start: u64, count: u64) {
     let schema = Arc::new(bar_schema());
     let col = |f: &dyn Fn(f64) -> f64| -> ArrayRef {
         Arc::new(Float64Array::from(
@@ -302,7 +307,7 @@ fn write_parquet(path: &Path, count: u64) {
     };
     let columns: Vec<ArrayRef> = vec![
         Arc::new(Int64Array::from(
-            (0..count)
+            (start..start + count)
                 .map(|i| (T0 + i * MINUTE) as i64)
                 .collect::<Vec<_>>(),
         )),
@@ -337,6 +342,46 @@ async fn a_parquet_data_directory_serves_instruments_and_bars() {
         vec![(T0 + 2 * MINUTE).to_string(), (T0 + 3 * MINUTE).to_string()]
     );
     assert_eq!(body["data"]["bars"][0]["close"], 103.0);
+}
+
+#[tokio::test]
+async fn a_catalog_data_directory_serves_every_timeframe() {
+    let dir = TempDir::new("catalog");
+    let part = |tf: &str, symbol: &str, name: &str| {
+        let d = dir.0.join("catalog").join(tf).join("NSE").join(symbol);
+        std::fs::create_dir_all(&d).unwrap();
+        d.join(name)
+    };
+    // Two partitions overlapping by one bar; the overlap is dropped, not an error.
+    write_parquet_from(&part("1D", "TCS", "2024.parquet"), 0, 3);
+    write_parquet_from(&part("1D", "TCS", "2025.parquet"), 2, 2);
+    write_parquet_from(&part("5M", "INFY", "2025.parquet"), 0, 2);
+    assert!(AppState::has_catalog(&dir.0));
+    let app = api_router_with(AppState::from_catalog_dir(&dir.0).unwrap());
+
+    let (status, body) = get(app.clone(), "/instruments").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(ids(&body), vec!["INFY.NSE", "TCS.NSE"]);
+
+    let (status, body) = get(app.clone(), "/bars/TCS.NSE?tf=1d").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        unix_nanos(&body),
+        (0..4)
+            .map(|i| (T0 + i * MINUTE).to_string())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        body["data"]["bars"][0]["bar_type"]["spec"]["aggregation"],
+        "day"
+    );
+
+    let (status, body) = get(app.clone(), "/bars/INFY.NSE?tf=5m").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(unix_nanos(&body).len(), 2);
+
+    let (_, body) = get(app.clone(), "/bars/TCS.NSE?tf=5m").await;
+    assert_eq!(body["error"]["code"], "market_data_unavailable");
 }
 
 fn quote_ids(body: &Value) -> Vec<String> {

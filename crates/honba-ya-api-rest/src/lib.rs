@@ -33,6 +33,7 @@ mod approval;
 mod auth;
 mod bar_pump;
 mod caller;
+mod catalog;
 mod dispatch;
 mod exec;
 mod executor;
@@ -71,6 +72,7 @@ pub use auth::{
     unscoped_routes,
 };
 pub use bar_pump::BarPumpReport;
+pub use catalog::{CATALOG_DIR, CatalogBars, CatalogLoadError, load_catalog};
 pub use dispatch::{DispatchError, build_target, dispatch, dispatch_stream};
 pub use exec::ExecutionVenue;
 pub use executor::BacktestExecutor;

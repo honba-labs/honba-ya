@@ -62,7 +62,8 @@ enum Commands {
     },
     /// Serve the REST API over a directory of Parquet bar files
     Serve {
-        /// Directory holding the Parquet bar files
+        /// Data directory: a `honba-data` root holding `catalog/{TF}/{EXCHANGE}/{SYMBOL}/*.parquet`,
+        /// or else a flat directory of `SYMBOL.EXCHANGE.parquet` (one-minute) bar files
         #[arg(long)]
         data_dir: PathBuf,
         /// Address to listen on

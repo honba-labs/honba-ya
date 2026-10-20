@@ -259,7 +259,14 @@ pub fn run(
         }
     }
 
-    let mut state = AppState::from_parquet_dir(data_dir)
+    // A `honba-data` root (with a `catalog/` tree) serves the catalog at every timeframe it
+    // holds; otherwise the directory is a flat set of `SYMBOL.EXCHANGE.parquet` files.
+    let state = if AppState::has_catalog(data_dir) {
+        AppState::from_catalog_dir(data_dir).map_err(anyhow::Error::from)
+    } else {
+        AppState::from_parquet_dir(data_dir).map_err(anyhow::Error::from)
+    };
+    let mut state = state
         .with_context(|| format!("loading data directory {}", data_dir.display()))?
         .with_trading_state(trading_state)
         .with_risk_limits(risk_limits)

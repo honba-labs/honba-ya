@@ -292,6 +292,26 @@ impl AppState {
     pub fn from_parquet_dir(dir: &Path) -> Result<Self, ReaderError> {
         DatasetReader::from_parquet_dir(dir).map(Self::from_reader)
     }
+
+    /// Creates state serving the `honba-data` bar catalog under `root`
+    /// (`{root}/catalog/{TF}/{EXCHANGE}/{SYMBOL}/*.parquet`), every timeframe it holds.
+    ///
+    /// Bars come from [`CatalogBars`](crate::catalog::CatalogBars); instruments, quotes and
+    /// depth from each instrument's most recent slice, with `quotes` a [`LiveQuoteStore`] over
+    /// it as in [`AppState::from_reader`]. Blocks on I/O; call it once at start-up.
+    pub fn from_catalog_dir(root: &Path) -> Result<Self, crate::CatalogLoadError> {
+        let (bars, listing) = crate::catalog::load_catalog(root)?;
+        let listing = Arc::new(listing);
+        let live = Arc::new(LiveQuoteStore::new(listing.clone()));
+        let mut state = Self::new(listing.clone(), Arc::new(bars), live.clone(), listing);
+        state.live = Some(live);
+        Ok(state)
+    }
+
+    /// Whether `root` holds a `honba-data` bar catalog ([`AppState::from_catalog_dir`]).
+    pub fn has_catalog(root: &Path) -> bool {
+        root.join(crate::catalog::CATALOG_DIR).is_dir()
+    }
 }
 
 impl Default for AppState {
