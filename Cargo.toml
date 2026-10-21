@@ -4,6 +4,7 @@ members = [
   "crates/honba-ya-actors",
   "crates/honba-ya-api",
   "crates/honba-ya-backtest",
+  "crates/honba-ya-cli",
   "crates/honba-ya-config",
   "crates/honba-ya-persistence",
   "crates/honba-ya-testing",
