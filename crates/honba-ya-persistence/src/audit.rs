@@ -244,6 +244,57 @@ impl SqliteAuditLedger {
         Ok(row.get(0))
     }
 
+    /// Persist a structured risk breach event (`risk_breach`).
+    pub async fn record_risk_breach_event(
+        &self,
+        event: &crate::messages::RiskBreachEvent,
+    ) -> Result<i64, AuditError> {
+        let ts_ms = event.ts.timestamp_millis();
+        let ts_utc = event.ts.to_rfc3339();
+        let price_str = event.requested_price.map(|p| p.0.to_string());
+        let side_str = "NONE".to_string();
+        let order_type_str = "breach".to_string();
+
+        let metadata = serde_json::json!({
+            "refusal_reason": event.refusal_reason,
+            "rule_code": event.rule_code,
+            "requested_qty": event.requested_qty.map(|q| q.0.to_string()),
+            "requested_price": price_str,
+        });
+
+        let row = sqlx::query(
+            r#"
+            INSERT INTO sebi_audit_ledger (
+                timestamp_ms, timestamp_utc, event_type, algo_id, client_id,
+                correlation_id, client_order_id, broker_order_id, exchange_order_id,
+                instrument, side, order_type, quantity, price, status, refusal_reason,
+                latency_us, metadata_json
+            ) VALUES (
+                ?1, ?2, 'risk_breach', ?3, 'system',
+                ?4, NULL, NULL, NULL,
+                ?5, ?6, ?7, ?8, ?9, 'breach', ?10,
+                ?11, ?12
+            ) RETURNING id;
+            "#,
+        )
+        .bind(ts_ms)
+        .bind(ts_utc)
+        .bind(&event.algo_id)
+        .bind(Uuid::new_v4().to_string())
+        .bind(event.instrument.to_string())
+        .bind(side_str)
+        .bind(order_type_str)
+        .bind(event.requested_qty.map(|q| q.0.to_string()).unwrap_or_default())
+        .bind(price_str)
+        .bind(&event.refusal_reason)
+        .bind(event.eval_duration_us as i64)
+        .bind(serde_json::to_string(&metadata).ok())
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(row.get(0))
+    }
+
     /// Persist a broker acknowledgement (`broker_ack`).
     pub async fn record_broker_ack(
         &self,
