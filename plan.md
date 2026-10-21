@@ -415,6 +415,10 @@ honba trading-state halt --reason "High OTR breach observed"
   - [ ] Inject synthetic spread/slippage shocks (1.5x, 2.0x, 3.0x) and gap-down scenarios.
 - [ ] **5.6 Closed-Loop AI Refinement Integration**
   - [ ] Interface with `honba-nou` AI Strategy Enhancer loop to ingest diagnostic reports and apply prompt-driven parameter/rule mutations.
+- [ ] **5.7 StockSharp Odysseus Genetic Generation Backend Runner**
+  - [ ] Implement Rayon-accelerated parallel evaluator for Odysseus candidate rule trees against historical tick/bar streams.
+  - [ ] High-throughput simulation pipeline evaluating up to 1,000 rule tree genomes per second across pinned OS threads.
+  - [ ] Support L2 order book depth simulation (queue position, market depth depletion, latency jitter) for StockSharp market-making and quoting strategies.
 
 ### Phase 6: REST API Hardening, JWT Auth & OpenAPI (M5) — Week 11–12
 - [ ] **6.1 REST API Type Modernization**
