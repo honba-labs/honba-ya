@@ -255,6 +255,13 @@ impl ExecutionActor {
                     let _ = reply_to.send(res_converted);
                 }
 
+                ExecutionMsg::RiskBreachEvent(event) => {
+                    // Persist risk breach event to SEBI audit ledger
+                    if let Some(ref audit) = self.audit_ledger {
+                        let _ = audit.record_risk_breach_event(&event).await;
+                    }
+                }
+
                 ExecutionMsg::Shutdown => {
                     info!("ExecutionActor received shutdown signal");
                     self.status = ActorStatus::Draining;

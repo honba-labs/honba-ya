@@ -10,7 +10,7 @@ use std::time::Instant;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{info, warn};
 
-use crate::messages::{ActorStatus, ExecutionMsg, RiskMsg};
+use crate::messages::{ActorStatus, ExecutionMsg, RiskBreachEvent, RiskMsg};
 use crate::metrics::MetricsCollector;
 use crate::tracing_spans::{span_filled, span_risk_evaluated};
 
@@ -99,6 +99,18 @@ impl RiskActor {
                             "Pre-trade risk gate rejected order"
                         );
 
+                        // Emit structured RiskBreachEvent for persistence audit stream
+                        let breach_event = RiskBreachEvent {
+                            ts: now,
+                            algo_id: request.algo_id.clone(),
+                            instrument: request.instrument.clone(),
+                            refusal_reason: refusal.to_string(),
+                            rule_code: refusal.rule(),
+                            eval_duration_us,
+                            requested_qty: Some(request.quantity),
+                            requested_price: request.order_type.limit_price(),
+                        };
+
                         // Export Prometheus telemetry
                         if let Some(ref m) = self.metrics {
                             m.record_risk_evaluation(
@@ -121,6 +133,11 @@ impl RiskActor {
                         }
 
                         let _ = reply_to.send(Err(BrokerError::RiskRefusal(refusal)));
+                        // Emit breach event to audit stream after reply
+                        let _ = self
+                            .execution_tx
+                            .send(crate::messages::ExecutionMsg::RiskBreachEvent(breach_event))
+                            .await;
                         continue;
                     }
 

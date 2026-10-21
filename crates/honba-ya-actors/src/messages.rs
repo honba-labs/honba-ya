@@ -1,7 +1,7 @@
 //! Message contracts and types for actor communications.
 
 use chrono::{DateTime, Utc};
-use honba_core::{Bar, FillReport, InstrumentId, Money, OrderAck, OrderRequest, OrderStatus, Tick};
+use honba_core::{Bar, FillReport, InstrumentId, Money, OrderAck, OrderRequest, OrderStatus, Price, Quantity, Tick};
 use honba_portfolio::CorporateAction;
 use honba_portfolio::TaxSummary;
 use rust_decimal::Decimal;
@@ -112,6 +112,30 @@ pub enum RiskMsg {
     Shutdown,
 }
 
+/// Structured risk breach event emitted for persistence audit stream.
+///
+/// Emitted synchronously when `RiskEngine` refuses an order, providing
+/// an immutable record for SEBI regulatory audit and post-trade analysis.
+#[derive(Debug, Clone)]
+pub struct RiskBreachEvent {
+    /// Timestamp of the breach
+    pub ts: DateTime<Utc>,
+    /// Algo ID associated with the breach
+    pub algo_id: String,
+    /// Instrument being traded
+    pub instrument: InstrumentId,
+    /// Refusal reason from the risk engine
+    pub refusal_reason: String,
+    /// Regulatory rule code (e.g., "freeze_limit_exceeded", "price_band_violation")
+    pub rule_code: &'static str,
+    /// Evaluation latency in microseconds
+    pub eval_duration_us: u64,
+    /// Requested order quantity
+    pub requested_qty: Option<Quantity>,
+    /// Requested order price limit
+    pub requested_price: Option<Price>,
+}
+
 /// Commands and queries dispatched to the `ExecutionActor`.
 #[derive(Debug)]
 pub enum ExecutionMsg {
@@ -138,6 +162,8 @@ pub enum ExecutionMsg {
         /// Channel returning order status
         reply_to: oneshot::Sender<Result<OrderStatus, BrokerError>>,
     },
+    /// Risk breach event emitted from RiskActor for audit stream persistence.
+    RiskBreachEvent(RiskBreachEvent),
     /// Request actor shutdown.
     Shutdown,
 }

@@ -12,7 +12,7 @@ name = "honba_actors"
 
 [dependencies]
 honba-core.workspace = true
-# honba-mon.workspace = true  # Disabled due to pre-existing compilation issues
+honba-mon.workspace = true
 honba-ya-persistence.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
