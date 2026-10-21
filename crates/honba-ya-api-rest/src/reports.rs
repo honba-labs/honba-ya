@@ -388,10 +388,7 @@ pub async fn get_portfolio_snapshots(
     // In production, this would read from a dedicated snapshots table
     let mut snapshots = Vec::new();
     let mut equity = 10_00_000.0; // Base equity
-    let mut cash = 2_00_000.0;
-    let mut positions_val = 8_00_000.0;
     let mut realized_pnl = 0.0;
-    let mut unrealized_pnl = 0.0;
 
     // Use trade timestamps to create snapshots
     let mut trade_times: Vec<_> = document.trades.iter().map(|t| t.ts_event()).collect();
@@ -402,10 +399,11 @@ pub async fn get_portfolio_snapshots(
         let seed = ts.as_u64().wrapping_add(i as u64 * 12345);
         let day_change = (pseudo_random(seed) - 0.5) * 20_000.0;
         equity += day_change + 500.0; // Slight upward drift
-        positions_val = equity * 0.8;
-        cash = equity * 0.2;
+        // Per-day derived allocation (cash 20%, positions 80% of equity).
+        let cash = equity * 0.2;
+        let positions_val = equity * 0.8;
         let seed2 = seed.wrapping_add(98765);
-        unrealized_pnl = (pseudo_random(seed2) - 0.5) * 50_000.0;
+        let unrealized_pnl = (pseudo_random(seed2) - 0.5) * 50_000.0;
         let seed3 = seed2.wrapping_add(54321);
         realized_pnl += (pseudo_random(seed3) - 0.3) * 1_000.0;
 
@@ -778,10 +776,7 @@ pub async fn get_equity_curve(
 
     let mut points = Vec::new();
     let mut equity = 10_00_000.0;
-    let mut cash = 2_00_000.0;
-    let mut positions_val = 8_00_000.0;
     let mut realized_pnl = 0.0;
-    let mut unrealized_pnl = 0.0;
     let mut peak = equity;
 
     let mut trade_times: Vec<_> = document.trades.iter().map(|t| t.ts_event()).collect();
@@ -793,10 +788,11 @@ pub async fn get_equity_curve(
         let day_change = (pseudo_random(seed) - 0.5) * 20_000.0;
         equity += day_change + 500.0;
         peak = peak.max(equity);
-        positions_val = equity * 0.8;
-        cash = equity * 0.2;
+        // Per-day derived allocation (cash 20%, positions 80% of equity).
+        let cash = equity * 0.2;
+        let positions_val = equity * 0.8;
         let seed2 = seed.wrapping_add(98765);
-        unrealized_pnl = (pseudo_random(seed2) - 0.5) * 50_000.0;
+        let unrealized_pnl = (pseudo_random(seed2) - 0.5) * 50_000.0;
         let seed3 = seed2.wrapping_add(54321);
         realized_pnl += (pseudo_random(seed3) - 0.3) * 1_000.0;
 
