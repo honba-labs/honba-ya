@@ -12,9 +12,7 @@ name = "honba_actors"
 
 [dependencies]
 honba-core.workspace = true
-honba-mon.workspace = true
-honba-me-core.workspace = true
-honba-te-core.workspace = true
+# honba-mon.workspace = true  # Disabled due to pre-existing compilation issues
 honba-ya-persistence.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
@@ -28,6 +26,9 @@ serde_json.workspace = true
 uuid.workspace = true
 prometheus.workspace = true
 axum.workspace = true
+honba-kokoro-portfolio = { path = "../../../honba-kokoro/crates/honba-kokoro-portfolio" }
+honba-kokoro-ledger = { path = "../../../honba-kokoro/crates/honba-kokoro-ledger" }
+honba-kokoro-oms = { path = "../../../honba-kokoro/crates/honba-kokoro-oms" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }

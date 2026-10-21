@@ -1,13 +1,39 @@
 //! Market data actor for ingesting, normalizing, and broadcasting live feeds.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
 
 use honba_core::{Bar, InstrumentId, Tick};
-use honba_me_core::SymbolMapper;
 
 use crate::messages::{ActorStatus, MarketDataMsg, StrategyMsg};
+
+/// Minimal symbol mapper for broker token normalization.
+#[derive(Debug, Default)]
+pub struct SymbolMapper {
+    token_to_instrument: HashMap<String, InstrumentId>,
+    instrument_to_token: HashMap<InstrumentId, String>,
+}
+
+impl SymbolMapper {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn map_token(&self, token: &str) -> Option<InstrumentId> {
+        self.token_to_instrument.get(token).cloned()
+    }
+
+    pub fn map_instrument(&self, instrument: &InstrumentId) -> Option<String> {
+        self.instrument_to_token.get(instrument).cloned()
+    }
+
+    pub fn register(&mut self, instrument: InstrumentId, token: String) {
+        let token_clone = token.clone();
+        self.token_to_instrument.insert(token, instrument.clone());
+        self.instrument_to_token.insert(instrument, token_clone);
+    }
+}
 
 /// Market data ingestion actor.
 pub struct MarketDataActor {

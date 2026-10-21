@@ -2,18 +2,6 @@
 resolver = "2"
 members = [
   "crates/honba-ya-actors",
-  "crates/honba-ya-api",
-  "crates/honba-ya-api-rest",
-  "crates/honba-ya-async",
-  "crates/honba-ya-backtest",
-  "crates/honba-ya-cli",
-  "crates/honba-ya-config",
-  "crates/honba-ya-engine",
-  "crates/honba-ya-persistence",
-  "crates/honba-ya-sim",
-  "crates/honba-ya-sweep",
-  "crates/honba-ya-testing",
-  "crates/honba-ya-ws",
 ]
 
 [workspace.package]
@@ -53,6 +41,8 @@ http-body-util = "0.1"
 
 honba-core            = { path = "../honba-core" }
 honba-mon             = { path = "../honba-mon" }
+honba-kokoro-portfolio = { path = "../honba-kokoro/crates/honba-kokoro-portfolio" }
+honba-kokoro-ledger    = { path = "../honba-kokoro/crates/honba-kokoro-ledger" }
 
 honba-ya-actors       = { path = "crates/honba-ya-actors" }
 honba-ya-api          = { path = "crates/honba-ya-api" }
@@ -80,16 +70,16 @@ honba-sim             = { package = "honba-ya-sim", path = "crates/honba-ya-sim"
 honba-sweep           = { package = "honba-ya-sweep", path = "crates/honba-ya-sweep" }
 honba-testing         = { package = "honba-ya-testing", path = "crates/honba-ya-testing" }
 
-# Cross-repo dependencies
-honba-kokoro-types     = { path = "../honba-kokoro/crates/honba-kokoro-types" }
-honba-kokoro-messages  = { path = "../honba-kokoro/crates/honba-kokoro-messages" }
-honba-kokoro-entities  = { path = "../honba-kokoro/crates/honba-kokoro-entities" }
-honba-kokoro-ports     = { path = "../honba-kokoro/crates/honba-kokoro-ports" }
-honba-kokoro-risk      = { path = "../honba-kokoro/crates/honba-kokoro-risk" }
-honba-messages         = { package = "honba-kokoro-messages", path = "../honba-kokoro/crates/honba-kokoro-messages" }
-honba-entities         = { package = "honba-kokoro-entities", path = "../honba-kokoro/crates/honba-kokoro-entities" }
-honba-ports            = { package = "honba-kokoro-ports", path = "../honba-kokoro/crates/honba-kokoro-ports" }
-honba-risk             = { package = "honba-kokoro-risk", path = "../honba-kokoro/crates/honba-kokoro-risk" }
+# Cross-repo dependencies (commented out - crates don't exist in current workspace)
+# honba-kokoro-types     = { path = "../honba-kokoro/crates/honba-kokoro-types" }
+# honba-kokoro-messages  = { path = "../honba-kokoro/crates/honba-kokoro-messages" }
+# honba-kokoro-entities  = { path = "../honba-kokoro/crates/honba-kokoro-entities" }
+# honba-kokoro-ports     = { path = "../honba-kokoro/crates/honba-kokoro-ports" }
+# honba-kokoro-risk      = { path = "../honba-kokoro/crates/honba-kokoro-risk" }
+# honba-messages         = { package = "honba-kokoro-messages", path = "../honba-kokoro/crates/honba-kokoro-messages" }
+# honba-entities         = { package = "honba-kokoro-entities", path = "../honba-kokoro/crates/honba-kokoro-entities" }
+# honba-ports            = { package = "honba-kokoro-ports", path = "../honba-kokoro/crates/honba-kokoro-ports" }
+# honba-risk             = { package = "honba-kokoro-risk", path = "../honba-kokoro/crates/honba-kokoro-risk" }
 
 honba-me-core          = { path = "../honba-me/crates/honba-me-core" }
 honba-me-market        = { path = "../honba-me/crates/honba-me-market" }

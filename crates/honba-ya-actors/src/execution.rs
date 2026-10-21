@@ -1,12 +1,42 @@
 //! Execution actor managing broker order placement, status queries, retries, and fills.
 
+use chrono::Utc;
+use honba_core::{OrderAck, OrderStatus};
+use honba_kokoro_oms::{OrderStateMachine, OrderState, TransitionError};
 use honba_persistence::SqliteAuditLedger;
-use honba_te_core::BrokerExecutor;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::info;
 use uuid::Uuid;
+
+/// Minimal broker error type for execution actor.
+#[derive(Debug, thiserror::Error)]
+pub enum BrokerError {
+    #[error("auth failure: {0}")]
+    Auth(String),
+    #[error("order rejected by broker: {0}")]
+    Rejected(String),
+    #[error("network or transport error: {0}")]
+    Transport(String),
+    #[error("broker request timeout")]
+    Timeout,
+    #[error("order not found: {0}")]
+    OrderNotFound(String),
+    #[error("invalid request or parameters: {0}")]
+    InvalidRequest(String),
+    #[error("other: {0}")]
+    Other(String),
+}
+
+/// Minimal broker executor trait.
+#[async_trait::async_trait]
+pub trait BrokerExecutor: Send + Sync {
+    fn name(&self) -> &str;
+    async fn place_order(&self, req: honba_core::OrderRequest) -> Result<honba_core::OrderAck, BrokerError>;
+    async fn cancel_order(&self, order_id: &str) -> Result<(), BrokerError>;
+    async fn get_order_status(&self, order_id: &str) -> Result<honba_core::OrderStatus, BrokerError>;
+}
 
 use crate::messages::{ActorStatus, ExecutionMsg, RiskMsg, StrategyMsg};
 use crate::metrics::MetricsCollector;
@@ -22,6 +52,8 @@ pub struct ExecutionActor {
     status: ActorStatus,
     metrics: Option<Arc<MetricsCollector>>,
     audit_ledger: Option<Arc<SqliteAuditLedger>>,
+    /// Optional OMS for idempotency and fill reconciliation
+    oms: Option<OrderStateMachine>,
 }
 
 impl ExecutionActor {
@@ -40,6 +72,7 @@ impl ExecutionActor {
             status: ActorStatus::Starting,
             metrics: None,
             audit_ledger: None,
+            oms: None,
         }
     }
 
@@ -52,6 +85,12 @@ impl ExecutionActor {
     /// Attach SEBI SQLite audit ledger.
     pub fn with_audit_ledger(mut self, audit_ledger: Arc<SqliteAuditLedger>) -> Self {
         self.audit_ledger = Some(audit_ledger);
+        self
+    }
+
+    /// Attach Order State Machine for idempotency and fill reconciliation.
+    pub fn with_oms(mut self, oms: OrderStateMachine) -> Self {
+        self.oms = Some(oms);
         self
     }
 
@@ -68,6 +107,24 @@ impl ExecutionActor {
         while let Some(msg) = self.rx.recv().await {
             match msg {
                 ExecutionMsg::ExecuteOrder { request, reply_to } => {
+                    // 0. OMS: Check idempotency and register order
+                    if let Some(ref mut oms) = self.oms {
+                        let client_order_id_str = request.client_order_id.to_string();
+                        // Check if client_order_id is already registered
+                        if let Err(e) = oms.check_idempotency(&client_order_id_str) {
+                            let _ = reply_to.send(Err(crate::messages::BrokerError::Other(
+                                format!("Idempotency check failed: {}", e)
+                            )));
+                            continue;
+                        }
+                        // Register the order in the OMS
+                        oms.register_order(
+                            client_order_id_str,
+                            OrderState::PendingNew,
+                            Utc::now(),
+                        );
+                    }
+
                     // 1. Structured tracing span: BrokerSubmitted
                     let submit_span = span_broker_submitted(&request, self.broker.name());
                     let _enter = submit_span.enter();
@@ -103,6 +160,15 @@ impl ExecutionActor {
                                     .record_broker_ack(&request, ack, dispatch_duration_us)
                                     .await;
                             }
+
+                            // OMS: Process the successful ack as a fill (for now, just mark as New)
+                            if let Some(ref mut oms) = self.oms {
+                                let client_order_id_str = request.client_order_id.to_string();
+                                // When broker acks, order transitions to New
+                                if let Some(state) = oms.get_state(&client_order_id_str).cloned() {
+                                    let _ = OrderState::transition(state, OrderState::New);
+                                }
+                            }
                         }
                         Err(_e) => {
                             if let Some(ref m) = self.metrics {
@@ -113,10 +179,22 @@ impl ExecutionActor {
                                     false,
                                 );
                             }
+
+                            // OMS: Mark order as rejected on broker error
+                            if let Some(ref mut oms) = self.oms {
+                                let client_order_id_str = request.client_order_id.to_string();
+                                if let Some(state) = oms.get_state(&client_order_id_str).cloned() {
+                                    let _ = OrderState::transition(state, OrderState::Rejected);
+                                }
+                            }
                         }
                     }
 
-                    let _ = reply_to.send(res);
+                    // Convert execution::BrokerError to messages::BrokerError for the reply channel
+                    let res_converted: Result<OrderAck, crate::messages::BrokerError> = res.map_err(|e| {
+                        crate::messages::BrokerError::Other(e.to_string())
+                    });
+                    let _ = reply_to.send(res_converted);
                 }
 
                 ExecutionMsg::CancelOrder {
@@ -162,12 +240,19 @@ impl ExecutionActor {
                             let _ = r_tx.send(RiskMsg::RecordCancellation { algo_id }).await;
                         }
                     }
-                    let _ = reply_to.send(res);
-                }
+                    // Convert execution::BrokerError to messages::BrokerError for the reply channel
+                        let res_converted: Result<(), crate::messages::BrokerError> = res.map_err(|e| {
+                            crate::messages::BrokerError::Other(e.to_string())
+                        });
+                        let _ = reply_to.send(res_converted);
+                    }
 
                 ExecutionMsg::QueryStatus { order_id, reply_to } => {
                     let res = self.broker.get_order_status(&order_id).await;
-                    let _ = reply_to.send(res);
+                    let res_converted: Result<OrderStatus, crate::messages::BrokerError> = res.map_err(|e| {
+                        crate::messages::BrokerError::Other(e.to_string())
+                    });
+                    let _ = reply_to.send(res_converted);
                 }
 
                 ExecutionMsg::Shutdown => {

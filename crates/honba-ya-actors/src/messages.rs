@@ -1,9 +1,30 @@
 //! Message contracts and types for actor communications.
 
 use chrono::{DateTime, Utc};
-use honba_core::{Bar, FillReport, InstrumentId, OrderAck, OrderRequest, OrderStatus, Tick};
-use honba_te_core::BrokerError;
+use honba_core::{Bar, FillReport, InstrumentId, Money, OrderAck, OrderRequest, OrderStatus, Tick};
+use honba_portfolio::CorporateAction;
+use honba_portfolio::TaxSummary;
+use rust_decimal::Decimal;
 use tokio::sync::oneshot;
+
+/// Broker execution error type.
+#[derive(Debug, thiserror::Error)]
+pub enum BrokerError {
+    #[error("auth failure: {0}")]
+    Auth(String),
+    #[error("order rejected by broker: {0}")]
+    Rejected(String),
+    #[error("network or transport error: {0}")]
+    Transport(String),
+    #[error("broker request timeout")]
+    Timeout,
+    #[error("order not found: {0}")]
+    OrderNotFound(String),
+    #[error("invalid request or parameters: {0}")]
+    InvalidRequest(String),
+    #[error("other: {0}")]
+    Other(String),
+}
 
 /// Lifecycle status of an individual actor or the entire runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,4 +140,114 @@ pub enum ExecutionMsg {
     },
     /// Request actor shutdown.
     Shutdown,
+}
+
+/// Commands and queries dispatched to the `PortfolioActor`.
+#[derive(Debug)]
+pub enum PortfolioMsg {
+    /// Process a fill report from the execution layer.
+    ProcessFill {
+        fill: FillReport,
+        reply_to: oneshot::Sender<Result<PortfolioUpdate, PortfolioError>>,
+    },
+    /// Get current portfolio snapshot.
+    GetSnapshot {
+        reply_to: oneshot::Sender<PortfolioSnapshot>,
+    },
+    /// Get tax summary for a period.
+    GetTaxSummary {
+        period_start: chrono::NaiveDate,
+        period_end: chrono::NaiveDate,
+        reply_to: oneshot::Sender<TaxSummary>,
+    },
+    /// Apply corporate actions.
+    ApplyCorporateActions {
+        actions: Vec<CorporateAction>,
+        reply_to: oneshot::Sender<()>,
+    },
+    /// Perform T+1 settlement for a date.
+    SettleTrades {
+        current_date: chrono::NaiveDate,
+        reply_to: oneshot::Sender<PortfolioSettleResult>,
+    },
+    /// Request actor shutdown.
+    Shutdown,
+}
+
+/// Result of processing a fill in the portfolio.
+#[derive(Debug, Clone)]
+pub struct PortfolioUpdate {
+    /// Updated positions after the fill
+    pub positions: std::collections::BTreeMap<String, Vec<honba_portfolio::HeldPosition>>,
+    /// Realized PnL from this fill
+    pub realized_pnl: Money,
+    /// Updated cash balance
+    pub cash: Money,
+    /// Any tax/fee breakdown
+    pub fees: FeeBreakdown,
+}
+
+/// Fee breakdown for a fill.
+#[derive(Debug, Clone)]
+pub struct FeeBreakdown {
+    pub stt: Money,
+    pub gst: Money,
+    pub stamp_duty: Money,
+    pub sebi_turnover: Money,
+    pub dp_charges: Money,
+    pub brokerage: Money,
+}
+
+impl Default for FeeBreakdown {
+    fn default() -> Self {
+        Self {
+            stt: Money::inr(Decimal::ZERO),
+            gst: Money::inr(Decimal::ZERO),
+            stamp_duty: Money::inr(Decimal::ZERO),
+            sebi_turnover: Money::inr(Decimal::ZERO),
+            dp_charges: Money::inr(Decimal::ZERO),
+            brokerage: Money::inr(Decimal::ZERO),
+        }
+    }
+}
+
+/// Portfolio snapshot for reporting.
+#[derive(Debug, Clone)]
+pub struct PortfolioSnapshot {
+    pub total_equity: Money,
+    pub cash: Money,
+    pub unrealized_pnl: Money,
+    pub realized_pnl: Money,
+    pub positions: std::collections::BTreeMap<String, Vec<honba_portfolio::HeldPosition>>,
+}
+
+/// Errors from the PortfolioActor.
+#[derive(Debug, thiserror::Error)]
+pub enum PortfolioError {
+    #[error("Instrument not found in portfolio: {0}")]
+    InstrumentNotFound(String),
+    #[error("Insufficient position for sell: {0}")]
+    InsufficientPosition(String),
+    #[error("Ledger error: {0}")]
+    LedgerError(String),
+    #[error("Tax calculation error: {0}")]
+    TaxError(String),
+    #[error("Internal error: {0}")]
+    Internal(String),
+}
+
+/// Settlement result for portfolio.
+#[derive(Debug, Clone)]
+pub struct PortfolioSettleResult {
+    pub settled_count: usize,
+    pub failed_count: usize,
+    pub cash_flow: Money,
+    pub securities_moved: Vec<InstrumentId>,
+    pub errors: Vec<String>,
+}
+
+impl PortfolioSettleResult {
+    pub fn is_successful(&self) -> bool {
+        self.failed_count == 0
+    }
 }
