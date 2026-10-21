@@ -354,6 +354,7 @@ honba trading-state halt --reason "High OTR breach observed"
   - [ ] Standardize all Cargo dependencies to canonical `honba-core`, `honba-mon`, `honba-te-core`, `honba-me-core`.
   - [ ] Fix broken relative paths (`../../../`) in `honba-ya-cli`, `honba-ya-persistence`, and `honba-ya-sim`.
   - [ ] Excise all usages of `honba-messages`, `honba-entities`, and `honba-ports`.
+  - [ ] Purge excised `honba-kokoro-risk` from `honba-ya/Cargo.toml` and migrate `honba-ya-config`, `honba-ya-actors::RiskActor`, and `honba-ya-api-rest` to `honba-mon` per [Risk Migration Plan](../honba-docs/docs/architecture/migration_plan_kokoro_risk_to_mon.md).
 - [ ] **1.2 Decimal Arithmetic Enforcement**
   - [ ] Replace remaining `f64` prices, quantities, and cash values in `honba-ya-api` and `honba-ya-cli` with `rust_decimal::Decimal`.
   - [ ] Ensure all API serialization formats support lossless decimal strings.
