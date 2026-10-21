@@ -42,6 +42,7 @@ mod ingest;
 mod journal;
 mod market;
 mod operator_journal;
+mod openapi;
 mod orders;
 mod portfolio;
 mod portfolio_store;
@@ -256,7 +257,7 @@ pub fn api_router_with_config(state: AppState, config: &ApiConfig) -> Router {
     if let Some(tokens_file) = &config.auth.tokens_file {
         let audit_log_path = config.auth.audit_log_path.clone();
         let store = FileTokenStore::new(tokens_file.clone()).expect("failed to load token file");
-        let auth_layer = Arc::new(AuthLayer::new(store, audit_log_path));
+        let auth_layer = Arc::new(AuthLayer::new(store, audit_log_path, config.auth.jwt_config.clone()));
         router.with_auth(auth_layer)
     } else {
         router
@@ -376,13 +377,10 @@ async fn get_health() -> Json<ResponseEnvelope<serde_json::Value>> {
     Json(ApiResponse::success(serde_json::json!({"status": "ok"})))
 }
 
-/// Get schema bundle.
+/// Get schema bundle — full OpenAPI 3.1 document.
 async fn get_schema() -> Json<ResponseEnvelope<serde_json::Value>> {
-    // Return basic schema info - codegen will populate full schema
-    Json(ApiResponse::success(serde_json::json!({
-        "openapi": "3.1.0",
-        "version": honba_api::API_VERSION
-    })))
+    let doc = openapi::OpenApiDocument::generate();
+    Json(ApiResponse::success(serde_json::to_value(&doc).unwrap()))
 }
 
 /// Lists the strategies compiled in this process, ordered by id.
@@ -453,7 +451,7 @@ async fn get_orders(
 }
 
 async fn post_orders(State(state): State<Arc<AppState>>, req: ApiJson<OrdersRequest>) -> Response {
-    orders::post_orders(State(state), req, honba_messages::OrderId::new("rest")).await
+    orders::post_orders(State(state), req, "rest".to_string()).await
 }
 
 async fn delete_order(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {

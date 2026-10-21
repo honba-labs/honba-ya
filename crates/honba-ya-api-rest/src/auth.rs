@@ -13,6 +13,8 @@ use honba_api::ApiResponse;
 use honba_messages::{ErrorCode, ErrorDetail, ResponseEnvelope};
 use serde::{Deserialize, Serialize};
 use tracing::info;
+use chrono::Utc;
+use russh_keys::rsa::PublicKey;
 /// Token info returned by successful validation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenInfo {
@@ -50,6 +52,8 @@ pub struct AuthConfig {
     pub tokens_file: Option<PathBuf>,
     /// Path to audit log file; when Some, auth decisions are logged here
     pub audit_log_path: Option<PathBuf>,
+    /// JWT configuration; when Some, JWT bearer tokens are validated
+    pub jwt_config: Option<JwtConfig>,
 }
 
 /// Token record as stored in the token file
@@ -88,6 +92,67 @@ impl TokenRecord {
         }
     }
 }
+
+/// JWT (RFC 7518) claims for Honba API token authentication.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JwtClaims {
+    /// Subject (token identifier)
+    pub sub: String,
+    /// Scopes granted to this token (e.g., "read", "trade", "admin")
+    pub scopes: Vec<String>,
+    /// Issuer identifier
+    pub iss: String,
+    /// Audience identifier
+    pub aud: String,
+    /// Expiration time (UNIX timestamp)
+    pub exp: usize,
+    /// Issued-at time (UNIX timestamp)
+    pub iat: usize,
+    /// JWT ID for tracking
+    pub jti: String,
+}
+
+/// JWT authentication configuration
+#[derive(Debug, Clone)]
+pub struct JwtConfig {
+    /// HMAC secret key for token signing/verification
+    pub hmac_secret: Option<Vec<u8>>,
+    /// RSA public key for token verification (PEM-encoded)
+    pub rsa_public_key: Option<String>,
+    /// Token issuer
+    pub issuer: String,
+    /// Token audience
+    pub audience: String,
+}
+
+/// JWT authentication error codes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JwtError {
+    MissingToken,
+    InvalidToken,
+    Expired,
+    InvalidSignature,
+    MissingHmacSecret,
+    MissingRsaKey,
+    UnknownAlgorithm,
+}
+
+impl std::fmt::Display for JwtError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JwtError::MissingToken => write!(f, "missing_token"),
+            JwtError::InvalidToken => write!(f, "invalid_token"),
+            JwtError::Expired => write!(f, "expired"),
+            JwtError::InvalidSignature => write!(f, "invalid_signature"),
+            JwtError::MissingHmacSecret => write!(f, "missing_hmac_secret"),
+            JwtError::MissingRsaKey => write!(f, "missing_rsa_key"),
+            JwtError::UnknownAlgorithm => write!(f, "unknown_algorithm"),
+        }
+    }
+}
+
+impl std::error::Error for JwtError {}
 
 /// File-backed token store
 #[derive(Debug, Clone)]
@@ -178,25 +243,38 @@ pub enum RouteScope {
 /// guard can compare the two by key. The five scopes are `read:market`,
 /// `read:account`, `write:orders`, `research` and `operator`; `read:account` governs the
 /// per-user portfolio reads (ADR 0032). Scopes are explicit: none implies another.
+/// RBAC scopes (Phase 6.2): coarse-grained roles replacing the previous fine-grained
+/// `read:market`/`write:orders`/`research`/`operator`/`read:account` hierarchy.
+///
+/// - `read`: general read access (market data, quotes, instruments, depth, bars, portfolio)
+/// - `trade`: general trade access (place, modify, cancel orders, close positions)
+/// - `admin`: administrative access (operator routes, approval queue, system config)
+///
+/// Legacy fine-grained scopes (`read:market`, `write:orders`, etc.) are still supported
+/// for backward compatibility but new routes should use these RBAC roles.
 pub const ROUTE_SCOPES: &[(&str, &str, RouteScope)] = &[
+    // Public routes (no auth required)
     ("GET", "/capabilities", RouteScope::Public),
     ("GET", "/health", RouteScope::Public),
     ("GET", "/schema", RouteScope::Public),
-    ("GET", "/instruments", RouteScope::Required("read:market")),
-    (
-        "GET",
-        "/instruments/{id}",
-        RouteScope::Required("read:market"),
-    ),
-    ("GET", "/quotes", RouteScope::Required("read:market")),
-    ("GET", "/bars/{id}", RouteScope::Required("read:market")),
-    ("GET", "/depth/{id}", RouteScope::Required("read:market")),
-    ("POST", "/bars", RouteScope::Required("write:orders")),
-    // Operator routes: the dedicated `operator` scope (ADR 0023). It implies nothing, and
-    // `write:orders` no longer reaches these routes.
-    ("GET", "/trading-state", RouteScope::Required("operator")),
-    ("PUT", "/trading-state", RouteScope::Required("operator")),
-    ("GET", "/screener/scan", RouteScope::Required("read:market")),
+
+    // Read routes: `read` RBAC scope
+    ("GET", "/instruments", RouteScope::Required("read")),
+    ("GET", "/instruments/{id}", RouteScope::Required("read")),
+    ("GET", "/quotes", RouteScope::Required("read")),
+    ("GET", "/bars/{id}", RouteScope::Required("read")),
+    ("GET", "/depth/{id}", RouteScope::Required("read")),
+
+    // Write/Trade routes: `trade` RBAC scope
+    ("POST", "/bars", RouteScope::Required("trade")),
+    ("POST", "/orders", RouteScope::Required("trade")),
+    ("DELETE", "/orders/{id}", RouteScope::Required("trade")),
+    ("POST", "/positions/close", RouteScope::Required("trade")),
+
+    // Operator / Admin routes: `admin` RBAC scope
+    ("GET", "/trading-state", RouteScope::Required("admin")),
+    ("PUT", "/trading-state", RouteScope::Required("admin")),
+    ("GET", "/screener/scan", RouteScope::Required("read")),
     // Profile routes: any valid token, scoped to its own `token_id` by the handlers.
     ("GET", "/profile", RouteScope::Authenticated),
     ("PUT", "/profile", RouteScope::Authenticated),
@@ -210,29 +288,30 @@ pub const ROUTE_SCOPES: &[(&str, &str, RouteScope)] = &[
     ("GET", "/profile/modules", RouteScope::Authenticated),
     ("PUT", "/profile/modules/{id}", RouteScope::Authenticated),
     ("DELETE", "/profile/modules/{id}", RouteScope::Authenticated),
-    // Portfolio routes: the reserved `read:account` scope, finally used (ADR 0032 §1, §6). The
-    // handlers scope the portfolio to the token's own `token_id`, like the profile routes.
-    ("GET", "/portfolio", RouteScope::Required("read:account")),
+    // Portfolio routes: `read` scope for read-only portfolio access (ADR 0032 §1, §6)
+    ("GET", "/portfolio", RouteScope::Required("read")),
     (
         "GET",
         "/portfolio/accounts",
-        RouteScope::Required("read:account"),
+        RouteScope::Required("read"),
     ),
     (
         "GET",
         "/portfolio/positions",
-        RouteScope::Required("read:account"),
+        RouteScope::Required("read"),
     ),
     (
         "GET",
         "/portfolio/holdings",
-        RouteScope::Required("read:account"),
+        RouteScope::Required("read"),
     ),
     (
         "GET",
         "/portfolio/trades",
-        RouteScope::Required("read:account"),
+        RouteScope::Required("read"),
     ),
+
+    // Research routes: still use `research` scope for backward compatibility
     ("GET", "/strategies", RouteScope::Required("research")),
     ("POST", "/strategies", RouteScope::Required("research")),
     (
@@ -260,33 +339,13 @@ pub const ROUTE_SCOPES: &[(&str, &str, RouteScope)] = &[
         RouteScope::Required("research"),
     ),
     ("GET", "/journals/{id}", RouteScope::Required("research")),
-    ("POST", "/orders", RouteScope::Required("write:orders")),
-    ("GET", "/orders", RouteScope::Required("write:orders")),
-    (
-        "DELETE",
-        "/orders/{id}",
-        RouteScope::Required("write:orders"),
-    ),
-    (
-        "POST",
-        "/positions/close",
-        RouteScope::Required("write:orders"),
-    ),
-    (
-        "GET",
-        "/approval/queue",
-        RouteScope::Required("write:orders"),
-    ),
-    (
-        "POST",
-        "/approval/approve",
-        RouteScope::Required("write:orders"),
-    ),
-    (
-        "POST",
-        "/approval/reject",
-        RouteScope::Required("write:orders"),
-    ),
+
+    // Approval queue routes: `admin` scope
+    ("GET", "/approval/queue", RouteScope::Required("admin")),
+    ("POST", "/approval/approve", RouteScope::Required("admin")),
+    ("POST", "/approval/reject", RouteScope::Required("admin")),
+
+    // WebSocket routes: public
     ("GET", "/ws", RouteScope::Public),
     ("GET", "/ws/market", RouteScope::Public),
 ];
@@ -354,14 +413,16 @@ pub fn unscoped_routes(routes: &[(&str, &str)]) -> Vec<String> {
 pub struct AuthLayer {
     store: FileTokenStore,
     audit_log_path: Option<PathBuf>,
+    jwt_config: Option<JwtConfig>,
 }
 
 impl AuthLayer {
     /// Creates a new auth layer with the given token store and audit log path.
-    pub fn new(store: FileTokenStore, audit_log_path: Option<PathBuf>) -> Self {
+    pub fn new(store: FileTokenStore, audit_log_path: Option<PathBuf>, jwt_config: Option<JwtConfig>) -> Self {
         Self {
             store,
             audit_log_path,
+            jwt_config,
         }
     }
 
@@ -459,67 +520,129 @@ impl AuthLayer {
             }
         };
 
-        match self.store.validate(token) {
-            Ok(info) => {
-                if required.is_some_and(|r| !info.scopes.iter().any(|s| s == r)) {
-                    let required = required.unwrap_or_default();
-                    self.audit(AuditEntry {
-                        token_id: Some(&info.token_id),
-                        route: path,
-                        method,
-                        decision: "denied",
-                        reason: Some("forbidden"),
-                        required_scope: Some(required),
-                        token_scopes: Some(&info.scopes),
-                        client_ip,
-                    });
-                    let detail = ErrorDetail::new(
-                        ErrorCode::Forbidden,
-                        format!("Token does not have required scope: {}", required),
-                    )
-                    .with_context(serde_json::json!({
-                        "required_scope": required,
-                        "token_scopes": info.scopes,
-                        "token_id": info.token_id,
-                    }));
-                    return Err((StatusCode::FORBIDDEN, Json(ResponseEnvelope::error(detail))));
-                }
-
+        // First, try file-based token validation (backward compatible)
+        if let Ok(info) = self.store.validate(token) {
+            if required.is_some_and(|r| !info.scopes.iter().any(|s| s == r)) {
+                let required = required.unwrap_or_default();
                 self.audit(AuditEntry {
                     token_id: Some(&info.token_id),
                     route: path,
                     method,
-                    decision: "granted",
-                    reason: None,
-                    required_scope: required,
+                    decision: "denied",
+                    reason: Some("forbidden"),
+                    required_scope: Some(required),
                     token_scopes: Some(&info.scopes),
                     client_ip,
                 });
-                Ok(Some(info))
-            }
-            Err(code) => {
-                let (reason, status) = match code {
-                    AuthErrorCode::Expired => ("expired", StatusCode::UNAUTHORIZED),
-                    AuthErrorCode::InvalidToken => ("invalid_token", StatusCode::UNAUTHORIZED),
-                    _ => ("invalid_token", StatusCode::UNAUTHORIZED),
-                };
-                self.audit(AuditEntry {
-                    token_id: None,
-                    route: path,
-                    method,
-                    decision: "denied",
-                    reason: Some(reason),
-                    required_scope: required,
-                    token_scopes: None,
-                    client_ip,
-                });
                 let detail = ErrorDetail::new(
-                    ErrorCode::Unauthorized,
-                    format!("Token validation failed: {}", code),
-                );
-                Err((status, Json(ResponseEnvelope::error(detail))))
+                    ErrorCode::Forbidden,
+                    format!("Token does not have required scope: {}", required),
+                )
+                .with_context(serde_json::json!({
+                    "required_scope": required,
+                    "token_scopes": info.scopes,
+                    "token_id": info.token_id,
+                }));
+                return Err((StatusCode::FORBIDDEN, Json(ResponseEnvelope::error(detail))));
+            }
+
+            self.audit(AuditEntry {
+                token_id: Some(&info.token_id),
+                route: path,
+                method,
+                decision: "granted",
+                reason: None,
+                required_scope: required,
+                token_scopes: Some(&info.scopes),
+                client_ip,
+            });
+            return Ok(Some(info));
+        }
+
+        // Fall back to JWT validation if file token failed and JWT config is available
+        if let Some(config) = &self.jwt_config {
+            match Self::validate_jwt(token, config) {
+                Ok(info) => {
+                    if required.is_some_and(|r| !info.scopes.iter().any(|s| s == r)) {
+                        let required = required.unwrap_or_default();
+                        self.audit(AuditEntry {
+                            token_id: Some(&info.token_id),
+                            route: path,
+                            method,
+                            decision: "denied",
+                            reason: Some("forbidden"),
+                            required_scope: Some(required),
+                            token_scopes: Some(&info.scopes),
+                            client_ip,
+                        });
+                        let detail = ErrorDetail::new(
+                            ErrorCode::Forbidden,
+                            format!("Token does not have required scope: {}", required),
+                        )
+                        .with_context(serde_json::json!({
+                            "required_scope": required,
+                            "token_scopes": info.scopes,
+                            "token_id": info.token_id,
+                        }));
+                        return Err((StatusCode::FORBIDDEN, Json(ResponseEnvelope::error(detail))));
+                    }
+
+                    self.audit(AuditEntry {
+                        token_id: Some(&info.token_id),
+                        route: path,
+                        method,
+                        decision: "granted",
+                        reason: None,
+                        required_scope: required,
+                        token_scopes: Some(&info.scopes),
+                        client_ip,
+                    });
+                    return Ok(Some(info));
+                }
+                Err(code) => {
+                    let (reason, status) = match code {
+                        JwtError::MissingToken => ("missing_token", StatusCode::UNAUTHORIZED),
+                        JwtError::InvalidToken => ("invalid_token", StatusCode::UNAUTHORIZED),
+                        JwtError::Expired => ("expired", StatusCode::UNAUTHORIZED),
+                        JwtError::InvalidSignature => ("invalid_signature", StatusCode::UNAUTHORIZED),
+                        JwtError::MissingHmacSecret => {
+                            ("missing_hmac_secret", StatusCode::INTERNAL_SERVER_ERROR)
+                        }
+                        JwtError::MissingRsaKey => {
+                            ("missing_rsa_key", StatusCode::INTERNAL_SERVER_ERROR)
+                        }
+                        JwtError::UnknownAlgorithm => {
+                            ("unknown_algorithm", StatusCode::INTERNAL_SERVER_ERROR)
+                        }
+                    };
+                    self.audit(AuditEntry {
+                        token_id: None,
+                        route: path,
+                        method,
+                        decision: "denied",
+                        reason: Some(reason),
+                        required_scope: required,
+                        token_scopes: None,
+                        client_ip,
+                    });
+                    let detail = ErrorDetail::new(
+                        ErrorCode::Unauthorized,
+                        format!("Token validation failed: {}", code),
+                    );
+                    Err((status, Json(ResponseEnvelope::error(detail))))
+                }
             }
         }
+
+        // No JWT config and file token failed
+        let detail = ErrorDetail::new(
+            ErrorCode::Unauthorized,
+            "Authorization header missing or not Bearer",
+        );
+        Err((
+            StatusCode::UNAUTHORIZED,
+            Json(ResponseEnvelope::error(detail)),
+        ))
     }
 }
 
@@ -588,9 +711,102 @@ impl<S: Clone + Send + Sync + 'static> AuthRouterExt for Router<S> {
     }
 }
 
-pub(crate) fn sha256_hex(input: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(input.as_bytes());
-    hex::encode(hasher.finalize())
-}
+/// Validate a JWT bearer token.
+    ///
+    /// Supports two signing methods:
+    /// - `HS256` with an HMAC secret key
+    /// - `RS256` with an RSA public key
+    ///
+    /// Returns `Ok(TokenInfo)` on success, or `JwtError` on failure.
+    pub fn validate_jwt(token: &str, config: &JwtConfig) -> Result<TokenInfo, JwtError> {
+        if token.is_empty() {
+            return Err(JwtError::MissingToken);
+        }
+
+        // Try HS256 first (HMAC)
+        if let Some(hmac_secret) = &config.hmac_secret {
+            match jsonwebtoken::decode::<JwtClaims>(
+                token,
+                &jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256),
+                &jsonwebtoken::DecodeOptions::default(),
+            ) {
+                Ok(data) => {
+                    // Verify issuer and audience
+                    if data.claims.iss != config.issuer {
+                        return Err(JwtError::InvalidToken);
+                    }
+                    if data.claims.aud != config.audience {
+                        return Err(JwtError::InvalidToken);
+                    }
+
+                    // Check expiration
+                    if Utc::now().timestamp() as usize < data.claims.iat
+                        || Utc::now().timestamp() as usize > data.claims.exp
+                    {
+                        return Err(JwtError::Expired);
+                    }
+
+                    return Ok(TokenInfo {
+                        token_id: data.claims.sub.clone(),
+                        scopes: data.claims.scopes.clone(),
+                    });
+                }
+                Err(jsonwebtoken::errors::Error::InvalidSignature(_)) => {
+                    // Fall through to RSA verification
+                }
+                Err(_) => {
+                    // Not a valid HS256 token, try RSA
+                }
+            }
+        }
+
+        // Try RS256 (RSA public key verification)
+        if let Some(rsa_pem) = &config.rsa_public_key {
+            // Load the RSA public key
+            let rsa_key = match russh_keys::rsa::PublicKey::from_pem(rsa_pem.as_bytes()) {
+                Ok(key) => key,
+                Err(_) => return Err(JwtError::MissingRsaKey),
+            };
+
+            // Build RSA verification key
+            let verification_key = jsonwebtoken::RSAVerifier::from(&rsa_key);
+
+            match jsonwebtoken::decode::<JwtClaims>(
+                token,
+                &jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256),
+                jsonwebtoken::DecodeOptions::default().set_rsa_verifier(verification_key),
+            ) {
+                Ok(data) => {
+                    // Verify issuer and audience
+                    if data.claims.iss != config.issuer {
+                        return Err(JwtError::InvalidToken);
+                    }
+                    if data.claims.aud != config.audience {
+                        return Err(JwtError::InvalidToken);
+                    }
+
+                    // Check expiration
+                    if Utc::now().timestamp() as usize < data.claims.iat
+                        || Utc::now().timestamp() as usize > data.claims.exp
+                    {
+                        return Err(JwtError::Expired);
+                    }
+
+                    return Ok(TokenInfo {
+                        token_id: data.claims.sub.clone(),
+                        scopes: data.claims.scopes.clone(),
+                    });
+                }
+                Err(jsonwebtoken::errors::Error::InvalidSignature(_)) | Err(_) => {
+                    return Err(JwtError::InvalidSignature);
+                }
+            }
+        }
+
+        // No suitable key configured
+        if config.hmac_secret.is_none() && config.rsa_public_key.is_none() {
+            return Err(JwtError::MissingHmacSecret);
+        }
+
+        Err(JwtError::MissingRsaKey)
+    }

@@ -12,19 +12,13 @@ name = "honba_api_rest"
 
 [dependencies]
 honba-api.workspace = true
-honba-messages.workspace = true
-honba-entities.workspace = true
 honba-feed.workspace = true
-honba-ports.workspace = true
 honba-strategy.workspace = true
-honba-engine.workspace = true
-honba-sim.workspace = true
 honba-analytics.workspace = true
 honba-config.workspace = true
 honba-market.workspace = true
 honba-portfolio.workspace = true
-honba-risk.workspace = true
-honba-sweep.workspace = true
+honba-testing.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -41,6 +35,10 @@ futures.workspace = true
 tokio-stream.workspace = true
 http-body-util.workspace = true
 serde_urlencoded = "0.7"
+# JWT authentication (HMAC-SHA256 and RSA verification)
+jsonwebtoken = "9.3"
+rsa = "0.26"
+rustls = "0.23"
 # Run ids: OS entropy at the edge (ADR 0017 decision 2); chrono formats manifest timestamps.
 getrandom = "0.3"
 chrono.workspace = true

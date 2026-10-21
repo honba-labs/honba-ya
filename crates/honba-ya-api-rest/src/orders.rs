@@ -35,23 +35,61 @@
 //! queue when enabled, else the risk stage, then the ledger), so a halted engine still
 //! refuses them. `Order` has no reduce-only flag; the reduction is by construction.
 
+//! The `POST /orders` risk gate (ADR 0018 decision 7): approval queue (E5-S4) ->
+//! risk stage -> execution gateway (an [`crate::ExecutionVenue`]: the embedded `NextOpenSim` by default; no real venue wired yet, E3-S7).
+//!
+//! The handler builds a [`RiskRequest`] from the request body plus the ports the
+//! composition root already wires: rules come from the `null` profile over the
+//! `InstrumentMaster` set, `position` is the signed position the write ledger
+//! implies for the instrument ([`OrderLedger::position`]), `trading_state` is the
+//! app's operator-set [`AppState::trading_state`] (default `Active`; seeded via
+//! `AppState::with_trading_state` and changed at runtime by `PUT /trading-state`, read afresh
+//! for every request),
+//! `reference_price` comes from `QuoteReader` (the close of the latest bar, via
+//! mid when a book exists; the limit price when no quote exists), and `ts` /
+//! `last_feed_ts` are the latest quote's `ts_event` (no wall clock; both 0 / `None`
+//! when no quote exists). Approved orders are also submitted to the embedded simulator ([`crate::exec`]);
+//! fills arrive when the market advances ([`AppState::advance_market`]) and move the
+//! ledger row to `Filled`. Known limits: market orders only (a limit order is
+//! `Rejected` by the simulator) and order rows still carry a zero timestamp. Rows report
+//! `filled_qty` / `avg_fill_price` from the venue's fills and `reject_reason` (stable
+//! `ErrorCode` plus message) from its refusals (ADR 0030). A risk refusal is still the 422
+//! below; when the request carries a `client_order_id` it is also recorded as a `Rejected` row
+//! (`reject_reason` = the refusal's code and message) and a repeat of that id replays the
+//! same 422. A keyless refusal is not recorded (the shared route key would poison later orders).
+//!
+//! When the approval queue is enabled (E5-S4), placements are held in the queue
+//! until approved by an operator. Cancel and modify bypass the queue.
+//! A refusal from the risk stage is the 422 of ADR 0018 decision 5 and never
+//! reaches the gateway. Approved placements land in the [`OrderLedger`] keyed by
+//! the ADR 0019 decision 3 idempotency key; the decision 6 audit record is not
+//! written yet.
+//!
+//! `DELETE /orders/{id}` cannot add exposure, so it is never risk-checked and is
+//! allowed in every state. `POST /positions/close` takes no body: for every instrument
+//! with a non-zero ledger position it generates one market order on the opposite side
+//! for the full net quantity (it can only reduce the position, so it passes the
+//! reduce-only state). Those orders take the same path as `POST /orders` (approval
+//! queue when enabled, else the risk stage, then the ledger), so a halted engine still
+//! refuses them. `Order` has no reduce-only flag; the reduction is by construction.
+
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::Response;
-use honba_api::{OrdersQuery, OrdersRequest, OrdersResponse};
-use honba_market::NullMarketProfile;
-use honba_messages::{
-    ErrorCode, ErrorDetail, InstrumentId, Order, OrderId, OrderSide, OrderStatus, OrderType,
-    RejectReason, TimeInForce, UnixNanos,
-};
-use honba_risk::{ProfileRulesSource, RiskCheck, RiskDecision, RiskRequest, RiskStage};
+use honba_core::{InstrumentId, OrderSide, OrderStatus, OrderType, Price, Quantity, TimeInForce};
+use honba_mon::{RiskLimits, RiskRefusal};
 use serde_json::json;
 
 use crate::market::{ApiQuery, failure, success};
 use crate::state::AppState;
+
+/// Order idempotency key — an alias for `String` since `honba_messages::OrderId`
+/// was removed in Phase 1.3. Carries the caller-provided `client_order_id` when
+/// present, else a route-generated placeholder.
+type OrderId = String;
 
 fn is_terminal(status: OrderStatus) -> bool {
     matches!(
@@ -62,19 +100,25 @@ fn is_terminal(status: OrderStatus) -> bool {
 
 /// The unsigned quantity row `order` can contribute to the position: the part already filled
 /// plus the part that may still fill (see [`OrderLedger::position`]).
-fn exposure(order: &Order) -> f64 {
+fn exposure(order: &honba_core::Order) -> Decimal {
     let filled = order.filled_qty();
-    let remaining = (order.quantity() - filled).max(0.0);
+    let remaining = (order.quantity().0 - filled).max(Decimal::ZERO());
     match order.status() {
-        OrderStatus::Filled => order.quantity().max(filled),
-        OrderStatus::Submitted | OrderStatus::Accepted => filled + remaining,
-        OrderStatus::PartiallyFilled if order.reject_reason().is_none() => filled + remaining,
+        honba_core::OrderStatus::Filled => order.quantity().0.max(filled),
+        honba_core::OrderStatus::Submitted | honba_core::OrderStatus::Accepted => {
+            filled + remaining
+        }
+        honba_core::OrderStatus::PartiallyFilled
+            if order.reject_reason().is_none() =>
+        {
+            filled + remaining
+        }
         // A refused remainder, a cancelled/expired/rejected row: only what filled.
-        OrderStatus::PartiallyFilled
-        | OrderStatus::Cancelled
-        | OrderStatus::Expired
-        | OrderStatus::Rejected => filled,
-        _ => 0.0,
+        honba_core::OrderStatus::PartiallyFilled
+        | honba_core::OrderStatus::Cancelled
+        | honba_core::OrderStatus::Expired
+        | honba_core::OrderStatus::Rejected => filled,
+        _ => Decimal::ZERO(),
     }
 }
 
@@ -441,7 +485,7 @@ fn parse_order(
     Ok((instrument_id, side, quantity, price))
 }
 
-fn refusal_detail(refusal: &honba_risk::RiskRefusal) -> ErrorDetail {
+fn refusal_detail(refusal: &honba_mon::RiskRefusal) -> ErrorDetail {
     ErrorDetail::new(
         refusal.error_code(),
         format!("order refused by risk: {}", refusal.rule()),
@@ -453,7 +497,7 @@ fn refusal_detail(refusal: &honba_risk::RiskRefusal) -> ErrorDetail {
 /// refusal also becomes a `Rejected` ledger row, so `GET /orders` shows it and a repeat of the
 /// key replays this answer; the response itself is unchanged. A keyless refusal has no stable
 /// identity (the route placeholder key is shared) and is never recorded.
-fn refuse(state: &AppState, record: Option<Order>, refusal: &honba_risk::RiskRefusal) -> Response {
+fn refuse(state: &AppState, record: Option<Order>, refusal: &honba_mon::RiskRefusal) -> Response {
     let detail = refusal_detail(refusal);
     if let Some(order) = record {
         state.orders.record_refusal(order, detail.clone());
@@ -525,7 +569,7 @@ pub(crate) async fn post_orders(
     let ledger_id = req
         .client_order_id
         .as_deref()
-        .map(OrderId::new)
+        .map(|s| s.to_string())
         .unwrap_or_else(|| order_id.clone());
     if let Some(existing) = state.orders.get(ledger_id.as_str()) {
         if let Some(detail) = state.orders.refusal(ledger_id.as_str()) {
@@ -676,10 +720,10 @@ pub(crate) async fn post_close_positions(State(state): State<Arc<AppState>>) -> 
             client_order_id: Some(key.clone()),
         };
         if let Some(queue) = &state.approval_queue {
-            if let Err(detail) = queue.enqueue(OrderId::new(key), req) {
+            if let Err(detail) = queue.enqueue(key.clone(), req) {
                 return failure(StatusCode::TOO_MANY_REQUESTS, detail);
             }
-        } else if let Err(response) = gate_and_record(&state, &req, OrderId::new(key), false).await
+        } else if let Err(response) = gate_and_record(&state, &req, key.clone(), false).await
         {
             return response;
         }
@@ -707,8 +751,8 @@ pub(crate) async fn post_approve_order(State(state): State<Arc<AppState>>) -> Re
             let order_id = req
                 .client_order_id
                 .as_deref()
-                .map(honba_messages::OrderId::new)
-                .unwrap_or_else(|| honba_messages::OrderId::new("approved"));
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "approved".to_string());
             post_orders_direct(state.clone(), crate::ApiJson(req), order_id).await
         } else {
             failure(
