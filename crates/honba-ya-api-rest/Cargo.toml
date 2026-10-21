@@ -37,7 +37,7 @@ http-body-util.workspace = true
 serde_urlencoded = "0.7"
 # JWT authentication (HMAC-SHA256 and RSA verification)
 jsonwebtoken = "9.3"
-rsa = "0.26"
+rsa = { version = "0.10.0-rc.19" }
 rustls = "0.23"
 # Run ids: OS entropy at the edge (ADR 0017 decision 2); chrono formats manifest timestamps.
 getrandom = "0.3"
