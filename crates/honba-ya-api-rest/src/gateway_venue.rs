@@ -26,8 +26,11 @@ use std::time::Duration;
 
 use honba_engine::{AlgoError, ExecutionEngine, Result as EngineResult};
 use honba_entities::{ExecutionEvent, Trade};
-use honba_messages::ErrorCode;
-use honba_messages::{Order, OrderId, UnixNanos};
+use honba_api::ErrorCode;
+// NOTE: `Order`/`OrderId`/`UnixNanos` are the old honba_messages shapes, with no current
+// equivalent (see the longer note in exec.rs): honba_core has no rich, stateful `Order`
+// or standalone `OrderId`/`UnixNanos` type. Left unresolved so this is a visible blocker
+// pointing at the missing honba_engine/honba_sim subsystem, not a silent wrong substitution.
 use honba_ports::{ExecutionGateway, PortError};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
@@ -261,15 +264,15 @@ async fn cancel<G: ExecutionGateway>(
 /// `order_execution_unavailable`, and the rest keep their transport meaning.
 fn error_code(error: &PortError) -> ErrorCode {
     match error {
-        PortError::Rejected { .. } => ErrorCode::OrderRejected,
+        PortError::Rejected { .. } => ErrorCode::Conflict,
         PortError::InvalidRequest(_) => ErrorCode::ValidationInvalidRequest,
-        PortError::Unsupported(_) => ErrorCode::Unsupported,
+        PortError::Unsupported(_) => ErrorCode::NotImplemented,
         PortError::Unavailable(_)
         | PortError::Retriable(_)
         | PortError::Terminal(_)
-        | PortError::Unrecoverable(_) => ErrorCode::OrderExecutionUnavailable,
+        | PortError::Unrecoverable(_) => ErrorCode::Conflict,
         PortError::Timeout => ErrorCode::Timeout,
-        PortError::Transport(_) => ErrorCode::TransportError,
+        PortError::Transport(_) => ErrorCode::InternalError,
         _ => ErrorCode::InternalError,
     }
 }

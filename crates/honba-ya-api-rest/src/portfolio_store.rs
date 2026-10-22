@@ -18,10 +18,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use honba_entities::{
-    Currency, Money, PortfolioGreeks, PortfolioMode, PortfolioSource, Position, Trade,
+use honba_core::{
+    Currency, FillReport as Trade, Money, PortfolioGreeks, PortfolioMode, PortfolioPosition as Position,
+    PortfolioSource,
 };
-use honba_messages::Product;
+use honba_portfolio::Product;
 use serde::{Deserialize, Serialize};
 
 use crate::user_doc;

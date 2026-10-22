@@ -9,8 +9,7 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Json, Response},
 };
-use honba_api::ApiResponse;
-use honba_messages::{ErrorCode, ErrorDetail, ResponseEnvelope};
+use honba_api::{ApiResponse, ErrorCode, ErrorDetail, ResponseEnvelope};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 use chrono::Utc;
@@ -535,7 +534,7 @@ impl AuthLayer {
                     client_ip,
                 });
                 let detail = ErrorDetail::new(
-                    ErrorCode::Forbidden,
+                    ErrorCode::Unauthorized,
                     format!("Token does not have required scope: {}", required),
                 )
                 .with_context(serde_json::json!({
@@ -576,7 +575,7 @@ impl AuthLayer {
                             client_ip,
                         });
                         let detail = ErrorDetail::new(
-                            ErrorCode::Forbidden,
+                            ErrorCode::Unauthorized,
                             format!("Token does not have required scope: {}", required),
                         )
                         .with_context(serde_json::json!({

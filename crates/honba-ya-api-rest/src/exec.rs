@@ -26,8 +26,20 @@ use std::sync::{Arc, Mutex};
 
 use honba_engine::{ExecutionEngine, Result as EngineResult};
 use honba_entities::{Currency, ExecutionEvent, Money};
-use honba_messages::{Bar, ErrorCode, ErrorDetail, Order, OrderStatus, RejectReason};
+use honba_api::{ErrorCode, ErrorDetail};
+use honba_core::{Bar, OrderStatus};
 use honba_sim::NextOpenSim;
+
+// NOTE: `Order` and `RejectReason` here are the old honba_messages shapes (a rich,
+// stateful order-ledger `Order` with `.order_id()`/`.with_status()`/etc., and a
+// `RejectReason::new(code, message)` free-form rejection). Neither has a current
+// equivalent: honba_core::OrderRequest is a flat DTO with no such API, and
+// honba_core::order::RejectReason is a closed 3-variant enum
+// (ExchangeRejected/Expired/InsufficientMargin) with no `::new(ErrorCode, String)`
+// constructor. This file (and the missing `honba_engine`/`honba_sim` crates it
+// depends on) needs a dedicated redesign beyond this honba_messages migration;
+// left as `Order`/`RejectReason` so the single remaining blocker is visibly the
+// missing engine/sim crates, not a silently-wrong type substitution.
 
 use crate::OrderLedger;
 
@@ -81,7 +93,7 @@ impl ExecGateway {
             tracing::warn!(order = %order.order_id(), error = %e, "venue refused submit");
             ledger.reject(
                 order.order_id().as_str(),
-                RejectReason::new(ErrorCode::OrderRejected, e.to_string()),
+                RejectReason::new(ErrorCode::Conflict, e.to_string()),
             );
             return;
         }
@@ -111,7 +123,7 @@ impl ExecGateway {
         &self,
         ledger: &OrderLedger,
         order_id: &str,
-        ts: honba_messages::UnixNanos,
+        ts: chrono::DateTime<chrono::Utc>,
     ) {
         let mut sim = self
             .sim
@@ -139,7 +151,7 @@ fn reject_reason(reason: &str) -> RejectReason {
             return RejectReason::new(code, text);
         }
     }
-    RejectReason::new(ErrorCode::OrderRejected, reason)
+    RejectReason::new(ErrorCode::Conflict, reason)
 }
 
 /// Drains the venue's events into ledger status changes.

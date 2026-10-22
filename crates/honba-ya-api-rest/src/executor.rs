@@ -11,9 +11,10 @@ use honba_engine::{
     AlgoError, Engine, EngineOutput, ExecutionEngine, Handler, Result as EngineResult,
 };
 use honba_entities::{Currency, ExecutionEvent, Money, Trade};
-use honba_messages::{
-    ErrorCode, ErrorDetail, Event, InstrumentId, Message, Order, OrderStatus, UnixNanos,
-};
+use honba_api::{ErrorCode, ErrorDetail, Event, Message};
+use honba_core::{InstrumentId, OrderStatus};
+// NOTE: `Order`/`UnixNanos` are the old honba_messages shapes with no current equivalent
+// (see the longer note in exec.rs) — left unresolved as a visible blocker.
 use honba_ports::{BarReader, BarRequest, PortError, TickReader, TickRequest};
 use honba_sim::{BarFillEngine, FillCosts, L2Sim, SlippageKind, SlippageModel};
 use honba_strategy::{DynStrategy, LedgerContext, StrategyRunner};
@@ -40,10 +41,10 @@ impl honba_sweep::StrategyFactory for CustomStrategyFactory {
         // We'll use the registry to build the base strategy.
         // This factory is just a placeholder since the registry handles named strategies
         Box::new(honba_strategy::SmaCrossover::new(
-            honba_messages::InstrumentId::new("DUMMY", honba_messages::Exchange::new("DUMMY")),
+            InstrumentId::new(honba_core::Exchange::Nse, "DUMMY"),
             1,
             2,
-            1.0,
+            honba_core::Quantity::from_u64(1),
         ))
     }
 }
@@ -204,10 +205,10 @@ fn fill_model_from_name(name: &str) -> Result<FillModel, ErrorDetail> {
 
 fn port_error(e: &PortError) -> ErrorDetail {
     let code = match e {
-        PortError::Unsupported(_) => ErrorCode::Unsupported,
+        PortError::Unsupported(_) => ErrorCode::NotImplemented,
         PortError::InvalidRequest(_) => ErrorCode::ValidationInvalidRequest,
         PortError::Unavailable(_) | PortError::Timeout | PortError::Transport(_) => {
-            ErrorCode::MarketDataUnavailable
+            ErrorCode::NotFound
         }
         _ => ErrorCode::InternalError,
     };
@@ -547,7 +548,7 @@ fn assumptions(spec: &ResolvedBacktest) -> Value {
 
 /// Bars and ticks in `ts_event` order: stable, and at equal time the ticks come first (the
 /// Python `BacktestSession` rule, ADR 0030). `ticks` must be time-sorted.
-pub(crate) fn merge_events(bars: Vec<honba_messages::Bar>, ticks: Vec<Event>) -> Vec<Event> {
+pub(crate) fn merge_events(bars: Vec<honba_core::Bar>, ticks: Vec<Event>) -> Vec<Event> {
     if ticks.is_empty() {
         return bars.into_iter().map(Event::Bar).collect();
     }
@@ -607,7 +608,7 @@ impl BacktestExecutor {
         match self.account.currency.as_str() {
             "INR" => Ok(Currency::Inr),
             other => Err(ErrorDetail::new(
-                ErrorCode::Unsupported,
+                ErrorCode::NotImplemented,
                 format!("account currency {other:?} is not supported"),
             )),
         }
@@ -617,7 +618,7 @@ impl BacktestExecutor {
         &self,
         instrument: &InstrumentId,
         spec: &honba_api::ResolvedSweep,
-    ) -> Result<Vec<honba_messages::Bar>, ErrorDetail> {
+    ) -> Result<Vec<honba_core::Bar>, ErrorDetail> {
         let bar_spec = parse_timeframe(&spec.bar_spec)
             .map_err(|e| invalid("bar_spec", "invalid_bar_spec", e.message))?;
         let request = BarRequest::new(
@@ -635,7 +636,7 @@ impl BacktestExecutor {
             .map_err(|e| port_error(&e))?;
         if bars.is_empty() {
             return Err(ErrorDetail::new(
-                ErrorCode::MarketDataUnavailable,
+                ErrorCode::NotFound,
                 "no bars in the window",
             )
             .with_context(json!({"reason": "no_data"})));
@@ -647,7 +648,7 @@ impl BacktestExecutor {
         &self,
         instrument: &InstrumentId,
         spec: &ResolvedBacktest,
-    ) -> Result<Vec<honba_messages::Bar>, ErrorDetail> {
+    ) -> Result<Vec<honba_core::Bar>, ErrorDetail> {
         let bar_spec = parse_timeframe(&spec.bar_spec)
             .map_err(|e| invalid("bar_spec", "invalid_bar_spec", e.message))?;
         let request = BarRequest::new(
@@ -665,7 +666,7 @@ impl BacktestExecutor {
             .map_err(|e| port_error(&e))?;
         if bars.is_empty() {
             return Err(ErrorDetail::new(
-                ErrorCode::MarketDataUnavailable,
+                ErrorCode::NotFound,
                 "no bars in the window",
             )
             .with_context(json!({"reason": "no_data"})));
@@ -682,7 +683,7 @@ impl BacktestExecutor {
     ) -> Result<Vec<Event>, ErrorDetail> {
         let refused = |why: &str| {
             ErrorDetail::new(
-                ErrorCode::Unsupported,
+                ErrorCode::NotImplemented,
                 format!("fill_model l2 requires quote/trade ticks; {why}"),
             )
             .with_context(json!({"reason": "l2_requires_ticks", "fill_model": "l2"}))
@@ -769,7 +770,7 @@ impl BacktestExecutor {
         }
         if !is_l2 && !matches!(fill_model, FillModel::BarFill) {
             return Err(ErrorDetail::new(
-                ErrorCode::Unsupported,
+                ErrorCode::NotImplemented,
                 "only the bar_fill model is available",
             ));
         }
@@ -929,9 +930,7 @@ impl BacktestExecutor {
             .instruments
             .first()
             .cloned()
-            .unwrap_or_else(|| {
-                honba_messages::InstrumentId::new("TCS", honba_messages::Exchange::new("NSE"))
-            });
+            .unwrap_or_else(|| InstrumentId::new(honba_core::Exchange::Nse, "TCS"));
         let trials: Vec<TrialParams> = grid
             .into_iter()
             .enumerate()
