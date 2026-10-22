@@ -19,7 +19,7 @@ use honba_api::{
     ErrorDetail, InstrumentsQuery, InstrumentsResponse, QuotesQuery, QuotesResponse,
     ResponseEnvelope, instrument_json, parse_instrument_id,
 };
-use honba_ports::{BarRequest, PortError};
+use honba_feed::ports::{BarRequest, PortError};
 use serde::de::DeserializeOwned;
 
 use crate::AppState;
@@ -110,7 +110,7 @@ pub(crate) fn instrument_not_found(id: &honba_core::InstrumentId) -> Response {
 pub(crate) async fn master_get(
     state: &AppState,
     id: &honba_core::InstrumentId,
-) -> Result<Option<honba_entities::Instrument>, ErrorDetail> {
+) -> Result<Option<honba_feed::wire::Instrument>, ErrorDetail> {
     state
         .instruments
         .get_instrument(id)
@@ -136,20 +136,16 @@ pub(crate) async fn quote_last(state: &AppState, id: &honba_core::InstrumentId) 
 }
 
 /// Maps a port failure to a status and an envelope code.
+///
+/// `honba_feed::ports::PortError` has only three variants (`Unsupported`,
+/// `Internal`, `Terminal`) — leaner than the old `honba_messages` taxonomy
+/// this used to branch on (`InvalidRequest`/`Unavailable`/`Timeout`/
+/// `Transport`), so the mapping collapses to that.
 pub(crate) fn port_failure(error: PortError) -> Response {
     let (status, code) = match &error {
         PortError::Unsupported(_) => (StatusCode::NOT_FOUND, ErrorCode::NotFound),
-        PortError::InvalidRequest(_) => (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            ErrorCode::ValidationInvalidRequest,
-        ),
-        PortError::Unavailable(_) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            ErrorCode::NotFound,
-        ),
-        PortError::Timeout => (StatusCode::GATEWAY_TIMEOUT, ErrorCode::Timeout),
-        PortError::Transport(_) => (StatusCode::BAD_GATEWAY, ErrorCode::InternalError),
-        _ => (StatusCode::INTERNAL_SERVER_ERROR, ErrorCode::InternalError),
+        PortError::Terminal(_) => (StatusCode::SERVICE_UNAVAILABLE, ErrorCode::Conflict),
+        PortError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, ErrorCode::InternalError),
     };
     failure(status, ErrorDetail::new(code, error.to_string()))
 }
@@ -298,13 +294,10 @@ pub(crate) async fn get_depth(
     }
     match state.depth.read_depth(&id, levels).await {
         Ok(book) => {
-            let side = |levels: Vec<honba_ports::DepthLevel>| {
+            let side = |levels: Vec<(f64, f64)>| {
                 levels
                     .into_iter()
-                    .map(|level| DepthLevel {
-                        price: level.price,
-                        qty: level.qty,
-                    })
+                    .map(|(price, qty)| DepthLevel { price, qty })
                     .collect()
             };
             success(DepthResponse {

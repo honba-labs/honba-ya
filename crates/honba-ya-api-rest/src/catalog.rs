@@ -16,12 +16,13 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use honba_api::parse_timeframe;
 use honba_api::wire::BarSpecification;
-use honba_core::{Bar, Exchange, InstrumentId};
+use honba_core::{Exchange, InstrumentId};
+use honba_feed::wire::Bar;
 use honba_feed::{
     ColumnarSlice, ColumnarSliceBuilder, Dataset, DatasetBuildError, DatasetReader,
     ParquetBarSource, ParquetError,
 };
-use honba_ports::{BarReader, BarRequest, PortError, PortResult};
+use honba_feed::ports::{BarReader, BarRequest, PortError, PortResult};
 use thiserror::Error;
 
 /// The directory under a data root that holds the bar catalog.

@@ -10,7 +10,7 @@ use axum::{extract::State, response::Response};
 use honba_api::{
     ScreenerQuery, ScreenerResponse, ScreenerResultRow, check_scan_budget, check_screener_rows,
 };
-use honba_ports::BarRequest;
+use honba_feed::ports::BarRequest;
 
 use crate::AppState;
 use crate::market::{
