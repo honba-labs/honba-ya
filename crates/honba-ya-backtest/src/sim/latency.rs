@@ -1,13 +1,10 @@
 //! Seeded network and broker latency models for backtest simulation.
 
-use std::time::Duration;
-use rust_decimal::Decimal;
-use chrono::{Utc, Duration as ChronoDuration};
-
 /// Seeded random number generator for deterministic latency simulation.
 ///
 /// Uses a simple xorshift algorithm seeded at construction for reproducible
 /// backtest runs with varying latency profiles.
+#[derive(Debug, Clone)]
 pub struct SeededRng {
     state: u64,
 }

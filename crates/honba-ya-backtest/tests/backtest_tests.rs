@@ -5,6 +5,10 @@ use rust_decimal_macros::dec;
 
 use honba_actors::Strategy;
 use honba_backtest::*;
+// `honba_core::*` also exports a (different, live-trading) `MarketEvent`;
+// this explicit import resolves the glob ambiguity in favor of the
+// backtest-engine's own event type.
+use honba_backtest::MarketEvent;
 use honba_core::*;
 use honba_mon::{OtrConfig, RiskEngine, RiskLimits};
 use honba_nou_agent::{LlmRecord, PromptReplayer};
@@ -72,6 +76,7 @@ async fn test_historical_day_backtest_with_indian_cost_and_settlement() {
         ..Default::default()
     };
     let mut risk_engine = RiskEngine::new(limits, OtrConfig::default());
+    risk_engine.register_algo("algo-nse-equity");
 
     // Scrip-wise price band: 10% around 1500 (1350 to 1650) with reference price 1500
     let band = PriceBand::new(
@@ -84,6 +89,7 @@ async fn test_historical_day_backtest_with_indian_cost_and_settlement() {
     let config = BacktestConfig {
         starting_cash: dec!(500_000.00),
         product_type: ProductType::Delivery,
+        ..Default::default()
     };
     let cost_model = IndianCostModel::new();
     let calendar = NseTradingCalendar::new();
@@ -184,11 +190,11 @@ async fn test_deterministic_llm_prompt_replay_backtest() {
 
     // 1. Create recorded LLM decision trail with SHA256 checksums
     let prompt1 = "Tick 1: RELIANCE at 2500, RSI 28 (oversold). Recommendation?";
-    let raw1 = r#"{"action": "buy", "symbol": "RELIANCE", "exchange": "NSE", "qty": "50", "price_limit": "2500.00", "algo_id": "SEBI_AI_REPLAY_01", "rationale": "Oversold bounce entry"}"#;
+    let raw1 = r#"{"action": "place_order", "symbol": "RELIANCE", "side": "BUY", "qty": "50", "price_limit": "2500.00", "algo_id": "SEBI_AI_REPLAY_01", "rationale": "Oversold bounce entry"}"#;
     let d1: Decision = serde_json::from_str(raw1).unwrap();
 
     let prompt2 = "Tick 2: RELIANCE at 2550, RSI 72 (overbought). Recommendation?";
-    let raw2 = r#"{"action": "sell", "symbol": "RELIANCE", "exchange": "NSE", "qty": "50", "price_limit": "2550.00", "algo_id": "SEBI_AI_REPLAY_01", "rationale": "Overbought profit take"}"#;
+    let raw2 = r#"{"action": "place_order", "symbol": "RELIANCE", "side": "SELL", "qty": "50", "price_limit": "2550.00", "algo_id": "SEBI_AI_REPLAY_01", "rationale": "Overbought profit take"}"#;
     let d2: Decision = serde_json::from_str(raw2).unwrap();
 
     let r1 = LlmRecord::new(
@@ -219,6 +225,7 @@ async fn test_deterministic_llm_prompt_replay_backtest() {
         ..Default::default()
     };
     let mut risk_engine = RiskEngine::new(limits, OtrConfig::default());
+    risk_engine.register_algo(algo_id);
     let band = PriceBand::new(
         Price::from_rupees("2000.00").unwrap(),
         Price::from_rupees("3000.00").unwrap(),
@@ -229,6 +236,7 @@ async fn test_deterministic_llm_prompt_replay_backtest() {
     let config = BacktestConfig {
         starting_cash: dec!(1_000_000.00),
         product_type: ProductType::Delivery,
+        ..Default::default()
     };
     let mut engine = BacktestEngine::new(
         strategy,

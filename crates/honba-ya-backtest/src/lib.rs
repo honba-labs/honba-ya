@@ -13,6 +13,7 @@ pub mod costs;
 pub mod engine;
 pub mod events;
 pub mod settlement;
+pub mod sim;
 
 pub use calendar::{NseTradingCalendar, SessionWindow};
 pub use costs::{IndianCostConfig, IndianCostModel, IndianFeeBreakdown, ProductType};

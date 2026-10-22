@@ -1,9 +1,8 @@
 //! L2 Order book depth simulation and matching engine.
 
-use std::collections::{BTreeMap, BinaryHeap};
-use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use rust_decimal::Decimal;
-use honba_core::{Bar, InstrumentId, OrderSide, OrderType, Price, Tick, Quantity};
+use honba_core::{OrderSide, Price};
 
 /// Order book level with price and accumulated quantity.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,8 +173,23 @@ impl OrderBook {
         }
     }
 
+    /// Add synthetic depth at a price level.
+    ///
+    /// A tick/bar feed carries no bid/ask side information for the volume
+    /// it reports, so this adds the same depth to both sides — a simple
+    /// approximation of resting liquidity derived from traded volume.
+    pub fn add_order(&mut self, price: Price, quantity: i64) {
+        self.bids.add_order(price, quantity);
+        self.asks.add_order(price, quantity);
+    }
+
+    /// Total depth (bid + ask) resting at a price level.
+    pub fn depth_at(&self, price: Price) -> i64 {
+        self.bids.depth_at(price) + self.asks.depth_at(price)
+    }
+
     /// Apply latency delay (simulate network/broker latency).
-    fn apply_latency(&self) {
+    pub(crate) fn apply_latency(&self) {
         // In a real simulation, this would tick a clock
         // For now, we just note the latency exists
     }
@@ -224,7 +238,7 @@ impl OrderBook {
         let mut filled = 0i64;
         let mut remaining = quantity;
         let mut worst_price: Option<Price> = None;
-        let mut worst_price_val: Decimal = Decimal::MAX_VALUE;
+        let mut worst_price_val: Decimal = Decimal::MAX;
 
         while remaining > 0 && !self.bids.is_empty() {
             let bid_price = self.bids.best_price().unwrap();

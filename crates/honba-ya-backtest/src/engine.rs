@@ -16,14 +16,17 @@
 
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use rust_decimal_macros::dec;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use honba_actors::Strategy;
-use honba_core::{Bar, FillReport, InstrumentId, OrderRequest, OrderSide, OrderType, Price, Tick};
+use honba_core::{
+    FeeBreakdown, FillReport, InstrumentId, Money, OrderRequest, OrderSide, Price, Quantity, Tick,
+};
 use honba_mon::RiskEngine;
-use honba_backtest::sim::{
+use crate::sim::{
     l2_book::OrderBook,
     latency::NetworkLatency,
     mis::MisSquareOffManager,
@@ -137,6 +140,12 @@ pub struct BacktestEngine<S: Strategy> {
     total_fees: IndianFeeBreakdown,
     peak_equity: Decimal,
     max_drawdown: Decimal,
+
+    // Event-loop state
+    current_date: Option<NaiveDate>,
+    latest_prices: HashMap<InstrumentId, Price>,
+    scrips_sold_today: HashSet<InstrumentId>,
+    product_type: ProductType,
 }
 
 impl<S: Strategy> BacktestEngine<S> {
@@ -158,7 +167,7 @@ impl<S: Strategy> BacktestEngine<S> {
             order_book: if config.l2_simulation {
                 Some(OrderBook::new(
                     config.latency.as_ref().map(|l| l.current_latency()).unwrap_or(0),
-                    config.slippage.as_ref().map(|s| s.daily_range_pct).unwrap_or_default(),
+                    config.slippage.as_ref().map(|s| s.daily_range_pct()).unwrap_or_default(),
                 ))
             } else {
                 None
@@ -174,6 +183,10 @@ impl<S: Strategy> BacktestEngine<S> {
             total_fees: IndianFeeBreakdown::default(),
             peak_equity: initial_cash,
             max_drawdown: Decimal::ZERO,
+            current_date: None,
+            latest_prices: HashMap::new(),
+            scrips_sold_today: HashSet::new(),
+            product_type: config.product_type,
         }
     }
 
@@ -261,11 +274,27 @@ impl<S: Strategy> BacktestEngine<S> {
             ob.apply_latency();
             match &event {
                 MarketEvent::Tick(t) => {
-                    ob.add_order(t.price(), t.quantity.0);
+                    let price = t.last_price().unwrap_or_default();
+                    // `Tick` has no single "quantity" concept across its
+                    // variants: use the last-trade volume for `Ltp`, and
+                    // the larger of the best bid/ask size for `Quote`/
+                    // `Depth` as a simple proxy for available liquidity.
+                    let quantity = match t {
+                        Tick::Ltp { volume, .. } => volume.0,
+                        Tick::Quote {
+                            bid_qty, ask_qty, ..
+                        } => bid_qty.0.max(ask_qty.0),
+                        Tick::Depth { bids, asks, .. } => {
+                            let best_bid = bids.first().map(|l| l.quantity.0).unwrap_or_default();
+                            let best_ask = asks.first().map(|l| l.quantity.0).unwrap_or_default();
+                            best_bid.max(best_ask)
+                        }
+                    };
+                    ob.add_order(price, quantity.to_i64().unwrap_or(0));
                 }
                 MarketEvent::Bar(b) => {
                     // Bar approximates close price; add synthetic depth
-                    let _ = ob.add_order(b.close, Decimal::from(b.volume) as i64);
+                    let _ = ob.add_order(b.close, b.volume.0.to_i64().unwrap_or(0));
                 }
             }
         }
@@ -319,11 +348,14 @@ impl<S: Strategy> BacktestEngine<S> {
             None => return, // No market price available yet to match
         };
 
-        // Determine order book side and execution mode
-        let (filled_qty, fill_price, remaining_qty, price_impact) = if self.order_book.is_some() {
+        // Determine order book side and execution mode. `filled_qty` and
+        // `remaining_qty` are kept as `Decimal` across both branches (the L2
+        // branch's `i64` counts are converted up) so this `if`/`else` type-checks
+        // and downstream arithmetic against `Decimal` prices works directly.
+        let (filled_qty, fill_price, _remaining_qty, price_impact) = if self.order_book.is_some() {
             // Use L2 order book simulation
             let side = order.side;
-            let qty = order.quantity.0;
+            let qty = order.quantity.0.to_i64().unwrap_or(0);
             let (filled, price, remaining, worst) = if side == OrderSide::Buy {
                 self.order_book
                     .as_mut()
@@ -336,11 +368,16 @@ impl<S: Strategy> BacktestEngine<S> {
                     .execute_market_order(OrderSide::Sell, qty)
             };
             let price_impact = worst.map_or(Decimal::ZERO, |p| p.0);
-            (filled, price, remaining, price_impact)
+            (
+                Decimal::from(filled),
+                price,
+                Decimal::from(remaining),
+                price_impact,
+            )
         } else {
             // Direct execution at current market price (no L2 simulation)
             let fill_price = current_price;
-            (order.quantity.0, fill_price, 0, Decimal::ZERO)
+            (order.quantity.0, fill_price, Decimal::ZERO, Decimal::ZERO)
         };
 
         let notional = fill_price.0 * filled_qty;
@@ -359,6 +396,20 @@ impl<S: Strategy> BacktestEngine<S> {
         let trade_date = timestamp.date_naive();
         let fill_id = Uuid::new_v4().to_string();
 
+        // `honba_core::FeeBreakdown` has no dedicated slot for the DP
+        // (depository participant) charge, so it's folded into
+        // `exchange_charges` — the closest "other venue/infra charge"
+        // bucket — to keep `fee_breakdown.total()` equal to `fees.total()`.
+        let fee_breakdown = FeeBreakdown {
+            brokerage: Money::inr(fees.brokerage),
+            stt: Money::inr(fees.stt),
+            exchange_charges: Money::inr(fees.exchange_turnover + fees.dp_charge),
+            gst: Money::inr(fees.gst),
+            stamp_duty: Money::inr(fees.stamp_duty),
+            sebi_charges: Money::inr(fees.sebi_turnover),
+        };
+        let fee = fee_breakdown.total();
+
         let fill_report = FillReport {
             fill_id,
             order_id: Uuid::new_v4().to_string(),
@@ -366,11 +417,13 @@ impl<S: Strategy> BacktestEngine<S> {
             instrument: order.instrument.clone(),
             side: order.side,
             price: fill_price,
-            quantity: filled_qty,
+            quantity: Quantity(filled_qty),
             algo_id: order.algo_id.clone(),
             timestamp,
             correlation_id: order.correlation_id,
             client_id: order.client_id.clone(),
+            fee,
+            fee_breakdown: Some(fee_breakdown),
         };
 
         // Update Research-Live Parity: notify RiskEngine & Strategy
@@ -384,7 +437,7 @@ impl<S: Strategy> BacktestEngine<S> {
                 self.gross_pnl -= Decimal::ZERO; // buy establishes cost basis
                 self.ledger.record_delivery_buy(
                     order.instrument,
-                    filled_qty,
+                    Quantity(filled_qty),
                     total_debit,
                     trade_date,
                     &self.calendar,
@@ -395,7 +448,7 @@ impl<S: Strategy> BacktestEngine<S> {
                 self.gross_pnl += notional;
                 self.ledger.record_delivery_sell(
                     order.instrument,
-                    filled_qty,
+                    Quantity(filled_qty),
                     net_credit,
                     trade_date,
                     &self.calendar,
@@ -408,7 +461,7 @@ impl<S: Strategy> BacktestEngine<S> {
             let side = order.side;
             let _slippage = model.compute_slippage(
                 side,
-                filled_qty as i64,
+                filled_qty.to_i64().unwrap_or(0),
                 self.order_book
                     .as_ref()
                     .map_or(0, |ob| ob.depth_at(Price(Decimal::ZERO)))
@@ -425,18 +478,10 @@ impl<S: Strategy> BacktestEngine<S> {
     async fn check_mis_square_off(&mut self, timestamp: DateTime<Utc>) {
         if let Some(ref manager) = self.mis_square_off {
             // Check if square-off time has been reached
-            if let Some(result) = manager.check_square_off_time(
-                // We need an instrument - use the latest instrument from prices
-                self.latest_prices
-                    .keys()
-                    .next()
-                    .cloned()
-                    .unwrap_or(honba_core::InstrumentId::new(
-                        honba_core::Exchange::Nse,
-                        "UNKNOWN".to_string(),
-                    )),
-                timestamp,
-            ) {
+            // We need an instrument - use the latest instrument from prices
+            let fallback = honba_core::InstrumentId::new(honba_core::Exchange::Nse, "UNKNOWN");
+            let instrument = self.latest_prices.keys().next().unwrap_or(&fallback);
+            if let Some(result) = manager.check_square_off_time(instrument, timestamp) {
                 // Square-off triggered - refuse new orders that increase MIS position
                 // In a full implementation, would force square-off of existing positions
                 // For now, just log the square-off event
@@ -445,57 +490,31 @@ impl<S: Strategy> BacktestEngine<S> {
         }
     }
 
-    fn current_date: Option<NaiveDate> = None,
-    latest_prices: HashMap<InstrumentId, Price>,
-    scrips_sold_today: HashSet<InstrumentId>,
-}
-
-/// Configuration for backtest execution.
-#[derive(Debug, Clone)]
-pub struct BacktestConfig {
-    /// Initial starting capital in INR
-    pub starting_cash: Decimal,
-    /// Product type (Delivery vs Intraday)
-    pub product_type: ProductType,
-    /// Enable L2 order book depth simulation
-    pub l2_simulation: bool,
-    /// Latency model configuration
-    pub latency: Option<NetworkLatency>,
-    /// Slippage model configuration
-    pub slippage: Option<SlippageModel>,
-    /// MIS square-off manager
-    pub mis_square_off: Option<MisSquareOffManager>,
-}
-
-impl Default for BacktestConfig {
-    fn default() -> Self {
-        Self {
-            starting_cash: dec!(1_000_000.00), // ₹10 Lakhs
-            product_type: ProductType::Delivery,
-            l2_simulation: false,
-            latency: None,
-            slippage: None,
-            mis_square_off: None,
-        }
+    /// Current total equity: settled cash plus the mark-to-market value of
+    /// every settled security, priced at the most recent tick/bar seen for
+    /// that instrument.
+    fn current_equity(&self) -> Decimal {
+        self.ledger.total_equity(|instrument| {
+            self.latest_prices
+                .get(instrument)
+                .map(|p| p.0)
+                .unwrap_or(Decimal::ZERO)
+        })
     }
-}
 
-impl BacktestConfig {
-    /// Create config with L2 simulation enabled.
-    pub fn with_l2_simulation(
-        starting_cash: Decimal,
-        product_type: ProductType,
-        latency: NetworkLatency,
-        slippage: SlippageModel,
-        mis_square_off: MisSquareOffManager,
-    ) -> Self {
-        Self {
-            starting_cash,
-            product_type,
-            l2_simulation: true,
-            latency: Some(latency),
-            slippage: Some(slippage),
-            mis_square_off: Some(mis_square_off),
+    /// Recompute equity and update the running peak/drawdown tracking.
+    ///
+    /// `peak_equity` only ever rises; `max_drawdown` is the largest observed
+    /// `peak_equity - current_equity`, which `run_events` later expresses as
+    /// a percentage of the peak.
+    fn update_drawdown(&mut self) {
+        let equity = self.current_equity();
+        if equity > self.peak_equity {
+            self.peak_equity = equity;
+        }
+        let drawdown = self.peak_equity - equity;
+        if drawdown > self.max_drawdown {
+            self.max_drawdown = drawdown;
         }
     }
 }

@@ -1,8 +1,9 @@
 //! Volatility and liquidity slippage models for backtest execution simulation.
 
 use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
 use std::collections::BTreeMap;
-use honba_core::{OrderSide, OrderType, Price, Tick, InstrumentId};
+use honba_core::{OrderSide, Price};
 
 /// Models slippage based on order book depth and volatility.
 ///
@@ -11,6 +12,7 @@ use honba_core::{OrderSide, OrderType, Price, Tick, InstrumentId};
 /// - Order size relative to book depth
 /// - Recent volatility (quantified by typical daily range)
 /// - Order type (market orders cause more slippage than limit orders)
+#[derive(Debug, Clone)]
 pub struct SlippageModel {
     /// Typical daily range as percentage of price (e.g., 0.02 = 2%)
     daily_range_pct: Decimal,
@@ -24,9 +26,9 @@ impl SlippageModel {
     /// Create a new slippage model with default parameters.
     pub fn new() -> Self {
         Self {
-            daily_range_pct: Decimal::from(0.02),   // 2% typical daily range
-            volatility_factor: Decimal::one(),        // 1.0 = normal
-            avg_spread_pct: Decimal::from(0.001),     // 0.1% average spread
+            daily_range_pct: dec!(0.02),   // 2% typical daily range
+            volatility_factor: Decimal::ONE, // 1.0 = normal
+            avg_spread_pct: dec!(0.001),     // 0.1% average spread
         }
     }
 
@@ -43,6 +45,11 @@ impl SlippageModel {
     /// Set average spread percentage.
     pub fn set_avg_spread_pct(&mut self, pct: Decimal) {
         self.avg_spread_pct = pct;
+    }
+
+    /// Typical daily range as a percentage of price.
+    pub fn daily_range_pct(&self) -> Decimal {
+        self.daily_range_pct
     }
 
     /// Compute slippage for a market order quantity.
@@ -71,8 +78,8 @@ impl SlippageModel {
         // Side-dependent adjustment (sellers typically get slightly better,
         // buyers slightly worse due to spread dynamics)
         let side_factor = match side {
-            OrderSide::Buy => Decimal::one() + self.avg_spread_pct / Decimal::from(2),
-            OrderSide::Sell => Decimal::one() - self.avg_spread_pct / Decimal::from(2),
+            OrderSide::Buy => Decimal::ONE + self.avg_spread_pct / Decimal::from(2),
+            OrderSide::Sell => Decimal::ONE - self.avg_spread_pct / Decimal::from(2),
         };
 
         // Clamp to reasonable bounds [-5%, +5%]
@@ -114,8 +121,8 @@ impl SlippageModel {
 
         // Apply side factor
         let side_factor = match side {
-            OrderSide::Buy => Decimal::one() + self.avg_spread_pct / Decimal::from(2),
-            OrderSide::Sell => Decimal::one() - self.avg_spread_pct / Decimal::from(2),
+            OrderSide::Buy => Decimal::ONE + self.avg_spread_pct / Decimal::from(2),
+            OrderSide::Sell => Decimal::ONE - self.avg_spread_pct / Decimal::from(2),
         };
 
         total_price_impact * side_factor
@@ -150,7 +157,7 @@ impl AdverseFillModel {
     pub fn compute_fill_slippage(
         &self,
         side: OrderSide,
-        fill_quantity: i64,
+        mut fill_quantity: i64,
         book_levels: &BTreeMap<Price, i64>,
         entry_price: Decimal,
     ) -> (Decimal, Option<Price>) {
@@ -162,8 +169,7 @@ impl AdverseFillModel {
         let mut worst_price: Option<Price> = None;
         let mut worst_price_val: Decimal = entry_price;
 
-        let mut levels = book_levels.clone();
-        let mut rounds = 0;
+        let mut rounds: usize = 0;
 
         while fill_quantity != 0 && rounds < self.levels_per_round {
             rounds += 1;
@@ -189,26 +195,30 @@ impl AdverseFillModel {
             let depth = best_depth.max(1);
             let take = std::cmp::min(fill_quantity, depth);
 
-            // Price at this level determines slippage
-            let price_at_level = best_price.0;
-            let price_pct_change = (take as Decimal * Decimal::from(100))
-                / (Decimal::from(best_depth) * current_price);
+            // Price impact at this level, relative to the entry price (guard
+            // against the zero-depth case with the same `.max(1)` floor used
+            // for `take`, rather than dividing by the raw, possibly-zero
+            // `best_depth`).
+            let price_pct_change =
+                (Decimal::from(take) * Decimal::from(100)) / (Decimal::from(depth) * entry_price);
 
-            total_slippage += pct_change * Decimal::from(10).powi(rounds as i32);
-            worst_price_val = worst_price_val * (Decimal::one() + pct_change);
+            // `compounding` means each successive round's impact is scaled
+            // by how many rounds have already walked the book; a flat model
+            // just applies each round's own impact once.
+            let round_slippage = if self.compounding {
+                price_pct_change * Decimal::from(rounds as i64)
+            } else {
+                price_pct_change
+            };
+            total_slippage += round_slippage;
+            worst_price_val *= Decimal::ONE + price_pct_change;
 
             // Update worst price tracking
-            if worst_price.is_none() || worst_price_val > worst_price.unwrap().0 {
+            if worst_price.is_none_or(|p| worst_price_val > p.0) {
                 worst_price = Some(Price(worst_price_val));
             }
 
-            // Remove filled level
-            if let Some(first_key) = book_levels.keys().next().cloned() {
-                // Simplified: just reduce depth or remove level
-                // In full impl, would update the book state
-            }
-
-            fill_quantity -= take as i64;
+            fill_quantity -= take;
         }
 
         // Cap at max slippage

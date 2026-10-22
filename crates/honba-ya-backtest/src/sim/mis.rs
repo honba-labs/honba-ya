@@ -1,10 +1,10 @@
 //! Intraday MIS (Margin Intraday Square-off) 15:20 IST auto-square-off engine.
 
-use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime, Utc};
+use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use std::collections::HashSet;
 
-use honba_core::{InstrumentId, OrderSide, OrderType, Tick};
+use honba_core::{InstrumentId, OrderSide, Price};
 use honba_mon::RiskRefusal;
 
 use crate::calendar::NseTradingCalendar;
@@ -33,6 +33,7 @@ pub enum SquareOffResult {
 /// Enforces SEBI/MARGIN INTRADAY SQUARE-OFF at 15:20 IST where all
 /// open intraday (MIS) positions are forcibly squared off, squaring off
 /// buy and sell positions at the prevailing market price.
+#[derive(Debug, Clone)]
 pub struct MisSquareOffManager {
     /// NSE trading calendar for holiday checks
     calendar: NseTradingCalendar,
@@ -76,7 +77,7 @@ impl MisSquareOffManager {
         let square_off_time = chrono::NaiveTime::from_hms_opt(15, 20, 0).unwrap();
         let market_close_time = chrono::NaiveTime::from_hms_opt(15, 30, 0).unwrap();
 
-        if ist_time >= square_off_time && ist_time < market_close_time {
+        if ist_time_only >= square_off_time && ist_time_only < market_close_time {
             // Square-off window active
             let reason = format!(
                 "MIS square-off at 15:20 IST; time is {:}",
@@ -86,7 +87,7 @@ impl MisSquareOffManager {
                 reason,
                 square_off_price: Price(Decimal::ZERO), // Would be mid-price at square-off
             })
-        } else if ist_time >= market_close_time {
+        } else if ist_time_only >= market_close_time {
             // Market closed
             Some(SquareOffResult::ForcedSquareOff {
                 reason: "NSE market close at 15:30 IST".to_string(),

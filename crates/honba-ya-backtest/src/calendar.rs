@@ -122,6 +122,11 @@ impl NseTradingCalendar {
         }
     }
 
+    /// IST offset (UTC+05:30) used to convert UTC timestamps for session checks.
+    pub fn ist_offset(&self) -> FixedOffset {
+        self.ist_offset
+    }
+
     /// Check if a UTC timestamp falls within open NSE market hours.
     pub fn is_market_open(&self, utc_time: DateTime<Utc>) -> bool {
         let ist_time = utc_time.with_timezone(&self.ist_offset);
