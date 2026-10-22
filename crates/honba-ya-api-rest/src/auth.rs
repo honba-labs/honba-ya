@@ -9,11 +9,23 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Json, Response},
 };
-use honba_api::{ApiResponse, ErrorCode, ErrorDetail, ResponseEnvelope};
+use honba_api::{ErrorCode, ErrorDetail, ResponseEnvelope};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 use chrono::Utc;
-use russh_keys::rsa::PublicKey;
+
+/// Hex-encoded SHA-256 digest of `s`.
+///
+/// `honba-ya-persistence::decisions::sha256_hex` has the same helper, but this
+/// crate doesn't depend on `honba-ya-persistence`, so it's kept local here on
+/// top of the `sha2`/`hex` deps this crate already has.
+fn sha256_hex(s: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(s.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
 /// Token info returned by successful validation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenInfo {
@@ -722,13 +734,18 @@ impl<S: Clone + Send + Sync + 'static> AuthRouterExt for Router<S> {
             return Err(JwtError::MissingToken);
         }
 
+        // Both branches below check `iss`/`aud`/`exp`/`iat` manually against `config`, so the
+        // library's own claim validation is disabled here to avoid double (and differently
+        // configured) enforcement; `jsonwebtoken` still verifies the signature.
+        let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
+        validation.validate_exp = false;
+        validation.validate_aud = false;
+        validation.required_spec_claims.clear();
+
         // Try HS256 first (HMAC)
         if let Some(hmac_secret) = &config.hmac_secret {
-            match jsonwebtoken::decode::<JwtClaims>(
-                token,
-                &jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256),
-                &jsonwebtoken::DecodeOptions::default(),
-            ) {
+            let key = jsonwebtoken::DecodingKey::from_secret(hmac_secret);
+            match jsonwebtoken::decode::<JwtClaims>(token, &key, &validation) {
                 Ok(data) => {
                     // Verify issuer and audience
                     if data.claims.iss != config.issuer {
@@ -739,9 +756,8 @@ impl<S: Clone + Send + Sync + 'static> AuthRouterExt for Router<S> {
                     }
 
                     // Check expiration
-                    if Utc::now().timestamp() as usize < data.claims.iat
-                        || Utc::now().timestamp() as usize > data.claims.exp
-                    {
+                    let now = Utc::now().timestamp() as usize;
+                    if now < data.claims.iat || now > data.claims.exp {
                         return Err(JwtError::Expired);
                     }
 
@@ -750,31 +766,24 @@ impl<S: Clone + Send + Sync + 'static> AuthRouterExt for Router<S> {
                         scopes: data.claims.scopes.clone(),
                     });
                 }
-                Err(jsonwebtoken::errors::Error::InvalidSignature(_)) => {
-                    // Fall through to RSA verification
-                }
                 Err(_) => {
-                    // Not a valid HS256 token, try RSA
+                    // Not a valid HS256 token (wrong key, signature, or shape); try RSA.
                 }
             }
         }
 
         // Try RS256 (RSA public key verification)
         if let Some(rsa_pem) = &config.rsa_public_key {
-            // Load the RSA public key
-            let rsa_key = match russh_keys::rsa::PublicKey::from_pem(rsa_pem.as_bytes()) {
+            let key = match jsonwebtoken::DecodingKey::from_rsa_pem(rsa_pem.as_bytes()) {
                 Ok(key) => key,
                 Err(_) => return Err(JwtError::MissingRsaKey),
             };
+            let mut rsa_validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
+            rsa_validation.validate_exp = false;
+            rsa_validation.validate_aud = false;
+            rsa_validation.required_spec_claims.clear();
 
-            // Build RSA verification key
-            let verification_key = jsonwebtoken::RSAVerifier::from(&rsa_key);
-
-            match jsonwebtoken::decode::<JwtClaims>(
-                token,
-                &jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256),
-                jsonwebtoken::DecodeOptions::default().set_rsa_verifier(verification_key),
-            ) {
+            match jsonwebtoken::decode::<JwtClaims>(token, &key, &rsa_validation) {
                 Ok(data) => {
                     // Verify issuer and audience
                     if data.claims.iss != config.issuer {
@@ -785,9 +794,8 @@ impl<S: Clone + Send + Sync + 'static> AuthRouterExt for Router<S> {
                     }
 
                     // Check expiration
-                    if Utc::now().timestamp() as usize < data.claims.iat
-                        || Utc::now().timestamp() as usize > data.claims.exp
-                    {
+                    let now = Utc::now().timestamp() as usize;
+                    if now < data.claims.iat || now > data.claims.exp {
                         return Err(JwtError::Expired);
                     }
 
@@ -796,7 +804,7 @@ impl<S: Clone + Send + Sync + 'static> AuthRouterExt for Router<S> {
                         scopes: data.claims.scopes.clone(),
                     });
                 }
-                Err(jsonwebtoken::errors::Error::InvalidSignature(_)) | Err(_) => {
+                Err(_) => {
                     return Err(JwtError::InvalidSignature);
                 }
             }
