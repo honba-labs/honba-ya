@@ -14,7 +14,7 @@
 use std::io::Write;
 use std::path::Path;
 
-use honba_messages::TradingState;
+use honba_api::TradingState;
 use serde::Serialize;
 
 /// One operator-journal line. Fields are private: it is written, never read back.

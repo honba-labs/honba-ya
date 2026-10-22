@@ -9,7 +9,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::Response;
 use honba_api::{BacktestRequest, RunKind, SweepRequest, TradesResponse};
-use honba_messages::{ErrorCode, ErrorDetail};
+use honba_api::{ErrorCode, ErrorDetail};
 use serde_json::json;
 
 use crate::market::{failure, success};
@@ -21,11 +21,11 @@ use crate::{ApiJson, AppState};
 /// The HTTP status of a run-route failure.
 fn status_of(detail: &ErrorDetail) -> StatusCode {
     match detail.code {
-        ErrorCode::ValidationInvalidRequest | ErrorCode::Unsupported => {
+        ErrorCode::ValidationInvalidRequest | ErrorCode::NotImplemented => {
             StatusCode::UNPROCESSABLE_ENTITY
         }
         ErrorCode::NotFound => StatusCode::NOT_FOUND,
-        ErrorCode::RateLimited => StatusCode::TOO_MANY_REQUESTS,
+        ErrorCode::Timeout => StatusCode::TOO_MANY_REQUESTS,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -74,7 +74,7 @@ pub(crate) async fn post_backtests(
             Ok(_) => failure(
                 StatusCode::SERVICE_UNAVAILABLE,
                 ErrorDetail::new(
-                    ErrorCode::Unsupported,
+                    ErrorCode::NotImplemented,
                     "no journals directory is configured",
                 )
                 .with_context(json!({"reason": "no_journals_dir"})),
@@ -190,7 +190,7 @@ pub(crate) async fn post_sweeps(
             Ok(_) => failure(
                 StatusCode::SERVICE_UNAVAILABLE,
                 ErrorDetail::new(
-                    ErrorCode::Unsupported,
+                    ErrorCode::NotImplemented,
                     "no journals directory is configured",
                 )
                 .with_context(json!({"reason": "no_journals_dir"})),

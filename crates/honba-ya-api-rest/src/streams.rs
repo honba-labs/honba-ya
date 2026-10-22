@@ -10,8 +10,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response, Sse, sse::Event},
 };
-use honba_api::{BacktestEventsQuery, RunKind, RunStatus, StreamFrame};
-use honba_messages::{ErrorCode, ErrorDetail, Message};
+use honba_api::{
+    BacktestEventsQuery, ErrorCode, ErrorDetail, Message, RunKind, RunStatus, SCHEMA_VERSION,
+    StreamFrame,
+};
 use serde_json::json;
 use tokio::time::interval;
 
@@ -96,15 +98,16 @@ pub(crate) fn read_journal_from(
 /// Decodes one complete journal line into a `Message`, enforcing `SCHEMA_VERSION`.
 fn decode_record(line: &[u8]) -> Result<Message, ErrorDetail> {
     serde_json::from_slice::<Message>(line).map_err(|e| {
+        // The wire `schema_version` is a string (e.g. "4"), not a number.
         let found = serde_json::from_slice::<serde_json::Value>(line)
             .ok()
-            .and_then(|v| v.get("schema_version").and_then(serde_json::Value::as_u64));
-        match found {
-            Some(found) if found != u64::from(honba_messages::SCHEMA_VERSION) => ErrorDetail::new(
-                ErrorCode::Unsupported,
+            .and_then(|v| v.get("schema_version").and_then(serde_json::Value::as_str).map(str::to_owned));
+        match found.as_deref() {
+            Some(found) if found != SCHEMA_VERSION => ErrorDetail::new(
+                ErrorCode::NotImplemented,
                 "journal written at another schema_version",
             )
-            .with_context(json!({"found": found, "expected": honba_messages::SCHEMA_VERSION})),
+            .with_context(json!({"found": found, "expected": SCHEMA_VERSION})),
             _ => ErrorDetail::new(
                 ErrorCode::InternalError,
                 format!("journal record invalid: {e}"),
@@ -150,7 +153,7 @@ pub async fn get_backtest_events(
         return failure(
             StatusCode::SERVICE_UNAVAILABLE,
             ErrorDetail::new(
-                ErrorCode::Unsupported,
+                ErrorCode::NotImplemented,
                 "no journals directory is configured",
             )
             .with_context(json!({"reason": "no_journals_dir"})),

@@ -280,7 +280,7 @@ async fn unsupported_method(method: Method, uri: axum::http::Uri) -> Response {
     market::failure(
         StatusCode::METHOD_NOT_ALLOWED,
         ErrorDetail::new(
-            ErrorCode::Unsupported,
+            ErrorCode::NotImplemented,
             format!("{method} is not supported on {}", uri.path()),
         ),
     )

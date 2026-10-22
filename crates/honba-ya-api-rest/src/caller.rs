@@ -9,7 +9,7 @@ use axum::extract::FromRequestParts;
 use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::Response;
-use honba_messages::{ErrorCode, ErrorDetail};
+use honba_api::{ErrorCode, ErrorDetail};
 
 use crate::auth::{AuthEnforced, TokenInfo};
 use crate::market::failure;

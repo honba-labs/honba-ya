@@ -5,7 +5,7 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 
 use honba_api::JournalWriter;
-use honba_messages::{ErrorCode, ErrorDetail, Message};
+use honba_api::{ErrorCode, ErrorDetail, Message};
 
 /// `events.ndjson`: one wire [`Message`] per line, in append order.
 pub struct NdjsonJournal<W: Write + Send = File> {

@@ -9,10 +9,9 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use honba_api::{
-    BacktestRequest, BacktestResponse, JournalWriter, ResolvedRequest, RunExecutor, RunId, RunJob,
-    StrategyCatalog, SweepRequest, unknown_strategy,
+    BacktestRequest, BacktestResponse, ErrorCode, ErrorDetail, JournalWriter, ResolvedRequest,
+    RunExecutor, RunId, RunJob, StrategyCatalog, SweepRequest, unknown_strategy,
 };
-use honba_messages::{ErrorCode, ErrorDetail};
 use honba_strategy::StrategyIr;
 
 use serde_json::json;
@@ -134,7 +133,7 @@ pub struct RunService {
 }
 
 fn shutting_down() -> ErrorDetail {
-    ErrorDetail::new(ErrorCode::RateLimited, "server is shutting down")
+    ErrorDetail::new(ErrorCode::Timeout, "server is shutting down")
         .with_context(json!({"reason": "shutting_down"}))
 }
 
@@ -223,7 +222,7 @@ impl RunService {
         }
         if queue.items.len() >= self.max_queued {
             return Err(
-                ErrorDetail::new(ErrorCode::RateLimited, "the run queue is full").with_context(
+                ErrorDetail::new(ErrorCode::Timeout, "the run queue is full").with_context(
                     json!({
                         "reason": "run_queue_full",
                         "max_queued": self.max_queued
@@ -269,7 +268,7 @@ impl RunService {
         }
         if queue.items.len() >= self.max_queued {
             return Err(
-                ErrorDetail::new(ErrorCode::RateLimited, "the run queue is full").with_context(
+                ErrorDetail::new(ErrorCode::Timeout, "the run queue is full").with_context(
                     json!({
                         "reason": "run_queue_full",
                         "max_queued": self.max_queued

@@ -15,10 +15,11 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::Response;
-use honba_api::{PortfolioAccountsResponse, PortfolioHoldingsResponse, PortfolioPositionsResponse};
-use honba_entities::PortfolioSnapshot;
-use honba_core::{InstrumentId};
-use honba_messages::{ErrorCode, ErrorDetail};
+use honba_api::{
+    ErrorCode, ErrorDetail, PortfolioAccountsResponse, PortfolioHoldingsResponse,
+    PortfolioPositionsResponse,
+};
+use honba_core::{InstrumentId, PortfolioSnapshot};
 use honba_portfolio::{
     AccountState, HeldPosition, Marks, PortfolioError as ValuationError, PortfolioState, value,
 };
@@ -34,7 +35,7 @@ fn no_store() -> Response {
     failure(
         StatusCode::SERVICE_UNAVAILABLE,
         ErrorDetail::new(
-            ErrorCode::Unsupported,
+            ErrorCode::NotImplemented,
             "no portfolios directory is configured",
         )
         .with_context(json!({"reason": "no_portfolios_dir"})),
@@ -47,7 +48,7 @@ fn store_failure(error: PortfolioError) -> Response {
         // The id comes from a token record, never from the request: refuse, don't build a path.
         PortfolioError::InvalidUserId => failure(
             StatusCode::FORBIDDEN,
-            ErrorDetail::new(ErrorCode::Forbidden, "this token id cannot own a portfolio")
+            ErrorDetail::new(ErrorCode::Unauthorized, "this token id cannot own a portfolio")
                 .with_context(json!({"reason": "invalid_user_id"})),
         ),
         PortfolioError::RevisionConflict { expected, current } => failure(
@@ -89,7 +90,7 @@ fn valuation_failure(error: ValuationError) -> Response {
         ValuationError::MissingMark { instrument_id } => failure(
             StatusCode::SERVICE_UNAVAILABLE,
             ErrorDetail::new(
-                ErrorCode::MarketDataUnavailable,
+                ErrorCode::NotFound,
                 format!("no mark for instrument {instrument_id}"),
             )
             .with_context(json!({

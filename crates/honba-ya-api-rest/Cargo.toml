@@ -11,6 +11,7 @@ description = "REST API server for the Honba platform (axum)"
 name = "honba_api_rest"
 
 [dependencies]
+honba-core.workspace = true
 honba-api.workspace = true
 honba-feed.workspace = true
 honba-strategy.workspace = true

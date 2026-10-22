@@ -11,8 +11,7 @@ use std::sync::Arc;
 use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::StatusCode;
 use axum::response::Response;
-use honba_api::{LayoutDocument, LayoutsResponse, ModulesResponse, ProfileRevision};
-use honba_messages::{ErrorCode, ErrorDetail};
+use honba_api::{ErrorCode, ErrorDetail, LayoutDocument, LayoutsResponse, ModulesResponse, ProfileRevision};
 use serde::Serialize;
 use serde_json::json;
 use tracing::error;
@@ -46,7 +45,7 @@ async fn with_store<T: Serialize + Send + 'static>(
         return failure(
             StatusCode::SERVICE_UNAVAILABLE,
             ErrorDetail::new(
-                ErrorCode::Unsupported,
+                ErrorCode::NotImplemented,
                 "no profiles directory is configured",
             )
             .with_context(json!({"reason": "no_profiles_dir"})),
@@ -67,7 +66,7 @@ fn profile_failure(e: ProfileError) -> Response {
         // The id comes from a token record, never from the request: refuse, don't build a path.
         ProfileError::InvalidUserId => failure(
             StatusCode::FORBIDDEN,
-            ErrorDetail::new(ErrorCode::Forbidden, "this token id cannot own a profile")
+            ErrorDetail::new(ErrorCode::Unauthorized, "this token id cannot own a profile")
                 .with_context(json!({"reason": "invalid_user_id"})),
         ),
         ProfileError::RevisionConflict { expected, current } => failure(

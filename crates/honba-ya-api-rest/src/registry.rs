@@ -3,7 +3,8 @@
 //! A strategy with no entry here is refused at admission with a typed 422, not at run time.
 
 use honba_api::parse_timeframe;
-use honba_messages::{ErrorCode, ErrorDetail, InstrumentId};
+use honba_api::{ErrorCode, ErrorDetail};
+use honba_core::InstrumentId;
 use honba_strategy::{
     BuyAndHold, RsiReversal, SmaCrossover, Strategy, StrategyIr, StrategyManifest, Subscriptions,
     TimeframeSpec, Universe,

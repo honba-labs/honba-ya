@@ -12,7 +12,7 @@ use std::sync::PoisonError;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::task::JoinHandle;
 
-use honba_messages::Bar;
+use honba_core::Bar;
 
 use crate::AppState;
 
@@ -85,7 +85,7 @@ impl AppState {
             }
             if let Err(e) = self.advance_market(std::slice::from_ref(&bar)) {
                 report.errors += 1;
-                tracing::warn!(ts_event = ?bar.ts_event(), error = %e.message, "bar pump: advance_market failed; bar skipped");
+                tracing::warn!(ts_event = ?bar.timestamp, error = %e.message, "bar pump: advance_market failed; bar skipped");
             }
         }
         tracing::info!(

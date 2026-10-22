@@ -3,7 +3,11 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use honba_api::OrdersRequest;
-use honba_messages::{ErrorCode, ErrorDetail, OrderId};
+use honba_api::{ErrorCode, ErrorDetail};
+
+/// Order idempotency key — a plain `String` since the old `honba_messages::OrderId`
+/// newtype was removed in Phase 1.3.
+type OrderId = String;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -63,7 +67,7 @@ impl ApprovalQueue {
         let mut inner = self.lock();
         if inner.items.len() >= inner.max_size {
             return Err(
-                ErrorDetail::new(ErrorCode::RateLimited, "approval queue is full").with_context(
+                ErrorDetail::new(ErrorCode::Timeout, "approval queue is full").with_context(
                     json!({
                         "reason": "approval_queue_full",
                         "max_size": inner.max_size

@@ -19,7 +19,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::Response;
 use honba_api::{BarsIngestRequest, BarsIngestResponse};
-use honba_messages::{ErrorCode, ErrorDetail};
+use honba_api::{ErrorCode, ErrorDetail};
 use serde_json::json;
 use tokio::sync::mpsc::error::TrySendError;
 
@@ -38,7 +38,7 @@ pub(crate) async fn post_bars(
         return failure(
             StatusCode::SERVICE_UNAVAILABLE,
             ErrorDetail::new(
-                ErrorCode::MarketDataUnavailable,
+                ErrorCode::NotFound,
                 "bar ingest is not running on this server",
             )
             .with_context(json!({"reason": "bar_ingest_disabled"})),
@@ -67,7 +67,7 @@ pub(crate) async fn post_bars(
         Err(TrySendError::Full(())) => {
             return failure(
                 StatusCode::TOO_MANY_REQUESTS,
-                ErrorDetail::new(ErrorCode::RateLimited, "bar ingest queue is full; retry")
+                ErrorDetail::new(ErrorCode::Timeout, "bar ingest queue is full; retry")
                     .with_context(json!({
                         "reason": "bar_ingest_full",
                         "capacity": sender.max_capacity(),
@@ -78,7 +78,7 @@ pub(crate) async fn post_bars(
         Err(TrySendError::Closed(())) => {
             return failure(
                 StatusCode::SERVICE_UNAVAILABLE,
-                ErrorDetail::new(ErrorCode::MarketDataUnavailable, "bar ingest has stopped")
+                ErrorDetail::new(ErrorCode::NotFound, "bar ingest has stopped")
                     .with_context(json!({"reason": "bar_ingest_disabled"})),
             );
         }

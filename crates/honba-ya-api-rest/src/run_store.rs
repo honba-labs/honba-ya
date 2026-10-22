@@ -13,9 +13,9 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use chrono::{DateTime, SecondsFormat};
 use honba_api::{
-    MANIFEST_VERSION, ResolvedRequest, RunId, RunIdGenerator, RunKind, RunManifest, RunStatus,
+    ErrorCode, ErrorDetail, MANIFEST_VERSION, Message, ResolvedRequest, RunId, RunIdGenerator,
+    RunKind, RunManifest, RunStatus, SCHEMA_VERSION,
 };
-use honba_messages::{ErrorCode, ErrorDetail, Message, SCHEMA_VERSION};
 use honba_strategy::StrategyIr;
 use serde_json::json;
 
@@ -193,7 +193,7 @@ impl RunStore {
         let mut inner = self.lock();
         if !inner.accepting {
             return Err(
-                ErrorDetail::new(ErrorCode::RateLimited, "server is shutting down")
+                ErrorDetail::new(ErrorCode::Timeout, "server is shutting down")
                     .with_context(json!({"reason": "shutting_down"})),
             );
         }
@@ -427,12 +427,14 @@ impl RunStore {
 
 fn decode_record(line: &[u8]) -> Result<Message, ErrorDetail> {
     serde_json::from_slice::<Message>(line).map_err(|e| {
+        // The wire `schema_version` is a string (e.g. "4"), not a number, since SCHEMA_VERSION
+        // moved from an integer to a string constant in the honba_messages -> honba_api move.
         let found = serde_json::from_slice::<serde_json::Value>(line)
             .ok()
-            .and_then(|v| v.get("schema_version").and_then(serde_json::Value::as_u64));
-        match found {
-            Some(found) if found != u64::from(SCHEMA_VERSION) => ErrorDetail::new(
-                ErrorCode::Unsupported,
+            .and_then(|v| v.get("schema_version").and_then(serde_json::Value::as_str).map(str::to_owned));
+        match found.as_deref() {
+            Some(found) if found != SCHEMA_VERSION => ErrorDetail::new(
+                ErrorCode::NotImplemented,
                 "journal written at another schema_version",
             )
             .with_context(json!({"found": found, "expected": SCHEMA_VERSION})),
