@@ -10,9 +10,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-pub use honba_risk::{OrderRateLimit, RiskLimits};
+pub use honba_mon::{OrderRateLimit, RiskLimits};
 use honba_strategy::{StrategyManifest, Universe};
-use honba_core::InstrumentId;
 
 /// A complete, self-describing description of one backtest run.
 ///
@@ -164,7 +163,13 @@ impl BacktestRunConfig {
                 return Err(RunConfigError::EmptyDataRoot);
             }
         }
-        self.risk.validate().map_err(RunConfigError::Risk)?;
+        if !self.risk.is_valid() {
+            return Err(RunConfigError::Risk(InvalidRiskLimits(
+                "risk limits are invalid: check max_notional_per_order, order_rate_limit, \
+                 price_collar_bps, and freeze_limits"
+                    .to_string(),
+            )));
+        }
         Ok(())
     }
 
@@ -189,7 +194,7 @@ pub enum RunConfigError {
     /// The local data root is blank.
     EmptyDataRoot,
     /// The `[risk]` limits are invalid.
-    Risk(honba_risk::RiskConfigError),
+    Risk(InvalidRiskLimits),
 }
 
 impl std::fmt::Display for RunConfigError {
@@ -214,6 +219,25 @@ impl std::error::Error for RunConfigError {
         }
     }
 }
+
+/// The `[risk]` section of a run config failed structural validation.
+///
+/// This crate validates the raw `[risk]` section (deserialized into
+/// [`RiskLimits`]) before any `honba_mon::RiskEngine` is constructed to
+/// evaluate orders against it, so there is no engine-level error to reuse
+/// here. `honba_mon::RiskError` also isn't `Clone`, which `RunConfigError`
+/// needs to stay `Clone`/`PartialEq` like its sibling variants, so this is
+/// a small local error carrying its own description.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InvalidRiskLimits(String);
+
+impl std::fmt::Display for InvalidRiskLimits {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for InvalidRiskLimits {}
 
 /// A named universe resolved to concrete instruments.
 ///

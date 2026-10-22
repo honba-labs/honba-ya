@@ -1,8 +1,9 @@
-//! TOML round trip of a full `[risk]` + `[risk.order_rate]` section (ADR 0018 decision 8).
+//! TOML round trip of a full `[risk]` + `[risk.order_rate_limit]` section (ADR 0018 decision 8).
 
 use std::path::PathBuf;
 
 use honba_config::{BacktestRunConfig, OrderRateLimit, RiskLimits};
+use rust_decimal::Decimal;
 
 fn base_text() -> String {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../configs/backtest");
@@ -18,19 +19,17 @@ fn base_text() -> String {
 #[test]
 fn full_risk_section_round_trips_through_toml() {
     let text = base_text()
-        + "\n[risk]\nmax_notional = 500000.0\n\n[risk.order_rate]\nmax_orders = 30\nwindow_ms = 1000\n";
+        + "\n[risk]\nmax_notional_per_order = \"500000.0\"\n\n[risk.order_rate_limit]\nmax_orders = 30\nwindow_ms = 1000\n";
     let cfg: BacktestRunConfig = toml::from_str(&text).unwrap();
     assert_eq!(
         cfg.risk,
         RiskLimits {
-            max_notional: Some(500000.0),
-            order_rate: Some(OrderRateLimit {
+            max_notional_per_order: Some(Decimal::from(500_000)),
+            order_rate_limit: Some(OrderRateLimit {
                 max_orders: 30,
                 window_ms: 1000
             }),
-            max_participation: None,
-            stale_after_ms: None,
-            price_collar_bps: None,
+            ..RiskLimits::default()
         }
     );
     cfg.validate().unwrap();
@@ -40,7 +39,7 @@ fn full_risk_section_round_trips_through_toml() {
 
 #[test]
 fn invalid_risk_section_fails_validation() {
-    let text = base_text() + "\n[risk]\nmax_notional = -1.0\n";
+    let text = base_text() + "\n[risk]\nmax_notional_per_order = \"-1.0\"\n";
     let cfg: BacktestRunConfig = toml::from_str(&text).unwrap();
     assert!(cfg.validate().is_err());
 }

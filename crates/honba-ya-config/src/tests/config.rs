@@ -2,11 +2,11 @@
 
 use crate::*;
 
-use honba_messages::{BarAggregation, Exchange, InstrumentId};
-use honba_strategy::{StrategyManifest, Subscriptions, TimeframeSpec};
+use honba_core::{Exchange, InstrumentId};
+use honba_strategy::{BarAggregation, StrategyManifest, Subscriptions, TimeframeSpec};
 
 fn any_id(symbol: &str) -> InstrumentId {
-    InstrumentId::new(symbol, Exchange::new("NSE"))
+    InstrumentId::new(Exchange::Nse, symbol)
 }
 
 fn valid_strategy() -> StrategyManifest {
