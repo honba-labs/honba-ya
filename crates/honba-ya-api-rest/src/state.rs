@@ -8,10 +8,9 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
-use honba_api::StrategyCatalog;
-use honba_entities::Currency;
+use honba_api::{ErrorDetail, StrategyCatalog, TradingState};
+use honba_core::Currency;
 use honba_feed::{DatasetReader, LiveQuoteStore, ReaderError};
-use honba_messages::{ErrorDetail, TradingState};
 use honba_ports::{BarReader, DepthReader, InstrumentMaster, QuoteReader};
 
 use crate::{
@@ -80,7 +79,7 @@ pub struct AppState {
     /// The sending side of the bar ingest channel behind `POST /bars`; `None` until
     /// [`AppState::start_bar_ingest`] (or [`AppState::attach_bar_ingest`]) and again after
     /// [`AppState::stop_bar_ingest`]. Shared by every clone of the state.
-    pub(crate) bar_ingest: Arc<Mutex<Option<tokio::sync::mpsc::Sender<honba_messages::Bar>>>>,
+    pub(crate) bar_ingest: Arc<Mutex<Option<tokio::sync::mpsc::Sender<honba_core::Bar>>>>,
 }
 
 impl AppState {
@@ -151,7 +150,7 @@ impl AppState {
     /// later session, and each fill, rejection or cancel updates the matching ledger row (so
     /// [`OrderLedger::position`] follows). This is the hook a live bar feed calls; event time is
     /// the bars' `ts_event`, never the wall clock. An out-of-order bar is an error.
-    pub fn advance_market(&self, bars: &[honba_messages::Bar]) -> Result<(), ErrorDetail> {
+    pub fn advance_market(&self, bars: &[honba_core::Bar]) -> Result<(), ErrorDetail> {
         self.exec.advance(&self.orders, bars)
     }
 
