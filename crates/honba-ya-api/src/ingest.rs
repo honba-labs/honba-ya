@@ -1,9 +1,9 @@
 //! Validation of a `POST /bars` batch (E3-S7 follow-up).
 //!
-//! Individual bars are validated when they deserialize ([`honba_messages::Bar`] checks its own
-//! invariants); this module bounds the batch.
+//! Bars are plain records ([`honba_core::Bar`]); this module bounds the batch a single
+//! request may carry.
 
-use honba_messages::{ErrorCode, ErrorDetail};
+use crate::wire::{ErrorCode, ErrorDetail};
 use serde_json::json;
 
 /// Most bars one `POST /bars` request may carry.

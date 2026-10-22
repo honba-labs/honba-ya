@@ -1,17 +1,18 @@
 //! ADR 0017 decision 8: the executor and journal ports and the values crossing them.
 
-use honba_messages::UnixNanos;
-use honba_messages::{ErrorCode, ErrorDetail, Event, Exchange, InstrumentId, Message, QuoteTick};
+use rust_decimal::Decimal;
 use serde_json::json;
 
+use crate::wire::{ErrorCode, ErrorDetail, Event, Message, QuoteTick};
 use crate::{
     BacktestMetrics, JournalWriter, ResolvedBacktest, ResolvedRequest, ResolvedSweep, RunExecutor,
     RunJob, RunKind, RunManifest, RunOutcome, RunStatus, StrategyCatalog, SweepReportResponse,
     compile_strategy,
 };
 use crate::{RunId, RunIdGenerator};
+use honba_core::{Exchange, InstrumentId};
 
-use super::tests_manifest;
+use super::{tests_manifest, ts};
 
 fn manifest(request: ResolvedRequest) -> RunManifest {
     let compiled = compile_strategy(&mut StrategyCatalog::default(), tests_manifest()).unwrap();
@@ -29,20 +30,24 @@ fn backtest() -> ResolvedRequest {
     ResolvedRequest::Backtest(ResolvedBacktest {
         strategy: "sma".into(),
         universe: "TCS.NSE".into(),
-        start: UnixNanos::from_u64(1),
-        end: UnixNanos::from_u64(9),
+        start: ts(1),
+        end: ts(9),
         bar_spec: "1d".into(),
-        initial_capital: 1_000.0,
+        initial_capital: Decimal::from(1_000_i64),
         seed: 42,
         fill_model: None,
-        commission_per_fill: 0.0,
-        slippage_bps: 0.0,
+        commission_per_fill: Decimal::ZERO,
+        slippage_bps: Decimal::ZERO,
     })
 }
 
 fn metrics() -> BacktestMetrics {
     serde_json::from_value(json!({
-        "trades": 2, "net_pnl": 5.0, "sharpe": 1.0, "max_drawdown": 0.1, "total_return": 0.01
+        "trades": 2,
+        "net_pnl": "5.0",
+        "sharpe": "1.0",
+        "max_drawdown": "0.1",
+        "total_return": "0.01"
     }))
     .unwrap()
 }
@@ -67,10 +72,10 @@ fn a_sweep_job_carries_the_sweep_kind_and_seed() {
         trials: 2,
         seed: 7,
         universe: "TCS.NSE".into(),
-        start: UnixNanos::from_u64(1),
-        end: UnixNanos::from_u64(2),
+        start: ts(1),
+        end: ts(2),
         bar_spec: "1d".into(),
-        initial_capital: 1_000_000.0,
+        initial_capital: Decimal::from(1_000_000_i64),
     }));
     let job = RunJob::from_manifest(&m);
     assert_eq!(job.kind, RunKind::Sweep);
@@ -103,10 +108,10 @@ fn a_sweep_outcome_completes_a_running_sweep_manifest() {
         trials: 2,
         seed: 7,
         universe: "TCS.NSE".into(),
-        start: UnixNanos::from_u64(1),
-        end: UnixNanos::from_u64(2),
+        start: ts(1),
+        end: ts(2),
         bar_spec: "1d".into(),
-        initial_capital: 1_000_000.0,
+        initial_capital: Decimal::from(1_000_000_i64),
     }));
     m.start("a").unwrap();
     let report = SweepReportResponse {
@@ -192,15 +197,15 @@ impl RunExecutor for OneQuote {
         journal: &mut dyn JournalWriter,
     ) -> Result<RunOutcome, ErrorDetail> {
         let q = QuoteTick::new(
-            InstrumentId::new("TCS", Exchange::new("NSE")),
-            1.0,
-            2.0,
-            1.0,
-            1.0,
-            UnixNanos::from_u64(job.seed),
-            UnixNanos::from_u64(job.seed),
+            InstrumentId::new(Exchange::Nse, "TCS"),
+            Decimal::from(1_i64),
+            Decimal::from(2_i64),
+            Decimal::from(1_i64),
+            Decimal::from(1_i64),
+            ts(job.seed as i64),
+            ts(job.seed as i64),
         );
-        journal.append(&Message::new(Event::Quote(q), UnixNanos::from_u64(1)))?;
+        journal.append(&Message::new(Event::Quote(q), ts(1)))?;
         journal.flush()?;
         Ok(RunOutcome::Backtest {
             metrics: BacktestMetrics::default(),

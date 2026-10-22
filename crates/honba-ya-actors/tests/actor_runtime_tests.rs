@@ -4,10 +4,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
-use honba_actors::*;
+use honba_actors::{*, RestartStrategy};
 use honba_core::*;
 use honba_mon::{OtrConfig, RiskEngine, RiskLimits, RiskRefusal};
-use honba_te_core::{BrokerError, MockBrokerExecutor};
+use honba_ya_testing::MockBrokerExecutor;
+use honba_te_core::BrokerError;
 
 struct SimpleBreakoutStrategy {
     symbol: InstrumentId,
@@ -64,10 +65,17 @@ async fn test_actor_runtime_end_to_end_pipeline() {
     let risk_engine = RiskEngine::new(limits, OtrConfig::default());
     let broker = Arc::new(MockBrokerExecutor::new(true));
 
-    let supervisor = Supervisor::spawn(strategy, risk_engine, broker, 64);
+    let supervisor = Supervisor::spawn_with_strategy(strategy, risk_engine, broker, 64, RestartStrategy::OneForOne);
     let mut tick_rx = supervisor.resubscribe_ticks();
 
-    // 1. Send tick below threshold -> no order
+    // 1. Subscribe to the instrument first
+    supervisor
+        .market_data_sender()
+        .send(MarketDataMsg::Subscribe(inst.clone()))
+        .await
+        .unwrap();
+
+    // 2. Send tick below threshold -> no order
     let t1 = Tick::Ltp {
         instrument: inst.clone(),
         price: Price::from_rupees("2490.00").unwrap(),
@@ -85,7 +93,7 @@ async fn test_actor_runtime_end_to_end_pipeline() {
     assert_eq!(r_t1.instrument(), &inst);
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // 2. Send tick meeting threshold -> triggers order -> passes risk -> fills at broker
+    // 3. Send tick meeting threshold -> triggers order -> passes risk -> fills at broker
     let t2 = Tick::Ltp {
         instrument: inst.clone(),
         price: Price::from_rupees("2505.00").unwrap(),
@@ -106,7 +114,7 @@ async fn test_actor_runtime_end_to_end_pipeline() {
     );
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // 3. Graceful staged drain and shutdown
+    // 4. Graceful staged drain and shutdown
     supervisor
         .shutdown_gracefully(Duration::from_secs(2))
         .await
@@ -151,7 +159,7 @@ async fn test_risk_actor_blocks_out_of_band_orders() {
     let res = reply_rx.await.unwrap();
     assert!(matches!(
         res,
-        Err(BrokerError::RiskRefusal(RiskRefusal::InvalidOrder { .. }))
+        Err(BrokerError::RiskRefusal(r)) if matches!(*r, RiskRefusal::InvalidOrder { .. })
     ));
 
     // Global kill switch test
@@ -183,7 +191,7 @@ async fn test_risk_actor_blocks_out_of_band_orders() {
     let res2 = reply_rx2.await.unwrap();
     assert!(matches!(
         res2,
-        Err(BrokerError::RiskRefusal(RiskRefusal::GlobalHalted { .. }))
+        Err(BrokerError::RiskRefusal(r)) if matches!(*r, RiskRefusal::GlobalHalted { .. })
     ));
 
     // Shutdown

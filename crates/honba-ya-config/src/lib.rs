@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 pub use honba_risk::{OrderRateLimit, RiskLimits};
 use honba_strategy::{StrategyManifest, Universe};
+use honba_core::InstrumentId;
 
 /// A complete, self-describing description of one backtest run.
 ///
@@ -168,7 +169,7 @@ impl BacktestRunConfig {
     }
 
     /// The instrument set this run covers.
-    pub fn instruments(&self) -> Vec<honba_messages::InstrumentId> {
+    pub fn instruments(&self) -> Vec<honba_core::InstrumentId> {
         self.strategy.instruments()
     }
 }
@@ -224,14 +225,14 @@ pub struct ResolvedUniverse {
     /// The name that was resolved, kept for the run's assumptions block.
     pub name: String,
     /// The instruments it resolved to, sorted.
-    pub instruments: Vec<honba_messages::InstrumentId>,
+    pub instruments: Vec<honba_core::InstrumentId>,
 }
 
 impl ResolvedUniverse {
     /// Builds a resolved universe, sorting for determinism.
     pub fn new(
         name: impl Into<String>,
-        mut instruments: Vec<honba_messages::InstrumentId>,
+        mut instruments: Vec<honba_core::InstrumentId>,
     ) -> Self {
         instruments.sort();
         instruments.dedup();

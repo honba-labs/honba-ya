@@ -1,8 +1,9 @@
 //! `POST /strategies` and `GET /strategies`: compile a manifest and keep it.
 //!
 //! "Compile" is the same step as `POST /strategies/verify` ([`verify_strategy`]): a manifest in,
-//! its [`StrategyIr`](honba_strategy::StrategyIr) out. What this adds is a session-scoped catalog, so a later request (a
-//! backtest naming `strategy`) can refer to the result by a stable id.
+//! its [`StrategyIr`](crate::strategy_ir::StrategyIr) out. What this adds is a session-scoped
+//! catalog, so a later request (a backtest naming `strategy`) can refer to the result by a
+//! stable id.
 //!
 //! Everything here is pure. The catalog is a plain value; the transport decides how to share it
 //! (the REST crate keeps one behind a lock). Nothing is persisted: a catalog lives as long as the
@@ -15,14 +16,14 @@
 
 use std::collections::BTreeMap;
 
-use honba_messages::{ErrorCode, ErrorDetail};
-use honba_strategy::StrategyManifest;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::requests::StrategiesRequest;
 use crate::responses::{CompiledStrategy, StrategiesResponse};
+use crate::strategy_ir::StrategyManifest;
 use crate::verify::verify_strategy;
+use crate::wire::{ErrorCode, ErrorDetail};
 
 /// Default capacity of a [`StrategyCatalog`].
 pub const MAX_COMPILED_STRATEGIES: usize = 1_000;
@@ -127,8 +128,8 @@ pub fn list_strategies(catalog: &StrategyCatalog) -> StrategiesResponse {
 }
 
 fn content_id(manifest: &StrategyManifest) -> Result<String, ErrorDetail> {
-    // Struct fields serialize in declaration order and `schedules` is a `BTreeMap`, so the
-    // bytes are canonical.
+    // Struct fields serialize in declaration order and every collection on the manifest is a
+    // `Vec` (never a hash map), so the bytes are canonical.
     let bytes = serde_json::to_vec(manifest)
         .map_err(|e| ErrorDetail::new(ErrorCode::InternalError, e.to_string()))?;
     let digest = Sha256::digest(&bytes);

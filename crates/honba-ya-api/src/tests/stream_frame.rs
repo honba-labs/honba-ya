@@ -1,24 +1,25 @@
 //! Unit tests for the run event stream frame and its resume DTO (E11-S4, ADR 0021).
 
-use honba_messages::{
-    ErrorCode, ErrorDetail, Event, Exchange, InstrumentId, Message, QuoteTick, SCHEMA_VERSION,
-    UnixNanos,
-};
+use rust_decimal::Decimal;
 use serde_json::json;
 
+use super::ts;
+use crate::wire::{ErrorCode, ErrorDetail, Event, Message, QuoteTick, SCHEMA_VERSION};
 use crate::{BacktestEventsQuery, RunStatus, StreamFrame};
+use honba_core::{Exchange, InstrumentId};
 
 fn quote_message(n: u64) -> Message {
+    let t = ts(n as i64);
     let quote = QuoteTick::new(
-        InstrumentId::new("TCS", Exchange::new("NSE")),
-        100.0,
-        101.0,
-        10.0,
-        20.0,
-        UnixNanos::from_u64(n),
-        UnixNanos::from_u64(n),
+        InstrumentId::new(Exchange::Nse, "TCS"),
+        Decimal::from(100_i64),
+        Decimal::from(101_i64),
+        Decimal::from(10_i64),
+        Decimal::from(20_i64),
+        t,
+        t,
     );
-    Message::new(Event::Quote(quote), UnixNanos::from_u64(n))
+    Message::new(Event::Quote(quote), t)
 }
 
 #[test]

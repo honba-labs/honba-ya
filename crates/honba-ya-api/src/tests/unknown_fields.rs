@@ -72,13 +72,17 @@ fn every_response_type_ignores_unknown_fields() {
     tolerates_extra::<InstrumentsResponse>(json!({"instruments": []}));
     tolerates_extra::<QuotesResponse>(json!({"quotes": []}));
     tolerates_extra::<BarsResponse>(json!({"bars": []}));
-    tolerates_extra::<DepthLevel>(json!({"price": 1.0, "qty": 2.0}));
+    tolerates_extra::<DepthLevel>(json!({"price": "1.0", "qty": "2.0"}));
     tolerates_extra::<DepthResponse>(json!({"bids": [], "asks": []}));
     tolerates_extra::<StrategiesResponse>(json!({"strategies": []}));
     tolerates_extra::<StrategiesResponse>(json!({"strategies": [compiled()]}));
     tolerates_extra::<CompiledStrategy>(compiled());
     tolerates_extra::<BacktestMetrics>(json!({
-        "trades": 1, "net_pnl": 0.0, "sharpe": 0.0, "max_drawdown": 0.0, "total_return": 0.0
+        "trades": 1,
+        "net_pnl": "0.0",
+        "sharpe": "0.0",
+        "max_drawdown": "0.0",
+        "total_return": "0.0"
     }));
     tolerates_extra::<BacktestResponse>(json!({"run_id": "r", "status": "pending"}));
     tolerates_extra::<SweepResponse>(json!({"job_id": "j", "status": "running"}));

@@ -1,6 +1,7 @@
 //! Unit tests for `honba-api` (ADR 007: one file per area).
 
 mod cache;
+mod capabilities;
 mod endpoints;
 mod ingest;
 mod market;
@@ -11,13 +12,21 @@ mod runs;
 mod screener;
 mod strategies;
 mod stream_frame;
+mod unknown_fields;
+mod verify;
 
+use rust_decimal::Decimal;
 use serde_json::json;
 
 use crate::{
     API_VERSION, ApiResponse, BacktestMetrics, BacktestRequest, ErrorCode, ErrorDetail,
-    ResponseEnvelope, RunStatus,
+    ResponseEnvelope, RunStatus, SCHEMA_VERSION,
 };
+
+/// Unix seconds → a test timestamp (`ts(86_400)` is 1970-01-02T00:00:00Z).
+pub(crate) fn ts(secs: i64) -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::from_timestamp(secs, 0).expect("a valid test timestamp")
+}
 
 #[test]
 fn a_backtest_request_rejects_unknown_fields() {
@@ -35,7 +44,7 @@ fn a_backtest_request_round_trips_through_json() {
         start: Some("2024-01-01".into()),
         end: Some("2025-01-01".into()),
         bar_spec: Some("1d".into()),
-        initial_capital: Some(1_000_000.0),
+        initial_capital: Some(Decimal::from(1_000_000_i64)),
         seed: Some(42),
         fill_model: None,
         commission_per_fill: None,
@@ -58,7 +67,7 @@ fn an_empty_backtest_request_is_accepted() {
 fn envelope_carries_the_api_version_and_the_schema_version() {
     let env: ResponseEnvelope<BacktestMetrics> = ApiResponse::success(BacktestMetrics::default());
     assert_eq!(env.api_version.as_str(), API_VERSION);
-    assert_eq!(env.schema_version, honba_messages::SCHEMA_VERSION);
+    assert_eq!(env.schema_version, SCHEMA_VERSION);
 }
 
 #[test]
@@ -97,22 +106,19 @@ fn run_status_serializes_in_snake_case() {
 
 #[test]
 fn api_error_codes_reach_callers_through_the_re_export() {
-    // The codes moved to honba-messages (docs/archive/plan.md 4.2); this pins that the
-    // honba-api re-export is the same type, not a copy.
+    // The canonical codes live in `wire`; this pins that the crate re-export is
+    // the same type, not a copy.
     let via_api: crate::ErrorCode = ErrorCode::Timeout;
-    let via_messages: honba_messages::ErrorCode = via_api;
-    assert_eq!(via_messages, honba_messages::ErrorCode::Timeout);
+    let via_wire: crate::wire::ErrorCode = via_api;
+    assert_eq!(via_wire, crate::wire::ErrorCode::Timeout);
 }
 
-mod capabilities;
-mod unknown_fields;
-mod verify;
-
 /// A minimal verifiable strategy manifest shared by the run tests.
-pub(crate) fn tests_manifest() -> honba_strategy::StrategyManifest {
-    use honba_messages::{BarAggregation, Exchange, InstrumentId};
-    use honba_strategy::{StrategyManifest, Subscriptions, TimeframeSpec, Universe};
-    let tcs = InstrumentId::new("TCS", Exchange::new("NSE"));
+pub(crate) fn tests_manifest() -> crate::strategy_ir::StrategyManifest {
+    use crate::strategy_ir::{StrategyManifest, Subscriptions, TimeframeSpec, Universe};
+    use crate::wire::BarAggregation;
+    use honba_core::{Exchange, InstrumentId};
+    let tcs = InstrumentId::new(Exchange::Nse, "TCS");
     StrategyManifest::new(
         "sma",
         "sha256:abc",
@@ -121,8 +127,6 @@ pub(crate) fn tests_manifest() -> honba_strategy::StrategyManifest {
     )
     .with_subscriptions(Subscriptions {
         instruments: vec![tcs],
-        quotes: false,
-        trades: false,
     })
     .with_warmup_bars(20)
 }

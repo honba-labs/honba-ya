@@ -1,15 +1,15 @@
 //! ADR 0017 decision 1 and 3: the run state machine and the run manifest.
 
+use rust_decimal::Decimal;
 use serde_json::json;
 
 use crate::{
     BacktestMetrics, ErrorCode, ErrorDetail, MANIFEST_VERSION, ResolvedBacktest, ResolvedRequest,
     ResolvedSweep, RunEvent, RunId, RunIdGenerator, RunKind, RunManifest, RunStatus,
-    StrategyCatalog, compile_strategy,
+    StrategyCatalog, SCHEMA_VERSION, compile_strategy,
 };
-use honba_messages::UnixNanos;
 
-use super::tests_manifest;
+use super::{tests_manifest, ts};
 
 const ALL_STATUSES: [RunStatus; 5] = [
     RunStatus::Pending,
@@ -119,11 +119,11 @@ fn backtest_manifest() -> RunManifest {
             start: crate::market::parse_bound("start", "2024-01-01").unwrap(),
             end: crate::market::parse_bound("end", "2025-01-01").unwrap(),
             bar_spec: "1d".into(),
-            initial_capital: 1_000_000.0,
+            initial_capital: Decimal::from(1_000_000_i64),
             seed: 42,
             fill_model: None,
-            commission_per_fill: 0.0,
-            slippage_bps: 0.0,
+            commission_per_fill: Decimal::ZERO,
+            slippage_bps: Decimal::ZERO,
         }),
         "2026-10-08T00:00:00Z",
     )
@@ -137,7 +137,7 @@ fn a_new_manifest_is_pending_and_versioned() {
     assert_eq!(m.kind, RunKind::Backtest);
     assert_eq!(m.status, RunStatus::Pending);
     assert_eq!(m.seed, 42);
-    assert_eq!(m.schema_version, honba_messages::SCHEMA_VERSION);
+    assert_eq!(m.schema_version, SCHEMA_VERSION);
     assert!(m.started_at.is_none() && m.finished_at.is_none());
 }
 
@@ -147,7 +147,8 @@ fn a_manifest_pins_inputs_and_leaks_no_paths() {
     assert_eq!(value["manifest_version"], json!(1));
     assert_eq!(value["kind"], json!("backtest"));
     assert_eq!(value["request"]["bar_spec"], json!("1d"));
-    assert_eq!(value["request"]["initial_capital"], json!(1_000_000.0));
+    // Money serializes as a decimal string (serde-with-str).
+    assert_eq!(value["request"]["initial_capital"], json!("1000000"));
     assert_eq!(value["seed"], json!(42));
     assert!(
         value["strategy_id"]
@@ -233,10 +234,10 @@ fn a_sweep_manifest_projects_a_sweep_response() {
             trials: 10,
             seed: 7,
             universe: "TCS.NSE".into(),
-            start: UnixNanos::from_u64(1),
-            end: UnixNanos::from_u64(2),
+            start: ts(1),
+            end: ts(2),
             bar_spec: "1d".into(),
-            initial_capital: 1_000_000.0,
+            initial_capital: Decimal::from(1_000_000_i64),
         }),
         "t0",
     );

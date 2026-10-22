@@ -118,7 +118,7 @@ fn a_sweep_body_resolves_through_serde() {
         "start": "2024-01-01",
         "end": "2024-06-01",
         "bar_spec": "1d",
-        "initial_capital": 1_000_000.0,
+        "initial_capital": "1000000",
         "params": {"fast": [5, 20, 5]},
         "trials": 3,
         "seed": 9
@@ -135,7 +135,7 @@ fn a_sweep_body_resolves_through_serde() {
         "start": "2024-01-01",
         "end": "2024-06-01",
         "bar_spec": "1d",
-        "initial_capital": 1_000_000.0,
+        "initial_capital": "1000000",
         "params": {"a": [1, 2, 1]},
         "trials": 3,
         "seed": 0

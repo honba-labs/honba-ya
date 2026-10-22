@@ -4,45 +4,47 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use honba_entities::{Currency, Instrument, InstrumentKind, Trade};
-use honba_messages::{
-    Event, InstrumentId, Message, Order, OrderId, OrderSide, OrderType, TimeInForce, UnixNanos,
+use honba_core::chrono::{DateTime, Utc};
+use honba_core::uuid::Uuid;
+use honba_core::{
+    FillReport, InstrumentId, OrderAck, OrderRequest, OrderSide, OrderStatus, OrderType, Price,
+    Quantity, Tick,
 };
-use honba_ports::{
-    Clock, ExecutionGateway, InstrumentMaster, MarketDataFeed, PortError, PortResult, SecretStore,
-    Sink,
-};
+use rust_decimal_macros::dec;
 
-use crate::fixtures::{any_instrument, instrument};
+use crate::fixtures::{any_instrument, instrument, utc_nanos};
 use crate::ports::*;
 
-fn message(ts: u64) -> Message {
-    let t = UnixNanos::from_u64(ts);
-    Message::new(
-        Event::OrderCancelled {
-            order_id: OrderId::new(format!("O-{ts}")),
-            ts_event: t,
-        },
-        t,
-    )
+fn message(ts: u64) -> FeedItem {
+    let at = utc_nanos(ts);
+    FeedItem::Tick(Tick::Ltp {
+        instrument: instrument("PROBE"),
+        price: Price::new(dec!(100)),
+        volume: Quantity::from_u64(1),
+        exchange_ts: at,
+        receive_ts: at,
+    })
 }
 
-fn order(id: &str) -> Order {
-    Order::new(
-        OrderId::new(id),
+fn order(tag: &str) -> OrderRequest {
+    let mut order = OrderRequest::new(
         any_instrument(),
         OrderSide::Buy,
-        OrderType::Limit,
-        10.0,
-        Some(100.0),
-        TimeInForce::Day,
-        UnixNanos::from_u64(1),
-        UnixNanos::from_u64(1),
-    )
+        OrderType::Limit(Price::new(dec!(100))),
+        Quantity::from_u64(10),
+        "port-contract",
+    );
+    order.tag = Some(tag.to_string());
+    order
 }
 
-fn instrument_meta(id: &InstrumentId) -> Instrument {
-    Instrument::new(id.clone(), InstrumentKind::Equity, Currency::Inr, 1.0, 0.05)
+fn instrument_meta(id: &InstrumentId) -> InstrumentInfo {
+    InstrumentInfo::new(
+        id.clone(),
+        InstrumentKind::Equity,
+        dec!(0.05),
+        Quantity::from_u64(1),
+    )
 }
 
 fn assert_violation<T: std::fmt::Debug>(result: PortResult<T>, context: &str) {
@@ -57,15 +59,15 @@ struct DeadFeed;
 
 #[async_trait]
 impl MarketDataFeed for DeadFeed {
-    async fn subscribe(&mut self, _symbols: &[InstrumentId]) -> PortResult<()> {
+    async fn subscribe(&mut self, _instruments: &[InstrumentId]) -> PortResult<()> {
         Err(PortError::Transport("socket closed".into()))
     }
 
-    async fn unsubscribe(&mut self, _symbols: &[InstrumentId]) -> PortResult<()> {
+    async fn unsubscribe(&mut self, _instruments: &[InstrumentId]) -> PortResult<()> {
         Ok(())
     }
 
-    async fn next(&mut self) -> PortResult<Option<Message>> {
+    async fn next(&mut self) -> PortResult<Option<FeedItem>> {
         Ok(None)
     }
 }
@@ -74,15 +76,15 @@ struct EndlessFeed;
 
 #[async_trait]
 impl MarketDataFeed for EndlessFeed {
-    async fn subscribe(&mut self, _symbols: &[InstrumentId]) -> PortResult<()> {
+    async fn subscribe(&mut self, _instruments: &[InstrumentId]) -> PortResult<()> {
         Ok(())
     }
 
-    async fn unsubscribe(&mut self, _symbols: &[InstrumentId]) -> PortResult<()> {
+    async fn unsubscribe(&mut self, _instruments: &[InstrumentId]) -> PortResult<()> {
         Ok(())
     }
 
-    async fn next(&mut self) -> PortResult<Option<Message>> {
+    async fn next(&mut self) -> PortResult<Option<FeedItem>> {
         Ok(Some(message(1)))
     }
 }
@@ -91,7 +93,7 @@ struct LossySink;
 
 #[async_trait]
 impl Sink for LossySink {
-    async fn write(&mut self, _msg: Message) -> PortResult<()> {
+    async fn write(&mut self, _item: FeedItem) -> PortResult<()> {
         Ok(())
     }
 
@@ -104,7 +106,7 @@ struct RejectingSink;
 
 #[async_trait]
 impl Sink for RejectingSink {
-    async fn write(&mut self, _msg: Message) -> PortResult<()> {
+    async fn write(&mut self, _item: FeedItem) -> PortResult<()> {
         Err(PortError::Internal("queue full".into()))
     }
 
@@ -114,12 +116,12 @@ impl Sink for RejectingSink {
 }
 
 struct FrozenClock {
-    now: UnixNanos,
+    now: DateTime<Utc>,
 }
 
 #[async_trait]
 impl Clock for FrozenClock {
-    async fn now(&self) -> UnixNanos {
+    async fn now(&self) -> DateTime<Utc> {
         self.now
     }
 
@@ -132,8 +134,8 @@ struct FailingClock;
 
 #[async_trait]
 impl Clock for FailingClock {
-    async fn now(&self) -> UnixNanos {
-        UnixNanos::default()
+    async fn now(&self) -> DateTime<Utc> {
+        utc_nanos(0)
     }
 
     async fn sleep(&self, _dur: Duration) -> PortResult<()> {
@@ -145,26 +147,26 @@ struct EmptyMaster;
 
 #[async_trait]
 impl InstrumentMaster for EmptyMaster {
-    async fn get_instrument(&self, _id: &InstrumentId) -> PortResult<Option<Instrument>> {
+    async fn get_instrument(&self, _id: &InstrumentId) -> PortResult<Option<InstrumentInfo>> {
         Ok(None)
     }
 
-    async fn list_instruments(&self) -> PortResult<Vec<Instrument>> {
+    async fn list_instruments(&self) -> PortResult<Vec<InstrumentInfo>> {
         Ok(Vec::new())
     }
 }
 
 struct LyingMaster {
-    instruments: Vec<Instrument>,
+    instruments: Vec<InstrumentInfo>,
 }
 
 #[async_trait]
 impl InstrumentMaster for LyingMaster {
-    async fn get_instrument(&self, _id: &InstrumentId) -> PortResult<Option<Instrument>> {
+    async fn get_instrument(&self, _id: &InstrumentId) -> PortResult<Option<InstrumentInfo>> {
         Ok(None)
     }
 
-    async fn list_instruments(&self) -> PortResult<Vec<Instrument>> {
+    async fn list_instruments(&self) -> PortResult<Vec<InstrumentInfo>> {
         Ok(self.instruments.clone())
     }
 }
@@ -173,40 +175,42 @@ struct InventingMaster;
 
 #[async_trait]
 impl InstrumentMaster for InventingMaster {
-    async fn get_instrument(&self, id: &InstrumentId) -> PortResult<Option<Instrument>> {
+    async fn get_instrument(&self, id: &InstrumentId) -> PortResult<Option<InstrumentInfo>> {
         Ok(Some(instrument_meta(id)))
     }
 
-    async fn list_instruments(&self) -> PortResult<Vec<Instrument>> {
+    async fn list_instruments(&self) -> PortResult<Vec<InstrumentInfo>> {
         Ok(vec![instrument_meta(&any_instrument())])
     }
 }
 
-struct DuplicatingGateway {
-    submitted: Vec<OrderId>,
-}
+struct DuplicatingGateway;
 
 #[async_trait]
 impl ExecutionGateway for DuplicatingGateway {
-    async fn submit_order(&mut self, _order: Order) -> PortResult<OrderId> {
-        self.submitted.push(OrderId::new("ALWAYS-THE-SAME"));
-        Ok(OrderId::new("ALWAYS-THE-SAME"))
+    async fn submit_order(&mut self, order: OrderRequest) -> PortResult<OrderAck> {
+        Ok(OrderAck::new(
+            "ALWAYS-THE-SAME",
+            order.client_order_id,
+            OrderStatus::New,
+            utc_nanos(0),
+        ))
     }
 
-    async fn cancel_order(&mut self, _id: OrderId) -> PortResult<()> {
+    async fn cancel_order(&mut self, _order_id: &str) -> PortResult<()> {
         Ok(())
     }
 
     async fn modify_order(
         &mut self,
-        _id: OrderId,
-        _new_qty: f64,
-        _new_price: Option<f64>,
+        _order_id: &str,
+        _new_qty: Quantity,
+        _new_price: Option<Price>,
     ) -> PortResult<()> {
         Ok(())
     }
 
-    async fn next_fill(&mut self) -> PortResult<Option<Trade>> {
+    async fn next_fill(&mut self) -> PortResult<Option<FillReport>> {
         Ok(None)
     }
 }
@@ -215,33 +219,34 @@ struct EndlessGateway;
 
 #[async_trait]
 impl ExecutionGateway for EndlessGateway {
-    async fn submit_order(&mut self, _order: Order) -> PortResult<OrderId> {
-        Ok(OrderId::new("O-1"))
+    async fn submit_order(&mut self, _order: OrderRequest) -> PortResult<OrderAck> {
+        Ok(OrderAck::new("O-1", Uuid::nil(), OrderStatus::New, utc_nanos(0)))
     }
 
-    async fn cancel_order(&mut self, _id: OrderId) -> PortResult<()> {
+    async fn cancel_order(&mut self, _order_id: &str) -> PortResult<()> {
         Ok(())
     }
 
     async fn modify_order(
         &mut self,
-        _id: OrderId,
-        _new_qty: f64,
-        _new_price: Option<f64>,
+        _order_id: &str,
+        _new_qty: Quantity,
+        _new_price: Option<Price>,
     ) -> PortResult<()> {
         Ok(())
     }
 
-    async fn next_fill(&mut self) -> PortResult<Option<Trade>> {
-        Ok(Some(Trade::new(
-            OrderId::new("O-1"),
+    async fn next_fill(&mut self) -> PortResult<Option<FillReport>> {
+        Ok(Some(FillReport::new(
+            "F-1",
+            "O-1",
+            Uuid::nil(),
             any_instrument(),
             OrderSide::Buy,
-            1.0,
-            100.0,
-            honba_entities::Currency::Inr,
-            UnixNanos::from_u64(1),
-            UnixNanos::from_u64(1),
+            Price::new(dec!(100)),
+            Quantity::from_u64(1),
+            "port-contract",
+            utc_nanos(1),
         )))
     }
 }
@@ -250,27 +255,27 @@ struct RefusingGateway;
 
 #[async_trait]
 impl ExecutionGateway for RefusingGateway {
-    async fn submit_order(&mut self, _order: Order) -> PortResult<OrderId> {
+    async fn submit_order(&mut self, _order: OrderRequest) -> PortResult<OrderAck> {
         Err(PortError::Rejected {
             code: "E_MARGIN".into(),
             message: "insufficient funds".into(),
         })
     }
 
-    async fn cancel_order(&mut self, _id: OrderId) -> PortResult<()> {
+    async fn cancel_order(&mut self, _order_id: &str) -> PortResult<()> {
         Ok(())
     }
 
     async fn modify_order(
         &mut self,
-        _id: OrderId,
-        _new_qty: f64,
-        _new_price: Option<f64>,
+        _order_id: &str,
+        _new_qty: Quantity,
+        _new_price: Option<Price>,
     ) -> PortResult<()> {
         Ok(())
     }
 
-    async fn next_fill(&mut self) -> PortResult<Option<Trade>> {
+    async fn next_fill(&mut self) -> PortResult<Option<FillReport>> {
         Ok(None)
     }
 }
@@ -329,19 +334,19 @@ async fn recording_sink_reads_back_in_write_order() {
     sink.flush().await.unwrap();
     sink.flush().await.unwrap();
 
-    assert_eq!(handle.messages(), vec![message(1), message(2)]);
+    assert_eq!(handle.items(), vec![message(1), message(2)]);
     assert_eq!(handle.flush_count(), 2);
 }
 
 #[tokio::test]
 async fn fixed_clock_starts_where_told_and_advances_on_sleep() {
-    let clock = FixedClock::new(UnixNanos::from_u64(1_000));
+    let clock = FixedClock::new(utc_nanos(1_000));
 
-    assert_eq!(clock.now().await, UnixNanos::from_u64(1_000));
+    assert_eq!(clock.now().await, utc_nanos(1_000));
     clock.sleep(Duration::from_millis(2)).await.unwrap();
-    assert_eq!(clock.now().await, UnixNanos::from_u64(1_000 + 2_000_000));
+    assert_eq!(clock.now().await, utc_nanos(1_000 + 2_000_000));
     clock.sleep(Duration::from_nanos(1)).await.unwrap();
-    assert_eq!(clock.now().await, UnixNanos::from_u64(1_000 + 2_000_001));
+    assert_eq!(clock.now().await, utc_nanos(1_000 + 2_000_001));
 }
 
 #[tokio::test]
@@ -353,7 +358,7 @@ async fn map_instrument_master_returns_registered_instruments() {
     assert_eq!(master.len(), 2);
     assert!(!master.is_empty());
     assert_eq!(
-        master.get_instrument(known.id()).await.unwrap(),
+        master.get_instrument(&known.id).await.unwrap(),
         Some(known)
     );
     assert_eq!(
@@ -381,39 +386,44 @@ async fn stub_gateway_numbers_orders_and_fills_once() {
 
     let first = gateway.submit_order(order("O-1")).await.unwrap();
     let second = gateway.submit_order(order("O-2")).await.unwrap();
-    gateway.cancel_order(first.clone()).await.unwrap();
+    gateway.cancel_order(&first.order_id).await.unwrap();
     gateway
-        .modify_order(second.clone(), 4.0, Some(101.25))
+        .modify_order(
+            &second.order_id,
+            Quantity::from_u64(4),
+            Some(Price::new(dec!(101.25))),
+        )
         .await
         .unwrap();
 
-    assert_eq!(first, OrderId::new("STUB-1"));
-    assert_eq!(second, OrderId::new("STUB-2"));
-    assert_eq!(
-        gateway.submitted(),
-        &[OrderId::new("STUB-1"), OrderId::new("STUB-2")]
-    );
-    assert_eq!(gateway.cancellations(), &[OrderId::new("STUB-1")]);
+    assert_eq!(first.order_id, "STUB-1");
+    assert_eq!(second.order_id, "STUB-2");
+    assert_eq!(gateway.submitted(), &["STUB-1".to_string(), "STUB-2".to_string()]);
+    assert_eq!(gateway.cancellations(), &["STUB-1".to_string()]);
     assert_eq!(
         gateway.modifications(),
-        &[(OrderId::new("STUB-2"), 4.0, Some(101.25))]
+        &[(
+            "STUB-2".to_string(),
+            Quantity::from_u64(4),
+            Some(Price::new(dec!(101.25)))
+        )]
     );
 
     let fill = gateway.next_fill().await.unwrap().expect("one fill");
-    assert_eq!(fill.order_id(), &second);
-    assert_eq!(fill.quantity(), 10.0);
-    assert_eq!(fill.price(), 100.0);
-    assert_eq!(gateway.next_fill().await.unwrap(), None);
+    assert_eq!(fill.order_id, second.order_id);
+    assert_eq!(fill.quantity, Quantity::from_u64(10));
+    assert_eq!(fill.price, Price::new(dec!(100)));
+    assert!(gateway.next_fill().await.unwrap().is_none());
     assert_eq!(gateway.fills_remaining(), 0);
 }
 
 #[tokio::test]
 async fn stub_gateway_honours_a_custom_fill_price() {
-    let mut gateway = StubGateway::with_fill_price(250.75);
+    let mut gateway = StubGateway::with_fill_price(Price::new(dec!(250.75)));
     gateway.submit_order(order("O-1")).await.unwrap();
 
     let fill = gateway.next_fill().await.unwrap().expect("one fill");
-    assert_eq!(fill.price(), 250.75);
+    assert_eq!(fill.price, Price::new(dec!(250.75)));
 }
 
 #[tokio::test]
@@ -424,7 +434,7 @@ async fn harness_accepts_every_fake() {
     let mut sink = RecordingSink::new();
     check_sink_contract(&mut sink).await.unwrap();
 
-    let clock = FixedClock::new(UnixNanos::from_u64(1));
+    let clock = FixedClock::new(utc_nanos(1));
     check_clock_contract(&clock).await.unwrap();
 
     let master = MapInstrumentMaster::with([instrument_meta(&any_instrument())]);
@@ -448,8 +458,7 @@ async fn harness_runs_against_trait_objects() {
     let mut gateway: Box<dyn ExecutionGateway> = Box::new(StubGateway::new());
     check_gateway_contract(&mut *gateway).await.unwrap();
 
-    let clock: std::sync::Arc<dyn Clock> =
-        std::sync::Arc::new(FixedClock::new(UnixNanos::default()));
+    let clock: std::sync::Arc<dyn Clock> = std::sync::Arc::new(FixedClock::new(utc_nanos(0)));
     check_clock_contract(&*clock).await.unwrap();
 
     let master: std::sync::Arc<dyn InstrumentMaster> = std::sync::Arc::new(
@@ -498,7 +507,7 @@ async fn sink_contract_rejects_a_failing_write() {
 async fn clock_contract_rejects_a_sleep_that_does_not_advance_time() {
     assert_violation(
         check_clock_contract(&FrozenClock {
-            now: UnixNanos::from_u64(5),
+            now: utc_nanos(5),
         })
         .await,
         "a clock whose sleep returns without waiting violates the contract",
@@ -543,10 +552,7 @@ async fn master_contract_rejects_an_invented_instrument() {
 #[tokio::test]
 async fn gateway_contract_rejects_reused_order_ids() {
     assert_violation(
-        check_gateway_contract(&mut DuplicatingGateway {
-            submitted: Vec::new(),
-        })
-        .await,
+        check_gateway_contract(&mut DuplicatingGateway).await,
         "a gateway that reuses an order id violates the contract",
     );
 }
@@ -555,7 +561,7 @@ async fn gateway_contract_rejects_reused_order_ids() {
 async fn gateway_contract_rejects_a_gateway_that_never_fills() {
     assert_violation(
         check_gateway_contract(&mut EndlessGateway).await,
-        "a gateway that never reports a fill violates the contract",
+        "a gateway that never reports exhaustion of the fill stream violates the contract",
     );
 }
 

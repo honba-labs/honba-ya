@@ -8,7 +8,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use honba_messages::{ErrorCode, ErrorDetail};
+use crate::wire::{ErrorCode, ErrorDetail};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 

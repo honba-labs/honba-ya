@@ -1,9 +1,12 @@
 #![allow(missing_docs)]
+use rust_decimal::Decimal;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use honba_messages::InstrumentId;
-use honba_strategy::StrategyManifest;
+use honba_core::InstrumentId;
+
+use crate::strategy_ir::StrategyManifest;
+use crate::wire::TradingState;
 
 /// Instruments query parameters.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -60,7 +63,7 @@ pub struct ScreenerQuery {
     /// instrument of the universe matches.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filters: Option<String>,
-    /// JSON-encoded array of instrument ids (`["TCS.NSE", ...]`) to scan; required, at most
+    /// JSON-encoded array of instrument ids (`["NSE:TCS", ...]`) to scan; required, at most
     /// `MAX_SCREENER_UNIVERSE` entries.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub universe: Option<String>,
@@ -116,9 +119,9 @@ pub struct BacktestRequest {
     /// Bar specification as a string (e.g. "1d").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bar_spec: Option<String>,
-    /// Initial capital.
+    /// Initial capital, as a decimal string on the wire.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub initial_capital: Option<f64>,
+    pub initial_capital: Option<Decimal>,
     /// Seed, for reproducibility; required and non-zero on submit. Same seed and data give a
     /// byte-identical journal.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -133,12 +136,12 @@ pub struct BacktestRequest {
     /// see [`MAX_COMMISSION_PER_FILL`](crate::MAX_COMMISSION_PER_FILL)). Added in this
     /// request's first version, so an older client that omits it still parses.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub commission_per_fill: Option<f64>,
+    pub commission_per_fill: Option<Decimal>,
     /// Slippage applied to every fill, in basis points of the fill price and always adverse
     /// to the order's side; `None` or `0` models none. Applied only by the `bar_fill` models.
     /// See [`MAX_SLIPPAGE_BPS`](crate::MAX_SLIPPAGE_BPS).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub slippage_bps: Option<f64>,
+    pub slippage_bps: Option<Decimal>,
 }
 
 /// Sweep request.
@@ -163,9 +166,9 @@ pub struct SweepRequest {
     /// Bar specification as a string (e.g. "1d").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bar_spec: Option<String>,
-    /// Initial capital.
+    /// Initial capital, as a decimal string on the wire.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub initial_capital: Option<f64>,
+    pub initial_capital: Option<Decimal>,
     /// Parameter ranges, as a JSON object of name to [low, high, step].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<serde_json::Value>,
@@ -211,12 +214,12 @@ pub struct OrdersRequest {
     /// Order type: market or limit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub order_type: Option<String>,
-    /// Quantity.
+    /// Quantity, as a decimal string on the wire.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub qty: Option<f64>,
-    /// Limit price.
+    pub qty: Option<Decimal>,
+    /// Limit price, as a decimal string on the wire.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub price: Option<f64>,
+    pub price: Option<Decimal>,
     /// Time in force: day, gtc, ioc, fok.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tif: Option<String>,
@@ -235,7 +238,7 @@ pub struct OrdersRequest {
 #[serde(deny_unknown_fields)]
 pub struct TradingStateRequest {
     /// The new trading state: `active`, `reducing` or `halted`.
-    pub state: honba_messages::TradingState,
+    pub state: TradingState,
     /// Why the state is changing; logged with the change, never interpreted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -243,14 +246,14 @@ pub struct TradingStateRequest {
 
 /// `POST /bars` request body: a batch of bars for the live bar pump (E3-S7 follow-up).
 ///
-/// Each bar is validated on deserialization (finite prices, `low <= open, close <= high`,
-/// `volume >= 0`), so one bad bar rejects the whole batch. The batch size is bounded by
-/// [`crate::MAX_INGEST_BARS`]. Bars must ascend by `ts_event`; ordering is enforced downstream
-/// by the simulator, where an out-of-order bar is counted and skipped rather than failing the
-/// request.
+/// Each bar must carry finite prices with `low <= open, close <= high` and `volume >= 0`;
+/// the batch is validated before it is queued, so one bad bar rejects the whole batch. The
+/// batch size is bounded by [`crate::MAX_INGEST_BARS`]. Bars must ascend by `ts_event`;
+/// ordering is enforced downstream by the simulator, where an out-of-order bar is counted
+/// and skipped rather than failing the request.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BarsIngestRequest {
     /// The bars to feed, oldest first.
-    pub bars: Vec<honba_messages::Bar>,
+    pub bars: Vec<honba_core::Bar>,
 }

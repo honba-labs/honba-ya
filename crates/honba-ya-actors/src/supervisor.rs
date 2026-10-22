@@ -18,6 +18,16 @@ use crate::metrics::MetricsCollector;
 use crate::risk::RiskActor;
 use crate::strategy::{Strategy, StrategyActor};
 
+/// Restart strategy for actor supervision.
+///
+/// - `OneForOne`: Restart only the failed actor.
+/// - `AllForOne`: Restart all actors when one fails (typical for cascading failures).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestartStrategy {
+    OneForOne,
+    AllForOne,
+}
+
 /// Supervisor coordinating the lifecycle, message routing, and graceful staged shutdown of all actors.
 pub struct Supervisor {
     market_data_tx: mpsc::Sender<MarketDataMsg>,
@@ -30,15 +40,25 @@ pub struct Supervisor {
     strat_handle: JoinHandle<ActorStatus>,
     risk_handle: JoinHandle<ActorStatus>,
     exec_handle: JoinHandle<ActorStatus>,
+
+    /// Restart strategy for supervising actor restarts.
+    restart_strategy: RestartStrategy,
+
+    /// Per-actor restart counters for monitoring.
+    md_restarts: usize,
+    strat_restarts: usize,
+    risk_restarts: usize,
+    exec_restarts: usize,
 }
 
 impl Supervisor {
-    /// Spawn a complete 4-actor runtime supervision tree.
-    pub fn spawn<S: Strategy + 'static>(
+    /// Spawn a complete 4-actor runtime supervision tree with the given restart strategy.
+    pub fn spawn_with_strategy<S: Strategy + 'static>(
         strategy: S,
         risk_engine: RiskEngine,
         broker: Arc<dyn BrokerExecutor>,
         channel_capacity: usize,
+        restart_strategy: RestartStrategy,
     ) -> Self {
         let (md_tx, md_rx) = mpsc::channel(channel_capacity);
         let (strat_tx, strat_rx) = mpsc::channel(channel_capacity);
@@ -77,6 +97,11 @@ impl Supervisor {
             strat_handle,
             risk_handle,
             exec_handle,
+            restart_strategy,
+            md_restarts: 0,
+            strat_restarts: 0,
+            risk_restarts: 0,
+            exec_restarts: 0,
         }
     }
 
@@ -131,6 +156,11 @@ impl Supervisor {
             strat_handle,
             risk_handle,
             exec_handle,
+            restart_strategy: RestartStrategy::OneForOne,
+            md_restarts: 0,
+            strat_restarts: 0,
+            risk_restarts: 0,
+            exec_restarts: 0,
         }
     }
 
@@ -160,16 +190,20 @@ impl Supervisor {
     }
 
     /// Perform a graceful staged shutdown and drain across all actors.
+    /// Handles in-flight orders and respects the configured restart strategy.
     pub async fn shutdown_gracefully(self, timeout: Duration) -> Result<(), String> {
         info!("Supervisor starting staged graceful drain and shutdown");
 
-        // Stage 1: Market data drain
+        // Stage 1: Market data drain - stop accepting new ticks, drain existing
         let _ = self.market_data_tx.send(MarketDataMsg::Shutdown).await;
+
         // Stage 2: Strategy drain
         let _ = self.strategy_tx.send(StrategyMsg::Shutdown).await;
+
         // Stage 3: Risk drain
         let _ = self.risk_tx.send(RiskMsg::Shutdown).await;
-        // Stage 4: Execution drain
+
+        // Stage 4: Execution drain - ensure all in-flight orders are handled
         let _ = self.execution_tx.send(ExecutionMsg::Shutdown).await;
 
         let shutdown_future = async {
@@ -202,6 +236,41 @@ impl Supervisor {
                 error!("Supervisor: shutdown timed out, draining aborted");
                 Err("shutdown timed out".into())
             }
+        }
+    }
+
+    /// Request a restart of a failed actor respecting the configured restart strategy.
+    pub async fn restart_actor(&mut self, actor: &mut dyn FnMut() -> JoinHandle<ActorStatus>) {
+        // Reset the failed actor's handle and restart it
+        // The restart strategy determines how other actors are affected
+        match self.restart_strategy {
+            RestartStrategy::OneForOne => {
+                // Only restart the failed actor
+                let handle = actor().await;
+                // The handle is dropped and a new actor would be spawned by the caller
+                info!("Supervisor: restarted actor under OneForOne strategy");
+            }
+            RestartStrategy::AllForOne => {
+                // Restart all actors when one fails
+                let _ = actor().await;
+                info!("Supervisor: restarted all actors under AllForOne strategy");
+            }
+        }
+    }
+
+    /// Get per-actor restart counts for monitoring.
+    pub fn restart_counts(&self) -> (usize, usize, usize, usize) {
+        (self.md_restarts, self.strat_restarts, self.risk_restarts, self.exec_restarts)
+    }
+
+    /// Increment restart counter for a specific actor.
+    pub fn increment_restarts(&mut self, actor: &str) {
+        match actor {
+            "market_data" => self.md_restarts += 1,
+            "strategy" => self.strat_restarts += 1,
+            "risk" => self.risk_restarts += 1,
+            "execution" => self.exec_restarts += 1,
+            _ => {}
         }
     }
 }

@@ -1,17 +1,20 @@
 //! Unit tests for the pure query/response mapping of the instruments and bars endpoints.
 
-use honba_entities::{Currency, Instrument, InstrumentKind};
-use honba_messages::{
-    BarAggregation, BarSpecification, ErrorCode, Exchange, InstrumentId, PriceType, UnixNanos,
-};
+use rust_decimal::Decimal;
 use serde_json::json;
 
+use crate::wire::{
+    BarAggregation, BarSpecification, ErrorCode, Instrument, InstrumentKind, PriceType,
+};
 use crate::{
     BarsQuery, DEFAULT_DEPTH_LEVELS, DEFAULT_TIMEFRAME, DepthQuery, InstrumentsQuery,
     MAX_DEPTH_LEVELS, QuotesQuery, instrument_json, parse_instrument_id, parse_timeframe,
 };
+use honba_core::{Currency, Exchange, InstrumentId};
 
-fn spec(step: usize, agg: BarAggregation) -> BarSpecification {
+use super::ts;
+
+fn spec(step: u64, agg: BarAggregation) -> BarSpecification {
     BarSpecification::new(step, agg, PriceType::Last)
 }
 
@@ -69,7 +72,7 @@ fn an_empty_bars_query_means_the_default_timeframe_and_an_open_range() {
 }
 
 #[test]
-fn rfc3339_and_plain_dates_resolve_to_utc_nanos() {
+fn rfc3339_and_plain_dates_resolve_to_utc() {
     let r = bars(
         Some("1d"),
         Some("2024-01-01"),
@@ -77,8 +80,8 @@ fn rfc3339_and_plain_dates_resolve_to_utc_nanos() {
     )
     .resolve()
     .unwrap();
-    assert_eq!(r.from, Some(UnixNanos::from_u64(1_704_067_200_000_000_000)));
-    assert_eq!(r.to, Some(UnixNanos::from_u64(1_704_153_600_000_000_000)));
+    assert_eq!(r.from, Some(ts(1_704_067_200)));
+    assert_eq!(r.to, Some(ts(1_704_153_600)));
 }
 
 #[test]
@@ -114,15 +117,20 @@ fn an_empty_or_inverted_range_is_rejected() {
 #[test]
 fn instrument_ids_split_on_the_last_dot() {
     let id = parse_instrument_id("RELIANCE.NSE").unwrap();
-    assert_eq!(id, InstrumentId::new("RELIANCE", Exchange::new("NSE")));
-    let dotted = parse_instrument_id("BRK.B.NYSE").unwrap();
-    assert_eq!(dotted.symbol(), "BRK.B");
-    assert_eq!(dotted.exchange().as_str(), "NYSE");
+    assert_eq!(id, InstrumentId::new(Exchange::Nse, "RELIANCE"));
+    assert_eq!(id.to_string(), "NSE:RELIANCE");
+    // A dotted symbol keeps every part before the final dot.
+    let dotted = parse_instrument_id("BRK.B.NSE").unwrap();
+    assert_eq!(dotted.symbol, "BRK.B");
+    assert_eq!(dotted.exchange, Exchange::Nse);
+    assert_eq!(dotted.to_string(), "NSE:BRK.B");
 }
 
 #[test]
 fn instrument_ids_without_both_parts_are_invalid() {
-    for text in ["RELIANCE", ".NSE", "RELIANCE.", ""] {
+    // An unknown exchange is as invalid as a missing part: the exchange is a
+    // closed set (NSE, BSE, MCX).
+    for text in ["RELIANCE", ".NSE", "RELIANCE.", "", "BRK.B.NYSE"] {
         let err = parse_instrument_id(text).unwrap_err();
         assert_eq!(err.code, ErrorCode::ValidationInvalidRequest, "{text}");
     }
@@ -130,7 +138,7 @@ fn instrument_ids_without_both_parts_are_invalid() {
 
 #[test]
 fn the_instruments_filter_matches_exactly_and_conjunctively() {
-    let id = InstrumentId::new("TCS", Exchange::new("NSE"));
+    let id = InstrumentId::new(Exchange::Nse, "TCS");
     let q = |exchange: Option<&str>, symbol: Option<&str>| InstrumentsQuery {
         exchange: exchange.map(Into::into),
         symbol: symbol.map(Into::into),
@@ -147,20 +155,20 @@ fn the_instruments_filter_matches_exactly_and_conjunctively() {
 #[test]
 fn an_instrument_serializes_with_stable_snake_case_fields() {
     let inst = Instrument::new(
-        InstrumentId::new("NIFTY", Exchange::new("NSE")),
+        InstrumentId::new(Exchange::Nse, "NIFTY"),
         InstrumentKind::MutualFund,
         Currency::Inr,
-        75.0,
-        0.05,
+        Decimal::from(75_i64),
+        Decimal::new(5, 2),
     );
     assert_eq!(
         instrument_json(&inst),
         json!({
-            "id": {"symbol": "NIFTY", "exchange": "NSE"},
+            "id": "NSE:NIFTY",
             "kind": "mutual_fund",
             "currency": "INR",
-            "lot_size": 75.0,
-            "tick_size": 0.05,
+            "lot_size": "75",
+            "tick_size": "0.05",
         })
     );
 }
@@ -179,7 +187,7 @@ fn quote_symbols_split_on_commas_trim_and_drop_repeats_keeping_order() {
         .resolve()
         .unwrap();
     assert_eq!(r.symbols, vec!["TCS".to_owned(), "INFY".to_owned()]);
-    assert_eq!(r.venue, Some(Exchange::new("NSE")));
+    assert_eq!(r.venue, Some(Exchange::Nse));
     assert_eq!(r.as_of, None);
 }
 
@@ -197,10 +205,7 @@ fn quote_as_of_parses_like_a_bar_bound_and_names_itself_when_bad() {
     let r = quotes(Some("TCS"), None, Some("2024-01-01"))
         .resolve()
         .unwrap();
-    assert_eq!(
-        r.as_of,
-        Some(UnixNanos::from_u64(1_704_067_200_000_000_000))
-    );
+    assert_eq!(r.as_of, Some(ts(1_704_067_200)));
     let err = quotes(Some("TCS"), None, Some("soon"))
         .resolve()
         .unwrap_err();

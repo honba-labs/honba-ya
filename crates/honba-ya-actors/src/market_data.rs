@@ -1,39 +1,13 @@
-//! Market data actor for ingesting, normalizing, and broadcasting live feeds.
+//! Market data ingestion actor.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+
+use honba_core::{InstrumentId, Tick};
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
 
-use honba_core::{Bar, InstrumentId, Tick};
-
 use crate::messages::{ActorStatus, MarketDataMsg, StrategyMsg};
-
-/// Minimal symbol mapper for broker token normalization.
-#[derive(Debug, Default)]
-pub struct SymbolMapper {
-    token_to_instrument: HashMap<String, InstrumentId>,
-    instrument_to_token: HashMap<InstrumentId, String>,
-}
-
-impl SymbolMapper {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn map_token(&self, token: &str) -> Option<InstrumentId> {
-        self.token_to_instrument.get(token).cloned()
-    }
-
-    pub fn map_instrument(&self, instrument: &InstrumentId) -> Option<String> {
-        self.instrument_to_token.get(instrument).cloned()
-    }
-
-    pub fn register(&mut self, instrument: InstrumentId, token: String) {
-        let token_clone = token.clone();
-        self.token_to_instrument.insert(token, instrument.clone());
-        self.instrument_to_token.insert(instrument, token_clone);
-    }
-}
+use crate::portfolio::SymbolMapper;
 
 /// Market data ingestion actor.
 pub struct MarketDataActor {
@@ -43,6 +17,12 @@ pub struct MarketDataActor {
     symbol_mapper: SymbolMapper,
     active_subscriptions: HashSet<InstrumentId>,
     status: ActorStatus,
+    /// Tick buffer for coalescing recent ticks within a window.
+    tick_buffer: Vec<Tick>,
+    /// Maximum number of ticks to buffer before coalescing.
+    max_buffer_size: usize,
+    /// Tick coalescing timer interval in milliseconds.
+    coalesce_interval: u64,
 }
 
 impl MarketDataActor {
@@ -61,6 +41,9 @@ impl MarketDataActor {
                 symbol_mapper: SymbolMapper::new(),
                 active_subscriptions: HashSet::new(),
                 status: ActorStatus::Starting,
+                tick_buffer: Vec::new(),
+                max_buffer_size: 100,
+                coalesce_interval: 50, // coalesce every 50ms
             },
             broadcast_rx,
         )
@@ -76,57 +59,99 @@ impl MarketDataActor {
         info!("MarketDataActor starting");
         self.status = ActorStatus::Running;
 
-        while let Some(msg) = self.rx.recv().await {
-            match msg {
-                MarketDataMsg::IngestTick(tick) => {
-                    self.handle_tick(tick).await;
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(self.coalesce_interval));
+        loop {
+            tokio::select! {
+                biased;
+
+                msg = self.rx.recv() => {
+                    match msg {
+                        Some(MarketDataMsg::Subscribe(instrument_id)) => {
+                            self.symbol_mapper.register(instrument_id.to_string(), instrument_id.clone());
+                            self.active_subscriptions.insert(instrument_id.clone());
+                            debug!("Subscribed to {}", instrument_id);
+                        }
+                        Some(MarketDataMsg::Unsubscribe(instrument_id)) => {
+                            self.active_subscriptions.remove(&instrument_id);
+                            debug!("Unsubscribed from {}", instrument_id);
+                        }
+                        Some(MarketDataMsg::IngestTick(tick)) => {
+                            self.handle_tick(tick).await;
+                        }
+                        Some(MarketDataMsg::IngestBar(bar)) => {
+                            self.handle_bar(bar).await;
+                        }
+                        Some(MarketDataMsg::Shutdown) => {
+                            info!("MarketDataActor received shutdown");
+                            self.status = ActorStatus::Stopped;
+                            break;
+                        }
+                        None => {
+                            info!("MarketDataActor channel closed");
+                            self.status = ActorStatus::Stopped;
+                            break;
+                        }
+                    }
                 }
-                MarketDataMsg::IngestBar(bar) => {
-                    self.handle_bar(bar).await;
-                }
-                MarketDataMsg::Subscribe(inst) => {
-                    debug!(instrument = %inst, "Subscribed instrument");
-                    self.active_subscriptions.insert(inst);
-                }
-                MarketDataMsg::Unsubscribe(inst) => {
-                    debug!(instrument = %inst, "Unsubscribed instrument");
-                    self.active_subscriptions.remove(&inst);
-                }
-                MarketDataMsg::Shutdown => {
-                    info!("MarketDataActor received shutdown signal");
-                    self.status = ActorStatus::Draining;
-                    break;
+
+                _ = interval.tick() => {
+                    self.flush_buffer().await;
                 }
             }
         }
-
-        self.status = ActorStatus::Stopped;
-        info!("MarketDataActor stopped");
         self.status
     }
 
-    async fn handle_tick(&self, tick: Tick) {
-        // Broadcast to general listeners
-        let _ = self.broadcast_tx.send(tick.clone());
+    async fn handle_tick(&mut self, tick: Tick) {
+        // Only forward ticks for active subscriptions
+        let instrument_id = match &tick {
+            Tick::Ltp { instrument, .. } => instrument,
+            Tick::Quote { instrument, .. } => instrument,
+            Tick::Depth { instrument, .. } => instrument,
+        };
 
-        // Dispatch to all subscribed strategy actors
-        for sender in &self.strategy_senders {
-            if let Err(e) = sender.try_send(StrategyMsg::OnTick(tick.clone())) {
-                match e {
-                    mpsc::error::TrySendError::Full(_) => {
-                        warn!("StrategyActor queue full, dropping tick under backpressure");
-                    }
-                    mpsc::error::TrySendError::Closed(_) => {
-                        debug!("StrategyActor channel closed");
-                    }
-                }
-            }
+        if !self.active_subscriptions.contains(instrument_id) {
+            return;
+        }
+
+        // Buffer for coalescing (clone to avoid move)
+        self.tick_buffer.push(tick.clone());
+        if self.tick_buffer.len() >= self.max_buffer_size {
+            self.flush_buffer().await;
         }
     }
 
-    async fn handle_bar(&self, bar: Bar) {
+    async fn handle_bar(&mut self, bar: honba_core::Bar) {
+        // Forward bar to strategies
         for sender in &self.strategy_senders {
-            let _ = sender.send(StrategyMsg::OnBar(bar.clone())).await;
+            let _ = sender.try_send(StrategyMsg::OnBar(bar.clone()));
+        }
+    }
+
+    async fn flush_buffer(&mut self) {
+        if self.tick_buffer.is_empty() {
+            return;
+        }
+
+        let ticks = std::mem::take(&mut self.tick_buffer);
+
+        // Coalesce ticks by instrument: keep only the latest tick per instrument
+        let mut latest = std::collections::HashMap::new();
+        for tick in ticks {
+            let key = match &tick {
+                Tick::Ltp { instrument, .. } => instrument.clone(),
+                Tick::Quote { instrument, .. } => instrument.clone(),
+                Tick::Depth { instrument, .. } => instrument.clone(),
+            };
+            latest.insert(key, tick);
+        }
+
+        for tick in latest.into_values() {
+            let tick_for_strategies = tick.clone();
+            let _ = self.broadcast_tx.send(tick);
+            for sender in &self.strategy_senders {
+                let _ = sender.try_send(StrategyMsg::OnTick(tick_for_strategies.clone()));
+            }
         }
     }
 }

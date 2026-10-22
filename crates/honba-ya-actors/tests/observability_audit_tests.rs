@@ -14,7 +14,7 @@ use honba_core::{
 };
 use honba_mon::{OtrConfig, RiskEngine, RiskLimits};
 use honba_persistence::SqliteAuditLedger;
-use honba_te_core::MockBrokerExecutor;
+use honba_ya_testing::MockBrokerExecutor;
 use rust_decimal::Decimal;
 
 struct TestObservabilityStrategy {
@@ -161,7 +161,7 @@ async fn test_actor_runtime_with_observability_and_audit() {
     let audit_ledger = Arc::new(SqliteAuditLedger::new_in_memory().await.unwrap());
 
     // Mock broker
-    let mock_broker = Arc::new(MockBrokerExecutor::new(false));
+    let mock_broker = Arc::new(MockBrokerExecutor::new(true));
 
     // Risk Engine
     let mut risk_engine = RiskEngine::new(RiskLimits::default(), OtrConfig::default());

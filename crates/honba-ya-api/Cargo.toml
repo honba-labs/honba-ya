@@ -11,17 +11,14 @@ description = "Transport-agnostic versioned API surface for the Honba platform"
 name = "honba_api"
 
 [dependencies]
-honba-messages.workspace = true
-honba-entities.workspace = true
-honba-strategy.workspace = true
-honba-indicators.workspace = true
-honba-analytics.workspace = true
+honba-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true
 thiserror.workspace = true
 chrono.workspace = true
 sha2.workspace = true
+rust_decimal.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

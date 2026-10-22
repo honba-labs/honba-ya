@@ -2,17 +2,21 @@
 //! extra fields (top level and nested) still parses, while a request body with a typo is refused.
 
 use honba_api::{BacktestRequest, DepthResponse, ResponseEnvelope};
+use rust_decimal::Decimal;
 use serde_json::json;
 
 #[test]
 fn an_enveloped_response_from_a_newer_server_still_parses() {
     let wire = json!({
         "api_version": honba_api::API_VERSION,
-        "schema_version": honba_messages::SCHEMA_VERSION,
-        "data": {"bids": [{"price": 101.5, "qty": 10.0, "orders": 2}], "asks": [], "ts": 7},
+        "schema_version": honba_api::SCHEMA_VERSION,
+        // Decimal fields are decimal strings on the wire; `orders`/`ts` belong to a
+        // newer server and must be dropped, not refused.
+        "data": {"bids": [{"price": "101.5", "qty": "10.0", "orders": 2}], "asks": [], "ts": 7},
     });
     let back: ResponseEnvelope<DepthResponse> = serde_json::from_value(wire).unwrap();
-    assert_eq!(back.into_result().unwrap().bids[0].qty, 10.0);
+    // Decimal equality is scale-insensitive, so "10.0" equals 10.
+    assert_eq!(back.into_result().unwrap().bids[0].qty, Decimal::from(10));
 }
 
 #[test]

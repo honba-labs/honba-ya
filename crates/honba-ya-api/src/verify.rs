@@ -2,12 +2,13 @@
 //!
 //! Verification is pure and idempotent (it compiles, it does not trade), so the
 //! endpoint is read-only and not gated by the approval queue. This module is the
-//! anti-corruption step between `honba-strategy`'s [`IrError`] and the API error
-//! taxonomy, so every transport reports a failed verification the same way.
+//! anti-corruption step between [`crate::strategy_ir`]'s [`IrError`] and the API
+//! error taxonomy, so every transport reports a failed verification the same way.
 
-use honba_messages::{ErrorCode, ErrorDetail};
-use honba_strategy::{IrError, StrategyIr, StrategyManifest};
 use serde_json::json;
+
+use crate::strategy_ir::{IrError, StrategyIr, StrategyManifest};
+use crate::wire::{ErrorCode, ErrorDetail};
 
 /// Request body of `POST /strategies/verify`: the manifest to verify.
 ///

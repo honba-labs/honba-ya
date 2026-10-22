@@ -1,6 +1,6 @@
 //! Tests for the endpoint registry (docs/archive/plan.md E11-S1).
 
-use honba_messages::{Access, ENDPOINTS, Endpoint, HttpMethod, ParamLocation, write_endpoints};
+use crate::wire::{Access, ENDPOINTS, Endpoint, HttpMethod, ParamLocation, write_endpoints};
 
 #[test]
 fn path_params_are_extracted_in_order() {

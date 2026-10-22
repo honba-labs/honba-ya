@@ -3,40 +3,13 @@
 use chrono::Utc;
 use honba_core::{OrderAck, OrderStatus};
 use honba_kokoro_oms::{OrderStateMachine, OrderState, TransitionError};
-use honba_persistence::SqliteAuditLedger;
+use honba_persistence::{SqliteAuditLedger, messages::RiskBreachEvent as PersistenceRiskBreachEvent};
+use honba_te_core::{BrokerError, BrokerExecutor};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::info;
 use uuid::Uuid;
-
-/// Minimal broker error type for execution actor.
-#[derive(Debug, thiserror::Error)]
-pub enum BrokerError {
-    #[error("auth failure: {0}")]
-    Auth(String),
-    #[error("order rejected by broker: {0}")]
-    Rejected(String),
-    #[error("network or transport error: {0}")]
-    Transport(String),
-    #[error("broker request timeout")]
-    Timeout,
-    #[error("order not found: {0}")]
-    OrderNotFound(String),
-    #[error("invalid request or parameters: {0}")]
-    InvalidRequest(String),
-    #[error("other: {0}")]
-    Other(String),
-}
-
-/// Minimal broker executor trait.
-#[async_trait::async_trait]
-pub trait BrokerExecutor: Send + Sync {
-    fn name(&self) -> &str;
-    async fn place_order(&self, req: honba_core::OrderRequest) -> Result<honba_core::OrderAck, BrokerError>;
-    async fn cancel_order(&self, order_id: &str) -> Result<(), BrokerError>;
-    async fn get_order_status(&self, order_id: &str) -> Result<honba_core::OrderStatus, BrokerError>;
-}
 
 use crate::messages::{ActorStatus, ExecutionMsg, RiskMsg, StrategyMsg};
 use crate::metrics::MetricsCollector;
@@ -112,7 +85,7 @@ impl ExecutionActor {
                         let client_order_id_str = request.client_order_id.to_string();
                         // Check if client_order_id is already registered
                         if let Err(e) = oms.check_idempotency(&client_order_id_str) {
-                            let _ = reply_to.send(Err(crate::messages::BrokerError::Other(
+                            let _ = reply_to.send(Err(crate::messages::BrokerError::InvalidRequest(
                                 format!("Idempotency check failed: {}", e)
                             )));
                             continue;
@@ -192,7 +165,7 @@ impl ExecutionActor {
 
                     // Convert execution::BrokerError to messages::BrokerError for the reply channel
                     let res_converted: Result<OrderAck, crate::messages::BrokerError> = res.map_err(|e| {
-                        crate::messages::BrokerError::Other(e.to_string())
+                        crate::messages::BrokerError::InvalidRequest(e.to_string())
                     });
                     let _ = reply_to.send(res_converted);
                 }
@@ -242,7 +215,7 @@ impl ExecutionActor {
                     }
                     // Convert execution::BrokerError to messages::BrokerError for the reply channel
                         let res_converted: Result<(), crate::messages::BrokerError> = res.map_err(|e| {
-                            crate::messages::BrokerError::Other(e.to_string())
+                            crate::messages::BrokerError::InvalidRequest(e.to_string())
                         });
                         let _ = reply_to.send(res_converted);
                     }
@@ -250,7 +223,7 @@ impl ExecutionActor {
                 ExecutionMsg::QueryStatus { order_id, reply_to } => {
                     let res = self.broker.get_order_status(&order_id).await;
                     let res_converted: Result<OrderStatus, crate::messages::BrokerError> = res.map_err(|e| {
-                        crate::messages::BrokerError::Other(e.to_string())
+                        crate::messages::BrokerError::InvalidRequest(e.to_string())
                     });
                     let _ = reply_to.send(res_converted);
                 }
@@ -258,7 +231,17 @@ impl ExecutionActor {
                 ExecutionMsg::RiskBreachEvent(event) => {
                     // Persist risk breach event to SEBI audit ledger
                     if let Some(ref audit) = self.audit_ledger {
-                        let _ = audit.record_risk_breach_event(&event).await;
+                        let persistence_event = PersistenceRiskBreachEvent {
+                            ts: event.ts,
+                            algo_id: event.algo_id,
+                            instrument: event.instrument,
+                            refusal_reason: event.refusal_reason,
+                            rule_code: event.rule_code,
+                            eval_duration_us: event.eval_duration_us,
+                            requested_qty: event.requested_qty,
+                            requested_price: event.requested_price,
+                        };
+                        let _ = audit.record_risk_breach_event(&persistence_event).await;
                     }
                 }
 

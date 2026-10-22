@@ -1,22 +1,22 @@
 //! The run execution ports (ADR 0017 decision 8): [`JournalWriter`], [`RunExecutor`] and
 //! the values that cross them, [`RunJob`] and [`RunOutcome`].
 //!
-//! Pure: no I/O lives here. `honba-api-rest` supplies the file journal, the worker threads
+//! Pure: no I/O lives here. The REST crate supplies the file journal, the worker threads
 //! and the concrete executor.
 
-use honba_messages::{ErrorCode, ErrorDetail, Message};
-use honba_strategy::StrategyIr;
 use serde_json::Value;
 
 use crate::responses::{BacktestMetrics, SweepReportResponse};
 use crate::run_id::RunId;
 use crate::run_resolve::ResolvedRequest;
 use crate::runs::{RunKind, RunManifest};
+use crate::strategy_ir::StrategyIr;
+use crate::wire::{ErrorCode, ErrorDetail, Message};
 
 /// Synchronous, append-only, per-run journal.
 ///
-/// Same contract as `honba_ports::Sink` (append-only, explicit flush, a failure is kept), but
-/// sync: the worker is a plain thread, and `honba-api` may not depend on `honba-ports`.
+/// Same contract as the platform sink port (append-only, explicit flush, a failure is kept),
+/// but sync: the worker is a plain thread, and this crate stays free of I/O.
 pub trait JournalWriter: Send {
     /// Appends one message as one record.
     fn append(&mut self, msg: &Message) -> Result<(), ErrorDetail>;

@@ -7,19 +7,53 @@
 //! use honba_testing::fixtures::{any_instrument, flat_bar, instrument};
 //!
 //! assert_eq!(any_instrument(), instrument("X"));
-//! assert_eq!(flat_bar("X", 10.0, 1).close(), 10.0);
+//! assert_eq!(flat_bar("X", 10.0, 1).close.to_string(), "10");
 //! ```
 
-use honba_messages::{
-    Bar, BarAggregation, BarSpecification, BarType, Exchange, InstrumentId, PriceType, UnixNanos,
-};
+use honba_core::chrono::{DateTime, Utc};
+use honba_core::rust_decimal::Decimal;
+use honba_core::{Bar, Exchange, InstrumentId, Price, Quantity};
 
-/// Exchange used by every fixture (and by [`crate::VecFeed`]'s builders).
-pub const TEST_EXCHANGE: &str = "TEST";
+/// Exchange label used by every fixture (and by [`crate::VecFeed`]'s builders).
+pub const TEST_EXCHANGE: &str = "NSE";
 
-/// Instrument `symbol` on the [`TEST_EXCHANGE`].
+/// The canonical exchange every fixture runs on (the value behind [`TEST_EXCHANGE`]).
+pub fn test_exchange() -> Exchange {
+    Exchange::Nse
+}
+
+/// Builds a UTC timestamp from `nanos` nanoseconds since the Unix epoch.
+///
+/// # Panics
+///
+/// Panics only for values outside the representable `DateTime<Utc>` range, which no `i64`
+/// nanosecond count can reach.
+pub fn utc_from_nanos(nanos: i64) -> DateTime<Utc> {
+    let secs = nanos.div_euclid(1_000_000_000);
+    let sub = nanos.rem_euclid(1_000_000_000) as u32;
+    DateTime::from_timestamp(secs, sub).expect("fixture timestamp out of range")
+}
+
+/// Builds a UTC timestamp from `u64` nanoseconds since the Unix epoch.
+pub fn utc_nanos(nanos: u64) -> DateTime<Utc> {
+    utc_from_nanos(nanos as i64)
+}
+
+/// Converts an `f64` fixture literal into an exact [`Decimal`].
+///
+/// # Panics
+///
+/// Panics if the value is not a finite decimal literal.
+pub fn exact_decimal(value: f64) -> Decimal {
+    value
+        .to_string()
+        .parse::<Decimal>()
+        .unwrap_or_else(|_| panic!("fixture f64 must be a finite decimal, got {value}"))
+}
+
+/// Instrument `symbol` on the [`TEST_EXCHANGE`] (canonical [`Exchange`]).
 pub fn instrument(symbol: &str) -> InstrumentId {
-    InstrumentId::new(symbol, Exchange::new(TEST_EXCHANGE))
+    InstrumentId::new(test_exchange(), symbol)
 }
 
 /// A placeholder instrument (`X` on the [`TEST_EXCHANGE`]) for tests where the
@@ -28,26 +62,17 @@ pub fn any_instrument() -> InstrumentId {
     instrument("X")
 }
 
-/// One-minute, last-price bar type for `symbol` on the [`TEST_EXCHANGE`].
-pub fn minute_bar_type(symbol: &str) -> BarType {
-    BarType::new(
-        instrument(symbol),
-        BarSpecification::new(1, BarAggregation::Minute, PriceType::Last),
-    )
-}
-
-/// A flat one-minute bar: open, high, low and close all equal `close`,
-/// volume 1, and both timestamps at `ts` nanoseconds.
+/// A flat bar: open, high, low and close all equal `close`, volume 1, and the
+/// timestamp at `ts` nanoseconds since the Unix epoch.
 pub fn flat_bar(symbol: &str, close: f64, ts: u64) -> Bar {
-    let t = UnixNanos::from_u64(ts);
-    Bar::new(
-        minute_bar_type(symbol),
-        close,
-        close,
-        close,
-        close,
-        1.0,
-        t,
-        t,
-    )
+    let price = Price::new(exact_decimal(close));
+    Bar {
+        instrument: instrument(symbol),
+        open: price,
+        high: price,
+        low: price,
+        close: price,
+        volume: Quantity::from_u64(1),
+        timestamp: utc_nanos(ts),
+    }
 }

@@ -1,32 +1,75 @@
 //! Event recorder handler.
 
+use std::fmt;
 use std::sync::{Arc, Mutex};
 
-use honba_engine::{Handler, Result};
-use honba_messages::{Event, UnixNanos};
+use honba_core::chrono::{DateTime, Utc};
+
+use crate::ports::FeedItem;
+
+/// Error surfaced by the local [`Handler`] lifecycle hooks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandlerError {
+    /// Human-readable failure reason.
+    pub message: String,
+}
+
+impl fmt::Display for HandlerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "handler error: {}", self.message)
+    }
+}
+
+impl std::error::Error for HandlerError {}
+
+/// Result alias for the [`Handler`] lifecycle hooks.
+pub type HandlerResult<T> = Result<T, HandlerError>;
+
+/// A lifecycle target for a feed-driven run.
+///
+/// The owning loop calls [`on_start`](Handler::on_start) before the first item,
+/// [`on_event`](Handler::on_event) for every item, and [`on_stop`](Handler::on_stop) once the
+/// feed is exhausted. [`Recorder`] is the reference implementation.
+pub trait Handler {
+    /// Called once before the first event.
+    fn on_start(&mut self) -> HandlerResult<()>;
+    /// Called for every event with its event timestamp.
+    fn on_event(&mut self, item: &FeedItem, ts: DateTime<Utc>) -> HandlerResult<()>;
+    /// Called once after the run ends.
+    fn on_stop(&mut self) -> HandlerResult<()>;
+}
 
 /// A handler that records every event it receives.
 ///
 /// Cheap to clone; clones share the same underlying buffer, so a test can
-/// register one clone with the engine and read from another after the run.
+/// drive one clone and read from another after the run.
 ///
 /// ```
-/// use honba_engine::{Engine, Handler};
-/// use honba_testing::{Recorder, VecFeed};
+/// use honba_testing::{Handler, MarketDataFeed, Recorder, VecFeed};
 ///
+/// # tokio::runtime::Builder::new_current_thread()
+/// #     .build()
+/// #     .unwrap()
+/// #     .block_on(async {
 /// let rec = Recorder::new();
-/// let mut engine = Engine::new();
-/// engine.add_handler(rec.clone());
+/// let mut driven = rec.clone();
+/// driven.on_start().unwrap();
 ///
 /// let mut feed = VecFeed::new(vec![VecFeed::quote("X", 1.0, 2.0, 5)]);
-/// engine.run(&mut feed).unwrap();
+/// while let Some(item) = feed.next().await.unwrap() {
+///     let ts = item.timestamp();
+///     driven.on_event(&item, ts).unwrap();
+/// }
+/// driven.on_stop().unwrap();
 ///
 /// assert_eq!(rec.len(), 1);
 /// assert_eq!(rec.timestamps(), vec![5]);
+/// assert!(rec.started() && rec.stopped());
+/// # });
 /// ```
 #[derive(Clone, Default)]
 pub struct Recorder {
-    events: Arc<Mutex<Vec<Event>>>,
+    events: Arc<Mutex<Vec<FeedItem>>>,
     started: Arc<Mutex<bool>>,
     stopped: Arc<Mutex<bool>>,
 }
@@ -48,17 +91,17 @@ impl Recorder {
     }
 
     /// Returns the recorded events as a clone.
-    pub fn events(&self) -> Vec<Event> {
+    pub fn events(&self) -> Vec<FeedItem> {
         self.events.lock().unwrap().clone()
     }
 
-    /// Returns the `ts_event` of every recorded event, in order.
-    pub fn timestamps(&self) -> Vec<u64> {
+    /// Returns the timestamp of every recorded event as epoch nanoseconds, in order.
+    pub fn timestamps(&self) -> Vec<i64> {
         self.events
             .lock()
             .unwrap()
             .iter()
-            .map(|e| e.ts_event().as_u64())
+            .map(|item| item.timestamp().timestamp_nanos())
             .collect()
     }
 
@@ -74,21 +117,17 @@ impl Recorder {
 }
 
 impl Handler for Recorder {
-    fn on_start(&mut self) -> Result<()> {
+    fn on_start(&mut self) -> HandlerResult<()> {
         *self.started.lock().unwrap() = true;
         Ok(())
     }
 
-    fn on_event(
-        &mut self,
-        event: &Event,
-        _ts_init: UnixNanos,
-    ) -> Result<honba_engine::EngineOutput> {
-        self.events.lock().unwrap().push(event.clone());
-        Ok(honba_engine::EngineOutput::None)
+    fn on_event(&mut self, item: &FeedItem, _ts: DateTime<Utc>) -> HandlerResult<()> {
+        self.events.lock().unwrap().push(item.clone());
+        Ok(())
     }
 
-    fn on_stop(&mut self) -> Result<()> {
+    fn on_stop(&mut self) -> HandlerResult<()> {
         *self.stopped.lock().unwrap() = true;
         Ok(())
     }

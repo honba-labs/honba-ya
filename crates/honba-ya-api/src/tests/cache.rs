@@ -2,16 +2,18 @@
 
 use serde_json::json;
 
+use rust_decimal::Decimal;
+
 use crate::cache::{CacheKey, CachedResult, ResultCache};
 use crate::responses::BacktestMetrics;
 
 fn sample_metrics() -> BacktestMetrics {
     BacktestMetrics {
-        total_return: 0.15,
-        sharpe: 1.85,
-        max_drawdown: 0.08,
+        total_return: Decimal::new(15, 2), // 0.15
+        sharpe: Decimal::new(185, 2),      // 1.85
+        max_drawdown: Decimal::new(8, 2),  // 0.08
         trades: 24,
-        net_pnl: 150_000.0,
+        net_pnl: Decimal::from(150_000_i64),
     }
 }
 

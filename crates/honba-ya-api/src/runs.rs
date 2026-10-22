@@ -1,7 +1,5 @@
 //! The run state machine and the run manifest (ADR 0017 decisions 1 and 3).
 
-use honba_messages::{ErrorCode, ErrorDetail, SCHEMA_VERSION};
-use honba_strategy::StrategyIr;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -11,6 +9,8 @@ use crate::responses::{
 };
 use crate::run_id::RunId;
 use crate::run_resolve::ResolvedRequest;
+use crate::strategy_ir::StrategyIr;
+use crate::wire::{ErrorCode, ErrorDetail, SCHEMA_VERSION};
 
 /// On-disk version of the manifest (its own axis, not `schema_version`). Starts at 1.
 pub const MANIFEST_VERSION: u32 = 1;
@@ -101,8 +101,8 @@ pub struct RunManifest {
     pub strategy: StrategyIr,
     /// The resolved request.
     pub request: ResolvedRequest,
-    /// The journal's wire `schema_version`.
-    pub schema_version: u32,
+    /// The journal's wire `schema_version` (`[`SCHEMA_VERSION`]` as of this build).
+    pub schema_version: String,
     /// Wall-clock creation time (RFC 3339, metadata only).
     pub created_at: String,
     /// When a worker started the run.
@@ -152,7 +152,7 @@ impl RunManifest {
             strategy_id,
             strategy,
             request,
-            schema_version: SCHEMA_VERSION,
+            schema_version: SCHEMA_VERSION.to_string(),
             created_at: created_at.into(),
             started_at: None,
             finished_at: None,

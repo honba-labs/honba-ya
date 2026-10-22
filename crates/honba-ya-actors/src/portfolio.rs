@@ -328,3 +328,25 @@ impl PortfolioActor {
 
 // Re-export honba-core Currency for internal use
 use honba_core::Currency;
+
+/// Maps exchange-specific tokens to canonical InstrumentIds.
+#[derive(Debug, Default, Clone)]
+pub struct SymbolMapper {
+    mapping: std::collections::HashMap<String, InstrumentId>,
+}
+
+impl SymbolMapper {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register an exchange token to InstrumentId mapping.
+    pub fn register(&mut self, exchange_token: String, instrument_id: InstrumentId) {
+        self.mapping.insert(exchange_token, instrument_id);
+    }
+
+    /// Look up InstrumentId by exchange token.
+    pub fn get(&self, exchange_token: &str) -> Option<&InstrumentId> {
+        self.mapping.get(exchange_token)
+    }
+}

@@ -19,23 +19,20 @@ serde_json  = "1"
 toml        = "0.8"
 
 # Internal honba-ya crates
-honba-engine          = { package = "honba-ya-engine", path = "../honba-ya-engine" }
-honba-async           = { package = "honba-ya-async", path = "../honba-ya-async" }
-honba-testing         = { package = "honba-ya-testing", path = "../honba-ya-testing" }
-honba-sim             = { package = "honba-ya-sim", path = "../honba-ya-sim" }
-honba-api-rest        = { package = "honba-ya-api-rest", path = "../honba-ya-api-rest" }
-honba-config          = { package = "honba-ya-config", path = "../honba-ya-config" }
+honba-ya-api-rest.workspace = true
+honba-ya-config.workspace = true
+honba-ya-testing.workspace = true
+honba-ya-backtest.workspace = true
 
 # Cross-workspace crates
-honba-messages        = { package = "honba-kokoro-messages", path = "../../../honba-kokoro/crates/honba-kokoro-messages" }
-honba-entities        = { package = "honba-kokoro-entities", path = "../../../honba-kokoro/crates/honba-kokoro-entities" }
-honba-ports           = { package = "honba-kokoro-ports", path = "../../../honba-kokoro/crates/honba-kokoro-ports" }
-honba-risk            = { package = "honba-kokoro-risk", path = "../../../honba-kokoro/crates/honba-kokoro-risk" }
-honba-market          = { package = "honba-me-market", path = "../../../honba-me/crates/honba-me-market" }
-honba-feed            = { package = "honba-me-feed", path = "../../../honba-me/crates/honba-me-feed" }
-honba-analytics       = { package = "honba-nou-analytics", path = "../../../honba-nou/crates/honba-nou-analytics" }
-honba-strategy        = { package = "honba-nou-strategy", path = "../../../honba-nou/crates/honba-nou-strategy" }
-honba-codegen         = { package = "honba-tamashii-codegen", path = "../../../honba-tamashii/crates/honba-tamashii-codegen" }
+honba-core.workspace = true
+honba-mon.workspace = true
+honba-portfolio.workspace = true
+honba-me-market.workspace = true
+honba-me-feed.workspace = true
+honba-nou-analytics.workspace = true
+honba-nou-strategy.workspace = true
+honba-tamashii-codegen.workspace = true
 
 tokio                 = { version = "1", features = ["rt-multi-thread", "net", "signal"] }
 

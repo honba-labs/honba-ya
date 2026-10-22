@@ -11,10 +11,10 @@ description = "Test fixtures, feeds, and helpers for Honba"
 name = "honba_testing"
 
 [dependencies]
-honba-messages.workspace = true
-honba-entities.workspace = true
-honba-engine.workspace = true
-honba-ports.workspace = true
-honba-sim.workspace = true
+honba-core.workspace = true
+honba-te-core = { path = "../../../honba-te/crates/honba-te-core" }
 async-trait.workspace = true
+chrono.workspace = true
+rust_decimal.workspace = true
+rust_decimal_macros.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }

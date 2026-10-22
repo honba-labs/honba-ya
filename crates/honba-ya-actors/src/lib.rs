@@ -16,13 +16,17 @@ pub mod market_data;
 pub mod messages;
 pub mod metrics;
 pub mod portfolio;
+pub mod risk;
 pub mod strategy;
+pub mod supervisor;
 pub mod tracing_spans;
 
 pub use execution::ExecutionActor;
 pub use market_data::MarketDataActor;
-pub use messages::{ActorStatus, ExecutionMsg, MarketDataMsg, PortfolioMsg, StrategyMsg};
+pub use messages::{ActorStatus, ExecutionMsg, MarketDataMsg, PortfolioMsg, RiskMsg, StrategyMsg};
 pub use metrics::MetricsCollector;
 pub use portfolio::PortfolioActor;
+pub use risk::RiskActor;
 pub use strategy::{Strategy, StrategyActor};
+pub use supervisor::{RestartStrategy, Supervisor};
 pub use tracing_spans::*;

@@ -14,6 +14,7 @@ name = "honba_actors"
 honba-core.workspace = true
 honba-mon.workspace = true
 honba-ya-persistence.workspace = true
+honba-te-core = { path = "../../../honba-te/crates/honba-te-core" }
 tokio.workspace = true
 async-trait.workspace = true
 futures.workspace = true
@@ -26,10 +27,13 @@ serde_json.workspace = true
 uuid.workspace = true
 prometheus.workspace = true
 axum.workspace = true
-honba-kokoro-portfolio = { path = "../../../honba-kokoro/crates/honba-kokoro-portfolio" }
-honba-kokoro-ledger = { path = "../../../honba-kokoro/crates/honba-kokoro-ledger" }
-honba-kokoro-oms = { path = "../../../honba-kokoro/crates/honba-kokoro-oms" }
+honba-kokoro-portfolio.workspace = true
+honba-kokoro-ledger.workspace = true
+honba-kokoro-oms.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 tracing-subscriber = { workspace = true }
+honba-ya-testing = { package = "honba-ya-testing", path = "../honba-ya-testing" }
+honba-te-core = { path = "../../../honba-te/crates/honba-te-core" }
+honba-mon.workspace = true

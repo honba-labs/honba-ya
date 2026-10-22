@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS traders (
+    id BIGSERIAL PRIMARY KEY,
+    client_id VARCHAR(255) NOT NULL UNIQUE,
+    algo_id VARCHAR(64) NOT NULL UNIQUE,
+    risk_profile VARCHAR(64) NOT NULL DEFAULT 'retail',
+    capital DECIMAL(30,16) NOT NULL DEFAULT '0',
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);

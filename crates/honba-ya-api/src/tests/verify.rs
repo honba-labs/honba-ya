@@ -1,13 +1,14 @@
 //! Tests for `crate::verify` (`POST /strategies/verify`).
 
-use honba_messages::{BarAggregation, Exchange, InstrumentId};
-use honba_strategy::{StrategyManifest, Subscriptions, TimeframeSpec, Universe};
 use serde_json::json;
 
+use crate::strategy_ir::{StrategyManifest, Subscriptions, TimeframeSpec, Universe};
+use crate::wire::BarAggregation;
 use crate::{ErrorCode, verify_strategy};
+use honba_core::{Exchange, InstrumentId};
 
 fn tcs() -> InstrumentId {
-    InstrumentId::new("TCS", Exchange::new("NSE"))
+    InstrumentId::new(Exchange::Nse, "TCS")
 }
 
 fn manifest() -> StrategyManifest {
@@ -19,8 +20,6 @@ fn manifest() -> StrategyManifest {
     )
     .with_subscriptions(Subscriptions {
         instruments: vec![tcs()],
-        quotes: false,
-        trades: false,
     })
     .with_warmup_bars(20)
 }
@@ -28,7 +27,13 @@ fn manifest() -> StrategyManifest {
 #[test]
 fn a_valid_manifest_verifies_to_its_ir() {
     let ir = verify_strategy(manifest()).expect("verifies");
-    assert_eq!(ir.subscriptions.bars, vec![tcs()]);
+    // The IR pins the subscriptions by instrument and the bar series by the
+    // driving timeframe (the manifest's subscriptions have no bar series yet).
+    assert_eq!(ir.subscriptions.instruments, vec![tcs()]);
+    assert_eq!(
+        ir.subscriptions.bars,
+        vec![TimeframeSpec::new(1, BarAggregation::Day)]
+    );
     assert_eq!(ir.warmup_bars, 20);
 }
 

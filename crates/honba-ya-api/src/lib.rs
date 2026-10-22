@@ -1,10 +1,11 @@
 //! Transport-agnostic versioned API surface for the Honba platform.
 //!
-//! The envelope, error taxonomy, endpoint registry, and version constants live in
-//! `honba-messages` (L0) because they are wire types that every surface —
-//! Python, REST, WASM, MCP — reads and writes. This crate holds the request
-//! and response DTOs that sit *inside* that envelope, plus the endpoint
-//! registry the code generator walks to emit OpenAPI `paths`.
+//! The envelope, error taxonomy, endpoint registry, and version constants live
+//! in [`wire`] because they are wire types that every surface — Python, REST,
+//! WASM, MCP — reads and writes. This crate holds the request and response
+//! DTOs that sit *inside* that envelope, plus the endpoint registry the code
+//! generator walks to emit OpenAPI `paths`. The strategy manifest → IR step
+//! lives in [`strategy_ir`].
 //!
 //! It stays transport-free on purpose: no axum, no wasm-bindgen, no I/O. The
 //! REST and WASM crates depend on this one, not on each other.
@@ -26,14 +27,12 @@ pub mod run_resolve;
 pub mod runs;
 pub mod screener;
 pub mod strategies;
+pub mod strategy_ir;
 pub mod verify;
+pub mod wire;
 
 pub use cache::{CacheKey, CachedResult, ResultCache, canonical_json_bytes};
 pub use capabilities::{Capabilities, CapabilityManifest};
-pub use honba_messages::{
-    API_VERSION, Access, ApiResponse, ApiVersion, ENDPOINTS, Endpoint, ErrorCategory, ErrorCode,
-    ErrorDetail, HttpMethod, ParamLocation, ResponseEnvelope, WRITE_PATHS, write_endpoints,
-};
 pub use ingest::{MAX_INGEST_BARS, check_ingest_batch};
 pub use market::{
     DEFAULT_DEPTH_LEVELS, DEFAULT_TIMEFRAME, MAX_DEPTH_LEVELS, ResolvedBarsQuery,
@@ -75,7 +74,16 @@ pub use strategies::{
     MAX_COMPILED_STRATEGIES, StrategyCatalog, compile_strategy, list_strategies,
     parse_compile_request,
 };
+pub use strategy_ir::{
+    IrError, StrategyIr, StrategyManifest, StrategySubscriptions, Subscriptions, TimeframeSpec,
+    Universe,
+};
 pub use verify::{VerifyStrategyRequest, VerifyStrategyResponse, verify_strategy};
+pub use wire::{
+    API_VERSION, SCHEMA_VERSION, Access, ApiResponse, ApiVersion, ENDPOINTS, Endpoint, ErrorCode,
+    ErrorDetail, Event, HttpMethod, Message, ParamLocation, ResponseEnvelope, TradingState,
+    WRITE_PATHS, write_endpoints,
+};
 
 #[cfg(test)]
 mod tests;

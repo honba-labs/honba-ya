@@ -1,14 +1,15 @@
 //! Unit tests for `ScreenerQuery::resolve` and the per-instrument evaluation.
 
-use honba_messages::{
-    Bar, BarAggregation, BarSpecification, BarType, ErrorCode, ErrorDetail, Exchange, InstrumentId,
-    PriceType, UnixNanos,
-};
+use rust_decimal::Decimal;
 use serde_json::{Value, json};
 
+use crate::wire::{BarAggregation, BarSpecification, ErrorCode, ErrorDetail, PriceType};
 use crate::{
     MAX_SCREENER_BARS, MAX_SCREENER_ROWS, MAX_SCREENER_UNIVERSE, ScreenerQuery, check_scan_budget,
 };
+use honba_core::{Bar, Exchange, InstrumentId, Price, Quantity};
+
+use super::ts;
 
 fn query(filters: Option<Value>, universe: Option<Value>) -> ScreenerQuery {
     ScreenerQuery {
@@ -27,22 +28,28 @@ fn reason(detail: &ErrorDetail) -> (&str, &str) {
     )
 }
 
-fn bars(closes: &[f64]) -> Vec<Bar> {
-    let bt = BarType::new(
-        InstrumentId::new("TCS", Exchange::new("NSE")),
-        BarSpecification::new(1, BarAggregation::Day, PriceType::Last),
-    );
+/// One daily bar per close: close `c`, the ±1 envelope around it, volume 10.
+fn bars(closes: &[i64]) -> Vec<Bar> {
+    let id = InstrumentId::new(Exchange::Nse, "TCS");
     closes
         .iter()
         .enumerate()
         .map(|(i, &c)| {
-            let t = UnixNanos::from_u64(i as u64 + 1);
-            Bar::new(bt.clone(), c, c + 1.0, c - 1.0, c, 10.0, t, t)
+            let close = Decimal::from(c);
+            Bar {
+                instrument: id.clone(),
+                open: Price(close),
+                high: Price(close + Decimal::ONE),
+                low: Price(close - Decimal::ONE),
+                close: Price(close),
+                volume: Quantity::from_u64(10),
+                timestamp: ts(i as i64 + 1),
+            }
         })
         .collect()
 }
 
-fn gt(key: &str, value: f64) -> Value {
+fn gt(key: &str, value: i64) -> Value {
     json!({"operator": "AND", "items": [{"key": key, "op": "gt", "value": value}]})
 }
 
@@ -74,7 +81,7 @@ fn the_universe_is_sorted_and_deduplicated() {
         .resolve()
         .unwrap();
     let ids: Vec<String> = resolved.universe.iter().map(ToString::to_string).collect();
-    assert_eq!(ids, ["INFY.NSE", "TCS.NSE"]);
+    assert_eq!(ids, ["NSE:INFY", "NSE:TCS"]);
 }
 
 #[test]
@@ -103,9 +110,10 @@ fn as_of_is_an_inclusive_upper_bound() {
     let mut q = query(None, Some(json!(["TCS.NSE"])));
     q.as_of = Some("1970-01-02".into());
     let resolved = q.resolve().unwrap();
+    // The exclusive end is one nanosecond past the inclusive `as_of` date.
     assert_eq!(
         resolved.to,
-        Some(UnixNanos::from_u64(86_400_000_000_000 + 1))
+        Some(chrono::DateTime::from_timestamp(86_400, 1).expect("a valid test timestamp"))
     );
     q.as_of = Some("yesterday".into());
     assert_eq!(reason(&q.resolve().unwrap_err()), ("as_of", "invalid_time"));
@@ -147,7 +155,7 @@ fn malformed_filters_are_invalid_filters() {
 #[test]
 fn unsupported_metrics_are_rejected_at_resolve_before_any_bar_is_read() {
     let q = query(
-        Some(gt("price_earnings_ttm", 1.0)),
+        Some(gt("price_earnings_ttm", 1)),
         Some(json!(["TCS.NSE"])),
     );
     let err = q.resolve().unwrap_err();
@@ -189,23 +197,24 @@ fn a_matching_instrument_yields_a_row_with_the_filter_metrics() {
     );
     let resolved = q.resolve().unwrap();
     assert_eq!(resolved.metric_keys, ["close", "SMA3"]);
-    let id = InstrumentId::new("TCS", Exchange::new("NSE"));
+    let id = InstrumentId::new(Exchange::Nse, "TCS");
     let row = resolved
-        .evaluate(&id, &bars(&[101.0, 102.0, 106.0]))
+        .evaluate(&id, &bars(&[101, 102, 106]))
         .unwrap()
         .expect("matches");
     assert_eq!(row.instrument_id, id);
-    assert_eq!(row.metrics["close"], Some(106.0));
-    assert_eq!(row.metrics["SMA3"], Some(103.0));
+    // (101 + 102 + 106) / 3, an exact Decimal mean.
+    assert_eq!(row.metrics["close"], Some(Decimal::from(106_i64)));
+    assert_eq!(row.metrics["SMA3"], Some(Decimal::from(103_i64)));
 }
 
 #[test]
 fn a_non_matching_instrument_yields_no_row() {
-    let resolved = query(Some(gt("close", 500.0)), Some(json!(["TCS.NSE"])))
+    let resolved = query(Some(gt("close", 500)), Some(json!(["TCS.NSE"])))
         .resolve()
         .unwrap();
-    let id = InstrumentId::new("TCS", Exchange::new("NSE"));
-    assert_eq!(resolved.evaluate(&id, &bars(&[101.0])).unwrap(), None);
+    let id = InstrumentId::new(Exchange::Nse, "TCS");
+    assert_eq!(resolved.evaluate(&id, &bars(&[101])).unwrap(), None);
 }
 
 #[test]
@@ -218,15 +227,15 @@ fn a_warming_up_metric_is_null_in_the_row_of_an_or_match() {
     )
     .resolve()
     .unwrap();
-    let id = InstrumentId::new("TCS", Exchange::new("NSE"));
-    let row = resolved.evaluate(&id, &bars(&[10.0])).unwrap().unwrap();
+    let id = InstrumentId::new(Exchange::Nse, "TCS");
+    let row = resolved.evaluate(&id, &bars(&[10])).unwrap().unwrap();
     assert_eq!(row.metrics["SMA50"], None);
 }
 
 #[test]
 fn no_filter_matches_every_instrument() {
     let resolved = query(None, Some(json!(["TCS.NSE"]))).resolve().unwrap();
-    let id = InstrumentId::new("TCS", Exchange::new("NSE"));
+    let id = InstrumentId::new(Exchange::Nse, "TCS");
     let row = resolved.evaluate(&id, &[]).unwrap().unwrap();
     assert!(row.metrics.is_empty());
 }

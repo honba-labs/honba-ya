@@ -1,20 +1,25 @@
 #![allow(missing_docs)]
 //! Response DTOs. These are *records* (ADR 0012): unknown fields are ignored
 //! on parse so an older client reads a newer server's response.
+//!
+//! Monetary and price-derived fields are exact [`rust_decimal::Decimal`]
+//! amounts that serialize as strings; timestamps are
+//! [`chrono::DateTime`]`<`[`chrono::Utc`]`>`.
+use std::collections::BTreeMap;
+
+use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use honba_entities::{
-    Currency, PortfolioAccount, PortfolioHolding, PortfolioPosition, Position, Trade,
-};
-use std::collections::BTreeMap;
-
-use honba_messages::{
-    Bar, ErrorDetail, InstrumentId, Message, Order, OrderSide, QuoteTick, UnixNanos,
-};
-use honba_strategy::StrategyIr;
+use honba_core::{Bar, Currency, InstrumentId, OrderSide};
 
 use crate::capabilities::Capabilities;
+use crate::strategy_ir::StrategyIr;
+use crate::wire::{
+    ErrorDetail, Message, Order, Position, PortfolioAccount, PortfolioHolding, PortfolioPosition,
+    QuoteTick, Trade, TradingState, ValidationBlock,
+};
 
 /// Capabilities response.
 pub type CapabilitiesResponse = Capabilities;
@@ -46,8 +51,8 @@ pub struct ScreenerResultRow {
     /// The instrument that matched.
     pub instrument_id: InstrumentId,
     /// Latest value of every metric the filter reads, by key as written in the filter;
-    /// `null` while a metric is still warming up.
-    pub metrics: BTreeMap<String, Option<f64>>,
+    /// `null` while a metric is still warming up. Decimal values serialize as strings.
+    pub metrics: BTreeMap<String, Option<Decimal>>,
 }
 
 /// Screener scan response.
@@ -61,9 +66,9 @@ pub struct ScreenerResponse {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DepthLevel {
     /// Price.
-    pub price: f64,
+    pub price: Decimal,
     /// Quantity resting at this price.
-    pub qty: f64,
+    pub qty: Decimal,
 }
 
 /// Depth (order book) response.
@@ -132,13 +137,13 @@ pub struct BacktestMetrics {
     /// Number of completed round trips.
     pub trades: u64,
     /// Net profit across the run.
-    pub net_pnl: f64,
+    pub net_pnl: Decimal,
     /// Annualized Sharpe ratio.
-    pub sharpe: f64,
+    pub sharpe: Decimal,
     /// Maximum peak-to-trough drawdown, as a positive fraction.
-    pub max_drawdown: f64,
+    pub max_drawdown: Decimal,
     /// Total return as a fraction of initial capital.
-    pub total_return: f64,
+    pub total_return: Decimal,
 }
 
 /// Backtest response.
@@ -156,10 +161,24 @@ pub struct BacktestResponse {
     pub assumptions: Option<serde_json::Value>,
     /// Statistical overfitting validation block (E4-S6).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub validation: Option<honba_analytics::ValidationBlock>,
+    pub validation: Option<ValidationBlock>,
     /// Why the run failed; present only when `status` is `failed`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<ErrorDetail>,
+}
+
+/// Default backtest response: an empty run id in `Pending` with no report.
+impl Default for BacktestResponse {
+    fn default() -> Self {
+        Self {
+            run_id: String::new(),
+            status: RunStatus::Pending,
+            metrics: None,
+            assumptions: None,
+            validation: None,
+            error: None,
+        }
+    }
 }
 
 /// Sweep response.
@@ -187,7 +206,7 @@ pub struct SweepReportResponse {
     pub best: Option<serde_json::Value>,
     /// Statistical overfitting validation block across sweep trials (E4-S6).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub validation: Option<honba_analytics::ValidationBlock>,
+    pub validation: Option<ValidationBlock>,
 }
 
 /// Orders response.
@@ -257,7 +276,7 @@ pub enum StreamFrame {
     },
     /// One journal record.
     Record {
-        /// The record's 0-based line index in `events.ndjson` industries.
+        /// The record's 0-based line index in `events.ndjson`.
         seq: u64,
         /// The journal message.
         message: Message,
@@ -275,7 +294,7 @@ pub struct BarsIngestResponse {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TradingStateResponse {
     /// The current trading state.
-    pub state: honba_messages::TradingState,
+    pub state: TradingState,
 }
 
 /// `PUT /trading-state` response: the state now in force and the one it replaced.
@@ -284,9 +303,9 @@ pub struct TradingStateResponse {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct TradingStateChange {
     /// The trading state now in force.
-    pub state: honba_messages::TradingState,
+    pub state: TradingState,
     /// The trading state before this request.
-    pub previous: honba_messages::TradingState,
+    pub previous: TradingState,
 }
 
 /// Ledger entry for transaction journal (trades, fees, transfers, adjustments).
@@ -294,8 +313,8 @@ pub struct TradingStateChange {
 pub struct LedgerEntry {
     /// Unique entry id.
     pub id: String,
-    /// Event timestamp (Unix nanos).
-    pub ts_event: UnixNanos,
+    /// Event timestamp (UTC).
+    pub ts_event: DateTime<Utc>,
     /// Human-readable date.
     pub date: String,
     /// Entry category.
@@ -305,13 +324,13 @@ pub struct LedgerEntry {
     /// Settlement currency.
     pub currency: Currency,
     /// Amount (positive = credit, negative = debit).
-    pub amount: f64,
+    pub amount: Decimal,
     /// Amount in USD (optional).
-    pub amount_usd: Option<f64>,
+    pub amount_usd: Option<Decimal>,
     /// Running balance after this entry.
-    pub balance: f64,
+    pub balance: Decimal,
     /// Balance in USD (optional).
-    pub balance_usd: Option<f64>,
+    pub balance_usd: Option<Decimal>,
     /// Wallet/account name.
     pub wallet: Option<String>,
     /// Instrument (optional).
@@ -319,7 +338,7 @@ pub struct LedgerEntry {
     /// Side for trades (optional).
     pub side: Option<OrderSide>,
     /// Fees for this entry (optional).
-    pub fees: Option<f64>,
+    pub fees: Option<Decimal>,
 }
 
 /// Ledger history response.
@@ -336,8 +355,8 @@ pub struct LedgerHistoryResponse {
 pub struct TaxTransaction {
     /// Unique transaction id.
     pub id: String,
-    /// Event timestamp (Unix nanos).
-    pub ts_event: UnixNanos,
+    /// Event timestamp (UTC).
+    pub ts_event: DateTime<Utc>,
     /// Human-readable sell date.
     pub date: String,
     /// Instrument name.
@@ -349,11 +368,11 @@ pub struct TaxTransaction {
     /// Side (buy/sell).
     pub side: OrderSide,
     /// Quantity.
-    pub quantity: f64,
+    pub quantity: Decimal,
     /// Buy price.
-    pub buy_price: f64,
+    pub buy_price: Decimal,
     /// Sell price.
-    pub sell_price: f64,
+    pub sell_price: Decimal,
     /// Buy date.
     pub buy_date: String,
     /// Sell date.
@@ -361,29 +380,29 @@ pub struct TaxTransaction {
     /// Holding period in days.
     pub holding_period_days: u64,
     /// Gross gain/loss.
-    pub gain_loss: f64,
+    pub gain_loss: Decimal,
     /// Gross gain/loss in USD (optional).
-    pub gain_loss_usd: Option<f64>,
+    pub gain_loss_usd: Option<Decimal>,
     /// Short-term capital gain.
-    pub stcg: f64,
+    pub stcg: Decimal,
     /// Long-term capital gain.
-    pub ltcg: f64,
+    pub ltcg: Decimal,
     /// Securities Transaction Tax.
-    pub stt: f64,
+    pub stt: Decimal,
     /// Stamp duty.
-    pub stamp_duty: f64,
+    pub stamp_duty: Decimal,
     /// Exchange charges.
-    pub exchange_charges: f64,
+    pub exchange_charges: Decimal,
     /// SEBI fees.
-    pub sebi_fees: f64,
+    pub sebi_fees: Decimal,
     /// GST.
-    pub gst: f64,
+    pub gst: Decimal,
     /// Total charges.
-    pub total_charges: f64,
+    pub total_charges: Decimal,
     /// Net gain/loss after charges.
-    pub net_gain_loss: f64,
+    pub net_gain_loss: Decimal,
     /// Tax liability.
-    pub tax_liability: f64,
+    pub tax_liability: Decimal,
     /// Category (STCG/LTCG/Exempt).
     pub category: String,
 }
@@ -403,23 +422,23 @@ pub struct TaxReportResponse {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TaxReportSummary {
     /// Total STCG.
-    pub total_stcg: f64,
+    pub total_stcg: Decimal,
     /// Total LTCG.
-    pub total_ltcg: f64,
+    pub total_ltcg: Decimal,
     /// Total STT.
-    pub total_stt: f64,
+    pub total_stt: Decimal,
     /// Total stamp duty.
-    pub total_stamp_duty: f64,
+    pub total_stamp_duty: Decimal,
     /// Total exchange charges.
-    pub total_exchange_charges: f64,
+    pub total_exchange_charges: Decimal,
     /// Total SEBI fees.
-    pub total_sebi_fees: f64,
+    pub total_sebi_fees: Decimal,
     /// Total GST.
-    pub total_gst: f64,
+    pub total_gst: Decimal,
     /// Total net gain/loss.
-    pub total_net_gain_loss: f64,
+    pub total_net_gain_loss: Decimal,
     /// Total tax liability.
-    pub total_tax_liability: f64,
+    pub total_tax_liability: Decimal,
 }
 
 /// Portfolio snapshot entry (historical).
@@ -427,24 +446,24 @@ pub struct TaxReportSummary {
 pub struct SnapshotEntry {
     /// Snapshot id.
     pub id: String,
-    /// Timestamp (Unix nanos).
-    pub ts_event: UnixNanos,
+    /// Timestamp (UTC).
+    pub ts_event: DateTime<Utc>,
     /// Human-readable date.
     pub date: String,
     /// Total equity.
-    pub total_equity: f64,
+    pub total_equity: Decimal,
     /// Total cash.
-    pub total_cash: f64,
+    pub total_cash: Decimal,
     /// Positions value.
-    pub positions_value: f64,
+    pub positions_value: Decimal,
     /// Unrealized PnL.
-    pub unrealized_pnl: f64,
+    pub unrealized_pnl: Decimal,
     /// Realized PnL.
-    pub realized_pnl: f64,
+    pub realized_pnl: Decimal,
     /// Day change.
-    pub day_change: f64,
+    pub day_change: Decimal,
     /// Day change percentage.
-    pub day_change_pct: f64,
+    pub day_change_pct: Decimal,
     /// Number of accounts.
     pub accounts: u32,
     /// Number of positions.
@@ -465,8 +484,8 @@ pub struct PortfolioSnapshotsResponse {
 pub struct AuditEntry {
     /// Entry id.
     pub id: String,
-    /// Timestamp (Unix nanos).
-    pub ts_event: UnixNanos,
+    /// Timestamp (UTC).
+    pub ts_event: DateTime<Utc>,
     /// Human-readable date.
     pub date: String,
     /// Instrument.
@@ -474,15 +493,15 @@ pub struct AuditEntry {
     /// Side.
     pub side: OrderSide,
     /// Quantity change.
-    pub quantity_change: f64,
+    pub quantity_change: Decimal,
     /// Price.
-    pub price: f64,
+    pub price: Decimal,
     /// Position after change.
-    pub position_after: f64,
+    pub position_after: Decimal,
     /// Average price after.
-    pub avg_price_after: f64,
+    pub avg_price_after: Decimal,
     /// Realized PnL from this change.
-    pub realized_pnl: f64,
+    pub realized_pnl: Decimal,
     /// Order id that caused the change.
     pub order_id: String,
     /// Change reason.
@@ -508,19 +527,19 @@ pub struct ConcentrationEntry {
     /// Exchange.
     pub exchange: String,
     /// Market value.
-    pub market_value: f64,
+    pub market_value: Decimal,
     /// Percentage of portfolio.
-    pub pct_of_portfolio: f64,
+    pub pct_of_portfolio: Decimal,
     /// Quantity.
-    pub quantity: f64,
+    pub quantity: Decimal,
     /// Average price.
-    pub avg_price: f64,
+    pub avg_price: Decimal,
     /// Current mark.
-    pub mark: f64,
+    pub mark: Decimal,
     /// Unrealized PnL.
-    pub unrealized_pnl: f64,
+    pub unrealized_pnl: Decimal,
     /// Realized PnL.
-    pub realized_pnl: f64,
+    pub realized_pnl: Decimal,
     /// Sector (optional).
     pub sector: Option<String>,
 }
@@ -531,13 +550,13 @@ pub struct ConcentrationRiskResponse {
     /// Concentration entries.
     pub entries: Vec<ConcentrationEntry>,
     /// Total portfolio value.
-    pub total_portfolio_value: f64,
+    pub total_portfolio_value: Decimal,
     /// Herfindahl-Hirschman Index.
-    pub hhi: f64,
+    pub hhi: Decimal,
     /// Top 5 concentration.
-    pub top5_concentration: f64,
+    pub top5_concentration: Decimal,
     /// Top 10 concentration.
-    pub top10_concentration: f64,
+    pub top10_concentration: Decimal,
 }
 
 /// Weighted average cost entry.
@@ -550,21 +569,21 @@ pub struct WACEntry {
     /// Exchange.
     pub exchange: String,
     /// Quantity.
-    pub quantity: f64,
+    pub quantity: Decimal,
     /// Weighted average cost.
-    pub weighted_avg_cost: f64,
+    pub weighted_avg_cost: Decimal,
     /// Current mark.
-    pub mark: f64,
+    pub mark: Decimal,
     /// Market value.
-    pub market_value: f64,
+    pub market_value: Decimal,
     /// Unrealized PnL.
-    pub unrealized_pnl: f64,
+    pub unrealized_pnl: Decimal,
     /// Realized PnL.
-    pub realized_pnl: f64,
+    pub realized_pnl: Decimal,
     /// Total cost basis.
-    pub total_cost_basis: f64,
+    pub total_cost_basis: Decimal,
     /// Total proceeds.
-    pub total_proceeds: f64,
+    pub total_proceeds: Decimal,
 }
 
 /// Weighted average cost response.
@@ -579,8 +598,8 @@ pub struct WeightedAverageCostResponse {
 pub struct FeeEntry {
     /// Entry id.
     pub id: String,
-    /// Timestamp (Unix nanos).
-    pub ts_event: UnixNanos,
+    /// Timestamp (UTC).
+    pub ts_event: DateTime<Utc>,
     /// Human-readable date.
     pub date: String,
     /// Fee type.
@@ -588,7 +607,7 @@ pub struct FeeEntry {
     /// Instrument (optional).
     pub instrument: Option<String>,
     /// Amount.
-    pub amount: f64,
+    pub amount: Decimal,
     /// Currency.
     pub currency: Currency,
     /// Related order id (optional).
@@ -612,7 +631,7 @@ pub struct FeeTypeSummary {
     /// Fee type.
     pub fee_type: String,
     /// Total amount.
-    pub total_amount: f64,
+    pub total_amount: Decimal,
     /// Count.
     pub count: u64,
 }
@@ -620,24 +639,24 @@ pub struct FeeTypeSummary {
 /// Portfolio value chart point (equity curve).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EquityPoint {
-    /// Timestamp (Unix nanos).
-    pub ts_event: UnixNanos,
+    /// Timestamp (UTC).
+    pub ts_event: DateTime<Utc>,
     /// Human-readable date.
     pub date: String,
     /// Equity value.
-    pub equity: f64,
+    pub equity: Decimal,
     /// Cash.
-    pub cash: f64,
+    pub cash: Decimal,
     /// Positions value.
-    pub positions_value: f64,
+    pub positions_value: Decimal,
     /// Unrealized PnL.
-    pub unrealized_pnl: f64,
+    pub unrealized_pnl: Decimal,
     /// Realized PnL.
-    pub realized_pnl: f64,
+    pub realized_pnl: Decimal,
     /// Drawdown from peak.
-    pub drawdown: f64,
+    pub drawdown: Decimal,
     /// Drawdown percentage.
-    pub drawdown_pct: f64,
+    pub drawdown_pct: Decimal,
 }
 
 /// Portfolio value chart response.
@@ -653,19 +672,19 @@ pub struct PortfolioValueChartResponse {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EquityCurveSummary {
     /// Starting equity.
-    pub start_equity: f64,
+    pub start_equity: Decimal,
     /// Ending equity.
-    pub end_equity: f64,
+    pub end_equity: Decimal,
     /// Total return.
-    pub total_return: f64,
+    pub total_return: Decimal,
     /// Total return percentage.
-    pub total_return_pct: f64,
+    pub total_return_pct: Decimal,
     /// Max drawdown.
-    pub max_drawdown: f64,
+    pub max_drawdown: Decimal,
     /// Max drawdown percentage.
-    pub max_drawdown_pct: f64,
+    pub max_drawdown_pct: Decimal,
     /// Sharpe ratio (if available).
-    pub sharpe: Option<f64>,
+    pub sharpe: Option<Decimal>,
 }
 
 /// Fill entry (fill-level detail for an order).
@@ -675,8 +694,8 @@ pub struct FillEntry {
     pub id: String,
     /// Order id.
     pub order_id: String,
-    /// Timestamp (Unix nanos).
-    pub ts_event: UnixNanos,
+    /// Timestamp (UTC).
+    pub ts_event: DateTime<Utc>,
     /// Human-readable date.
     pub date: String,
     /// Instrument.
@@ -684,11 +703,11 @@ pub struct FillEntry {
     /// Side.
     pub side: OrderSide,
     /// Fill quantity.
-    pub quantity: f64,
+    pub quantity: Decimal,
     /// Fill price.
-    pub price: f64,
+    pub price: Decimal,
     /// Costs.
-    pub costs: f64,
+    pub costs: Decimal,
     /// Currency.
     pub currency: Currency,
 }

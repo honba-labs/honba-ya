@@ -1,5 +1,6 @@
 //! ADR 0017 decision 6: `BacktestRequest::resolve` and `SweepRequest::resolve`.
 
+use rust_decimal::Decimal;
 use serde_json::json;
 
 use crate::{
@@ -41,7 +42,7 @@ fn backtest_request_resolve() {
     assert_eq!(r.universe, "nifty50");
     assert_eq!(r.bar_spec, "1d", "default bar_spec");
     assert_eq!(r.initial_capital, DEFAULT_INITIAL_CAPITAL);
-    assert_eq!(r.initial_capital, 1_000_000.0);
+    assert_eq!(r.initial_capital, Decimal::from(1_000_000_i64));
     assert_eq!(r.seed, 42);
     assert!(r.start < r.end);
 }
@@ -50,10 +51,10 @@ fn backtest_request_resolve() {
 fn backtest_resolve_keeps_explicit_optionals() {
     let mut req = full();
     req.bar_spec = Some("5m".into());
-    req.initial_capital = Some(250_000.0);
+    req.initial_capital = Some(Decimal::from(250_000_i64));
     let r = req.resolve().unwrap();
     assert_eq!(r.bar_spec, "5m");
-    assert_eq!(r.initial_capital, 250_000.0);
+    assert_eq!(r.initial_capital, Decimal::from(250_000_i64));
 }
 
 #[test]
@@ -88,31 +89,32 @@ fn backtest_resolve_rejects_an_unknown_or_blank_fill_model() {
 #[test]
 fn backtest_resolve_defaults_cost_knobs_to_zero_and_carries_explicit_ones() {
     let r = full().resolve().unwrap();
-    assert_eq!(r.commission_per_fill, 0.0, "unset commission is free");
-    assert_eq!(r.slippage_bps, 0.0, "unset slippage is none");
+    assert_eq!(r.commission_per_fill, Decimal::ZERO, "unset commission is free");
+    assert_eq!(r.slippage_bps, Decimal::ZERO, "unset slippage is none");
 
     let mut req = full();
-    req.commission_per_fill = Some(20.0);
-    req.slippage_bps = Some(5.0);
+    req.commission_per_fill = Some(Decimal::from(20_i64));
+    req.slippage_bps = Some(Decimal::from(5_i64));
     let r = req.resolve().unwrap();
-    assert_eq!(r.commission_per_fill, 20.0);
-    assert_eq!(r.slippage_bps, 5.0);
+    assert_eq!(r.commission_per_fill, Decimal::from(20_i64));
+    assert_eq!(r.slippage_bps, Decimal::from(5_i64));
 }
 
 #[test]
 fn backtest_resolve_rejects_out_of_range_cost_knobs() {
     for bad in [
-        -1.0,
-        f64::NAN,
-        f64::INFINITY,
-        crate::MAX_COMMISSION_PER_FILL + 1.0,
+        Decimal::NEGATIVE_ONE,
+        crate::MAX_COMMISSION_PER_FILL + Decimal::ONE,
     ] {
         let mut req = full();
         req.commission_per_fill = Some(bad);
         assert_field(req.resolve().unwrap_err(), "commission_per_fill");
     }
 
-    for bad in [-1.0, f64::NAN, f64::INFINITY, crate::MAX_SLIPPAGE_BPS + 1.0] {
+    for bad in [
+        Decimal::NEGATIVE_ONE,
+        crate::MAX_SLIPPAGE_BPS + Decimal::ONE,
+    ] {
         let mut req = full();
         req.slippage_bps = Some(bad);
         assert_field(req.resolve().unwrap_err(), "slippage_bps");
@@ -167,7 +169,7 @@ fn backtest_resolve_rejects_blank_and_invalid_values() {
     req.bar_spec = Some("fast".into());
     assert_field(req.resolve().unwrap_err(), "bar_spec");
 
-    for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+    for bad in [Decimal::ZERO, Decimal::NEGATIVE_ONE] {
         let mut req = full();
         req.initial_capital = Some(bad);
         assert_field(req.resolve().unwrap_err(), "initial_capital");
@@ -196,7 +198,7 @@ fn full_sweep() -> SweepRequest {
         start: Some("2024-01-01".into()),
         end: Some("2024-06-01".into()),
         bar_spec: Some("1d".into()),
-        initial_capital: Some(1_000_000.0),
+        initial_capital: Some(Decimal::from(1_000_000_i64)),
         params: Some(json!({"fast": [5, 20, 5]})),
         trials: Some(10),
         seed: Some(7),

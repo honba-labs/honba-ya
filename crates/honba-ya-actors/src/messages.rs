@@ -7,24 +7,8 @@ use honba_portfolio::TaxSummary;
 use rust_decimal::Decimal;
 use tokio::sync::oneshot;
 
-/// Broker execution error type.
-#[derive(Debug, thiserror::Error)]
-pub enum BrokerError {
-    #[error("auth failure: {0}")]
-    Auth(String),
-    #[error("order rejected by broker: {0}")]
-    Rejected(String),
-    #[error("network or transport error: {0}")]
-    Transport(String),
-    #[error("broker request timeout")]
-    Timeout,
-    #[error("order not found: {0}")]
-    OrderNotFound(String),
-    #[error("invalid request or parameters: {0}")]
-    InvalidRequest(String),
-    #[error("other: {0}")]
-    Other(String),
-}
+/// Re-export honba_te_core::BrokerError for actor communication.
+pub use honba_te_core::BrokerError;
 
 /// Lifecycle status of an individual actor or the entire runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]

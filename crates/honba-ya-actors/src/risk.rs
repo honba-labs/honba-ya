@@ -132,7 +132,7 @@ impl RiskActor {
                                 .await;
                         }
 
-                        let _ = reply_to.send(Err(BrokerError::RiskRefusal(refusal)));
+                        let _ = reply_to.send(Err(BrokerError::RiskRefusal(Box::new(refusal))));
                         // Emit breach event to audit stream after reply
                         let _ = self
                             .execution_tx
@@ -182,7 +182,7 @@ impl RiskActor {
                 }
 
                 RiskMsg::RecordCancellation { algo_id } => {
-                    self.risk_engine.record_cancellation(&algo_id);
+                    self.risk_engine.record_cancellation(&algo_id, Utc::now());
                     if let Some(ref m) = self.metrics {
                         m.record_cancellation(&algo_id, "ALL");
                         if let Some(otr) = self.risk_engine.otr_for_algo(&algo_id) {

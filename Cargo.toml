@@ -9,6 +9,7 @@ members = [
   "crates/honba-ya-persistence",
   "crates/honba-ya-testing",
   "crates/honba-strategies",
+  "crates/honba-ya-api-rest",
 ]
 
 [workspace.package]
@@ -50,6 +51,7 @@ honba-core            = { path = "../honba-core" }
 honba-mon             = { path = "../honba-mon" }
 honba-kokoro-portfolio = { path = "../honba-kokoro/crates/honba-kokoro-portfolio" }
 honba-kokoro-ledger    = { path = "../honba-kokoro/crates/honba-kokoro-ledger" }
+honba-kokoro-oms       = { path = "../honba-kokoro/crates/honba-kokoro-oms" }
 
 honba-ya-actors       = { path = "crates/honba-ya-actors" }
 honba-ya-api          = { path = "crates/honba-ya-api" }

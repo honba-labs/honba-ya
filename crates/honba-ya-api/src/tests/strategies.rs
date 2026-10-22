@@ -1,16 +1,17 @@
 //! Tests for `crate::strategies` (`POST /strategies`, `GET /strategies`).
 
-use honba_messages::{BarAggregation, Exchange, InstrumentId};
-use honba_strategy::{StrategyManifest, Subscriptions, TimeframeSpec, Universe};
 use serde_json::json;
 
+use crate::strategy_ir::{StrategyManifest, Subscriptions, TimeframeSpec, Universe};
+use crate::wire::BarAggregation;
 use crate::{
     ErrorCode, MAX_COMPILED_STRATEGIES, StrategyCatalog, compile_strategy, list_strategies,
     parse_compile_request,
 };
+use honba_core::{Exchange, InstrumentId};
 
 fn tcs() -> InstrumentId {
-    InstrumentId::new("TCS", Exchange::new("NSE"))
+    InstrumentId::new(Exchange::Nse, "TCS")
 }
 
 fn manifest_named(name: &str, hash: &str) -> StrategyManifest {
@@ -22,8 +23,6 @@ fn manifest_named(name: &str, hash: &str) -> StrategyManifest {
     )
     .with_subscriptions(Subscriptions {
         instruments: vec![tcs()],
-        quotes: false,
-        trades: false,
     })
     .with_warmup_bars(20)
 }
