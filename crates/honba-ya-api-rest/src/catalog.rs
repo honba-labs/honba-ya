@@ -15,11 +15,12 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use honba_api::parse_timeframe;
+use honba_api::wire::BarSpecification;
+use honba_core::{Bar, Exchange, InstrumentId};
 use honba_feed::{
     ColumnarSlice, ColumnarSliceBuilder, Dataset, DatasetBuildError, DatasetReader,
     ParquetBarSource, ParquetError,
 };
-use honba_messages::{Bar, BarSpecification, Exchange, InstrumentId};
 use honba_ports::{BarReader, BarRequest, PortError, PortResult};
 use thiserror::Error;
 
@@ -98,9 +99,12 @@ pub fn load_catalog(root: &Path) -> Result<(CatalogBars, DatasetReader), Catalog
             .map_err(|_| CatalogLoadError::Timeframe(name.clone()))?;
         let mut slices = Vec::new();
         for exchange_dir in sorted_dirs(&tf_dir)? {
-            let exchange = Exchange::new(file_name(&exchange_dir));
+            let exchange_name = file_name(&exchange_dir);
+            let exchange = exchange_name
+                .parse::<Exchange>()
+                .map_err(|_| CatalogLoadError::Timeframe(exchange_name.clone()))?;
             for symbol_dir in sorted_dirs(&exchange_dir)? {
-                let id = InstrumentId::new(file_name(&symbol_dir), exchange.clone());
+                let id = InstrumentId::new(exchange, file_name(&symbol_dir));
                 let slice = read_symbol(&symbol_dir, id, spec)?;
                 if !slice.is_empty() {
                     slices.push(slice);

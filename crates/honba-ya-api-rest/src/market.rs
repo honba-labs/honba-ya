@@ -96,11 +96,11 @@ pub(crate) fn unprocessable(detail: ErrorDetail) -> Response {
     failure(StatusCode::UNPROCESSABLE_ENTITY, detail)
 }
 
-pub(crate) fn instrument_not_found(id: &honba_messages::InstrumentId) -> Response {
+pub(crate) fn instrument_not_found(id: &honba_core::InstrumentId) -> Response {
     failure(
         StatusCode::NOT_FOUND,
         ErrorDetail::new(
-            ErrorCode::InstrumentNotFound,
+            ErrorCode::NotFound,
             format!("instrument {id} not found"),
         ),
     )
@@ -109,7 +109,7 @@ pub(crate) fn instrument_not_found(id: &honba_messages::InstrumentId) -> Respons
 /// Reads one instrument from the master; a port failure becomes `internal_error`.
 pub(crate) async fn master_get(
     state: &AppState,
-    id: &honba_messages::InstrumentId,
+    id: &honba_core::InstrumentId,
 ) -> Result<Option<honba_entities::Instrument>, ErrorDetail> {
     state
         .instruments
@@ -121,7 +121,7 @@ pub(crate) async fn master_get(
 /// The close of the latest quote, via mid when a book exists; `None` when the
 /// reader holds nothing (a bar store derives bid = ask = close, so this is the
 /// close; a book quotes mid, else bid).
-pub(crate) async fn quote_last(state: &AppState, id: &honba_messages::InstrumentId) -> Option<f64> {
+pub(crate) async fn quote_last(state: &AppState, id: &honba_core::InstrumentId) -> Option<f64> {
     match state.quotes.read_quote(id, None).await {
         Ok(Some(quote)) => {
             let mid = (quote.bid_price() + quote.ask_price()) / 2.0;
@@ -138,17 +138,17 @@ pub(crate) async fn quote_last(state: &AppState, id: &honba_messages::Instrument
 /// Maps a port failure to a status and an envelope code.
 pub(crate) fn port_failure(error: PortError) -> Response {
     let (status, code) = match &error {
-        PortError::Unsupported(_) => (StatusCode::NOT_FOUND, ErrorCode::MarketDataUnavailable),
+        PortError::Unsupported(_) => (StatusCode::NOT_FOUND, ErrorCode::NotFound),
         PortError::InvalidRequest(_) => (
             StatusCode::UNPROCESSABLE_ENTITY,
             ErrorCode::ValidationInvalidRequest,
         ),
         PortError::Unavailable(_) => (
             StatusCode::SERVICE_UNAVAILABLE,
-            ErrorCode::MarketDataUnavailable,
+            ErrorCode::NotFound,
         ),
         PortError::Timeout => (StatusCode::GATEWAY_TIMEOUT, ErrorCode::Timeout),
-        PortError::Transport(_) => (StatusCode::BAD_GATEWAY, ErrorCode::TransportError),
+        PortError::Transport(_) => (StatusCode::BAD_GATEWAY, ErrorCode::InternalError),
         _ => (StatusCode::INTERNAL_SERVER_ERROR, ErrorCode::InternalError),
     };
     failure(status, ErrorDetail::new(code, error.to_string()))
@@ -250,7 +250,7 @@ pub(crate) async fn get_quotes(
             return failure(
                 StatusCode::NOT_FOUND,
                 ErrorDetail::new(
-                    ErrorCode::InstrumentNotFound,
+                    ErrorCode::NotFound,
                     format!("no instrument for symbol {symbol}"),
                 ),
             );
@@ -266,7 +266,7 @@ pub(crate) async fn get_quotes(
                 return failure(
                     StatusCode::NOT_FOUND,
                     ErrorDetail::new(
-                        ErrorCode::MarketDataUnavailable,
+                        ErrorCode::NotFound,
                         format!("no quote for {id} at the requested time"),
                     ),
                 );
