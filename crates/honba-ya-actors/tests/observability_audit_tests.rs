@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use chrono::Utc;
 use honba_actors::{
-    ExecutionMsg, MetricsCollector, RiskMsg, Strategy, StrategyMsg, Supervisor, span_broker_acked,
+    ExecutionMsg, MarketDataMsg, MetricsCollector, RiskMsg, Strategy, StrategyMsg, Supervisor, span_broker_acked,
     span_broker_submitted, span_cancelled, span_filled, span_order_generated, span_risk_evaluated,
 };
 use honba_core::{
@@ -174,6 +174,8 @@ async fn test_actor_runtime_with_observability_and_audit() {
             Price::from_rupees("3750.00").unwrap(),
         ),
     );
+    // Register the algo_id so the risk engine accepts orders from it
+    risk_engine.register_algo("algo-obs-runtime");
 
     let strategy = TestObservabilityStrategy {
         algo_id: "algo-obs-runtime".to_string(),
@@ -198,14 +200,25 @@ async fn test_actor_runtime_with_observability_and_audit() {
         exchange_ts: Utc::now(),
         receive_ts: Utc::now(),
     };
+    // Subscribe to the instrument first, then send tick through market data actor
     supervisor
-        .strategy_sender()
-        .send(StrategyMsg::OnTick(tick))
+        .market_data_sender()
+        .send(MarketDataMsg::Subscribe(inst.clone()))
+        .await
+        .unwrap();
+
+    // Give actors a moment to start up
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Send a market tick to trigger strategy order generation -> risk -> execution
+    supervisor
+        .market_data_sender()
+        .send(MarketDataMsg::IngestTick(tick))
         .await
         .unwrap();
 
     // Give actors a moment to process the pipeline
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Get the broker order ID assigned to the placed order from the audit ledger
     let acks = audit_ledger
