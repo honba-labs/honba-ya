@@ -37,7 +37,6 @@ mod catalog;
 mod dispatch;
 mod exec;
 mod executor;
-mod gateway_venue;
 mod ingest;
 mod journal;
 mod market;
@@ -75,9 +74,8 @@ pub use auth::{
 pub use bar_pump::BarPumpReport;
 pub use catalog::{CATALOG_DIR, CatalogBars, CatalogLoadError, load_catalog};
 pub use dispatch::{DispatchError, build_target, dispatch, dispatch_stream};
-pub use exec::ExecutionVenue;
+pub use exec::NextOpenSim;
 pub use executor::BacktestExecutor;
-pub use gateway_venue::GatewayVenue;
 pub use honba_api::JournalWriter;
 pub use journal::NdjsonJournal;
 pub use market::{ApiQuery, ApiQueryRejection, MAX_BAR_ROWS};
@@ -112,7 +110,7 @@ impl IntoResponse for ApiJsonRejection {
         let detail = ErrorDetail::new(ErrorCode::ValidationInvalidRequest, self.0.body_text());
         (
             status,
-            Json(ResponseEnvelope::<serde_json::Value>::error(detail)),
+            Json(ApiResponse::error::<serde_json::Value>(detail)),
         )
             .into_response()
     }

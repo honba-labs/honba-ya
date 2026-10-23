@@ -9,7 +9,7 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Json, Response},
 };
-use honba_api::{ErrorCode, ErrorDetail, ResponseEnvelope};
+use honba_api::{ApiResponse, ErrorCode, ErrorDetail, ResponseEnvelope};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 use chrono::Utc;
@@ -526,7 +526,7 @@ impl AuthLayer {
                 );
                 return Err((
                     StatusCode::UNAUTHORIZED,
-                    Json(ResponseEnvelope::error(detail)),
+                    Json(ApiResponse::error(detail)),
                 ));
             }
         };
@@ -554,7 +554,7 @@ impl AuthLayer {
                     "token_scopes": info.scopes,
                     "token_id": info.token_id,
                 }));
-                return Err((StatusCode::FORBIDDEN, Json(ResponseEnvelope::error(detail))));
+                return Err((StatusCode::FORBIDDEN, Json(ApiResponse::error(detail))));
             }
 
             self.audit(AuditEntry {
@@ -572,7 +572,7 @@ impl AuthLayer {
 
         // Fall back to JWT validation if file token failed and JWT config is available
         if let Some(config) = &self.jwt_config {
-            match Self::validate_jwt(token, config) {
+            match validate_jwt(token, config) {
                 Ok(info) => {
                     if required.is_some_and(|r| !info.scopes.iter().any(|s| s == r)) {
                         let required = required.unwrap_or_default();
@@ -595,7 +595,7 @@ impl AuthLayer {
                             "token_scopes": info.scopes,
                             "token_id": info.token_id,
                         }));
-                        return Err((StatusCode::FORBIDDEN, Json(ResponseEnvelope::error(detail))));
+                        return Err((StatusCode::FORBIDDEN, Json(ApiResponse::error(detail))));
                     }
 
                     self.audit(AuditEntry {
@@ -640,7 +640,7 @@ impl AuthLayer {
                         ErrorCode::Unauthorized,
                         format!("Token validation failed: {}", code),
                     );
-                    Err((status, Json(ResponseEnvelope::error(detail))))
+                    return Err((status, Json(ApiResponse::error(detail))));
                 }
             }
         }
@@ -652,7 +652,7 @@ impl AuthLayer {
         );
         Err((
             StatusCode::UNAUTHORIZED,
-            Json(ResponseEnvelope::error(detail)),
+            Json(ApiResponse::error(detail)),
         ))
     }
 }
