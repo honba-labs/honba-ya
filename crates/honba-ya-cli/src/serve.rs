@@ -27,14 +27,21 @@ use std::time::Duration;
 use honba_api_rest::{ApiConfig, AppState, RetentionPolicy, RunServiceConfig};
 use honba_config::{ExecutionConfig, FillModel};
 use honba_feed::{InMemoryTickReader, ParquetTickStore};
-use honba_messages::TradingState;
+use honba_core::TradingState;
 
 /// Parses the `--trading-state` value; the spellings are the wire form (ADR 0018 decision 2).
+///
+/// `honba_core::TradingState` has no `Reducing` variant; see
+/// `crate::trading_state::state_command` for the rationale behind mapping
+/// `"reducing"` onto `Paused { resume_at: None }` and `"halted"` onto
+/// `Halted` with a generic operator-initiated reason.
 pub(crate) fn parse_trading_state(raw: &str) -> Result<TradingState, String> {
     match raw {
         "active" => Ok(TradingState::Active),
-        "reducing" => Ok(TradingState::Reducing),
-        "halted" => Ok(TradingState::Halted),
+        "reducing" => Ok(TradingState::Paused { resume_at: None }),
+        "halted" => Ok(TradingState::Halted {
+            reason: "operator halt via `--trading-state halted`".to_string(),
+        }),
         other => Err(format!(
             "unknown trading state {other:?}; expected active, reducing or halted"
         )),
@@ -117,8 +124,8 @@ pub(crate) struct IngestArgs {
 #[derive(clap::Args, Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RiskArgs {
     /// TOML file with a `[risk]` table, the same shape as a backtest config's `[risk]`
-    /// (max_notional, max_participation, stale_after_ms, price_collar_bps, [risk.order_rate]).
-    /// Default: no limits
+    /// (max_notional_per_order, max_quantity_per_order, max_daily_loss, price_collar_bps,
+    /// freeze_limits, [risk.order_rate_limit]). Default: no limits
     #[arg(long)]
     pub risk_config: Option<PathBuf>,
 }
@@ -190,18 +197,21 @@ impl FillArgs {
 #[serde(deny_unknown_fields)]
 struct RiskFile {
     #[serde(default)]
-    risk: honba_risk::RiskLimits,
+    risk: honba_mon::RiskLimits,
 }
 
 /// Reads and validates a `--risk-config` file. Errors carry the path and name the field.
-pub(crate) fn load_risk_limits(path: &Path) -> Result<honba_risk::RiskLimits> {
+pub(crate) fn load_risk_limits(path: &Path) -> Result<honba_mon::RiskLimits> {
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("reading --risk-config {}", path.display()))?;
     let file: RiskFile = toml::from_str(&text)
         .with_context(|| format!("parsing --risk-config {}", path.display()))?;
-    file.risk
-        .validate()
-        .with_context(|| format!("invalid [risk] in --risk-config {}", path.display()))?;
+    anyhow::ensure!(
+        file.risk.is_valid(),
+        "invalid [risk] in --risk-config {}: check max_notional_per_order, order_rate_limit, \
+         price_collar_bps, and freeze_limits",
+        path.display()
+    );
     Ok(file.risk)
 }
 
@@ -242,7 +252,7 @@ pub fn run(
     let (execution, ticks) = fill.resolve()?;
     let risk_limits = match &risk.risk_config {
         Some(path) => load_risk_limits(path)?,
-        None => honba_risk::RiskLimits::default(),
+        None => honba_mon::RiskLimits::default(),
     };
     let mut config = ApiConfig::default()
         .with_cors_origins(cors_origins)
@@ -272,7 +282,7 @@ pub fn run(
         .with_risk_limits(risk_limits)
         .with_execution(execution);
     if let Some(ticks) = ticks {
-        let reader: std::sync::Arc<dyn honba_ports::TickReader> = match ticks {
+        let reader: std::sync::Arc<dyn honba_core::TickReader> = match ticks {
             TickSource::Ndjson(reader) => std::sync::Arc::new(reader),
             TickSource::Parquet(store) => std::sync::Arc::new(store),
         };

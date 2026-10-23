@@ -1,24 +1,30 @@
 //! Unit tests for `crate::trading_state` (E2-S1 rest): the `set` spellings build the exact
-//! `honba_async::Command::State` the async shell applies.
+//! `honba_core::TradingState` the CLI prints.
 
-use honba_async::Command;
-use honba_messages::TradingState;
+use honba_core::TradingState;
 
 use crate::trading_state::state_command;
 
 #[test]
-fn set_spellings_map_to_command_state() {
+fn set_spellings_map_to_trading_state() {
     for (raw, expected) in [
         ("active", TradingState::Active),
-        ("reducing", TradingState::Reducing),
-        ("halted", TradingState::Halted),
-        ("REDUCING", TradingState::Reducing),
+        (
+            "reducing",
+            TradingState::Paused { resume_at: None },
+        ),
+        (
+            "halted",
+            TradingState::Halted {
+                reason: "operator halt via `honba trading-state set`".to_string(),
+            },
+        ),
+        (
+            "REDUCING",
+            TradingState::Paused { resume_at: None },
+        ),
     ] {
-        assert_eq!(
-            state_command(raw).unwrap(),
-            Command::State(expected),
-            "{raw}"
-        );
+        assert_eq!(state_command(raw).unwrap(), expected, "{raw}");
     }
 }
 

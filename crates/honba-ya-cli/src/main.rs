@@ -11,7 +11,7 @@ mod verify;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use honba_messages::TradingState;
+use honba_core::TradingState;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
