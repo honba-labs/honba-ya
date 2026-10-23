@@ -1,26 +1,31 @@
 //! Unit tests for `crate::intent`.
 
-use honba_messages::{OrderId, OrderSide, OrderType};
+use honba_core::{OrderSide, OrderType, Price, Quantity};
+use honba_testing::fixtures::exact_decimal;
+use rust_decimal::Decimal;
 
 use super::any_instrument;
-
 use crate::intent::*;
+
+fn p(val: f64) -> Price {
+    Price::new(exact_decimal(val))
+}
+
+fn q(val: f64) -> Quantity {
+    Quantity::new(exact_decimal(val))
+}
 
 #[test]
 fn constructors_are_valid() {
     for i in [
-        OrderIntent::market_buy(any_instrument(), 1.0),
-        OrderIntent::market_sell(any_instrument(), 1.0),
-        OrderIntent::limit_buy(any_instrument(), 1.0, 10.0),
-        OrderIntent::limit_sell(any_instrument(), 1.0, 10.0),
-        OrderIntent::stop_buy(any_instrument(), 1.0, 10.0),
-        OrderIntent::stop_sell(any_instrument(), 1.0, 10.0),
-        OrderIntent::stop_limit_buy(any_instrument(), 1.0, 10.0, 10.5),
-        OrderIntent::stop_limit_sell(any_instrument(), 1.0, 10.0, 9.5),
-        OrderIntent::trailing_stop_amount_buy(any_instrument(), 1.0, 15.0),
-        OrderIntent::trailing_stop_percent_buy(any_instrument(), 1.0, 2.5),
-        OrderIntent::trailing_stop_amount_sell(any_instrument(), 1.0, 15.0),
-        OrderIntent::trailing_stop_percent_sell(any_instrument(), 1.0, 2.5),
+        OrderIntent::market_buy(any_instrument(), q(1.0)),
+        OrderIntent::market_sell(any_instrument(), q(1.0)),
+        OrderIntent::limit_buy(any_instrument(), q(1.0), p(10.0)),
+        OrderIntent::limit_sell(any_instrument(), q(1.0), p(10.0)),
+        OrderIntent::stop_buy(any_instrument(), q(1.0), p(10.0)),
+        OrderIntent::stop_sell(any_instrument(), q(1.0), p(10.0)),
+        OrderIntent::stop_limit_buy(any_instrument(), q(1.0), p(10.0), p(10.5)),
+        OrderIntent::stop_limit_sell(any_instrument(), q(1.0), p(10.0), p(9.5)),
     ] {
         assert_eq!(i.validate(), Ok(()), "{i:?}");
     }
@@ -28,210 +33,58 @@ fn constructors_are_valid() {
 
 #[test]
 fn stop_constructors_set_trigger_not_limit() {
-    let i = OrderIntent::stop_sell(any_instrument(), 2.0, 99.0);
-    assert_eq!(i.order_type, OrderType::StopMarket);
-    assert_eq!((i.price, i.trigger_price), (None, Some(99.0)));
+    let i = OrderIntent::stop_sell(any_instrument(), q(2.0), p(99.0));
+    assert_eq!(i.order_type, OrderType::StopLoss(p(99.0)));
     assert_eq!(i.side, OrderSide::Sell);
 }
 
 #[test]
-fn trailing_stop_constructors_set_trail_values() {
-    let amt_sell = OrderIntent::trailing_stop_amount_sell(any_instrument(), 2.0, 12.0);
-    assert_eq!(amt_sell.order_type, OrderType::TrailingStop);
-    assert_eq!(amt_sell.trail_amount, Some(12.0));
-    assert_eq!(amt_sell.trail_percent, None);
-    assert_eq!(amt_sell.side, OrderSide::Sell);
-
-    let pct_buy = OrderIntent::trailing_stop_percent_buy(any_instrument(), 5.0, 3.5);
-    assert_eq!(pct_buy.order_type, OrderType::TrailingStop);
-    assert_eq!(pct_buy.trail_amount, None);
-    assert_eq!(pct_buy.trail_percent, Some(3.5));
-    assert_eq!(pct_buy.side, OrderSide::Buy);
-}
-
-#[test]
-fn validate_rejects_each_broken_rule() {
+fn validate_rejects_non_positive_quantity() {
     use IntentError::*;
-    let base = OrderIntent::stop_limit_buy(any_instrument(), 1.0, 10.0, 10.5);
-    let cases = [
-        (
-            OrderIntent {
-                quantity: 0.0,
-                ..base.clone()
-            },
-            NonPositiveQuantity(0.0),
-        ),
-        (
-            OrderIntent {
-                side: OrderSide::NoOrderSide,
-                ..base.clone()
-            },
-            NoSide,
-        ),
-        (
-            OrderIntent {
-                price: Some(f64::NAN),
-                ..base.clone()
-            },
-            NonFinitePrice,
-        ),
-        (
-            OrderIntent {
-                price: None,
-                ..base.clone()
-            },
-            MissingPrice(OrderType::StopLimit),
-        ),
-        (
-            OrderIntent {
-                trigger_price: None,
-                ..base.clone()
-            },
-            MissingTriggerPrice(OrderType::StopLimit),
-        ),
-        (
-            OrderIntent {
-                order_type: OrderType::Market,
-                ..base.clone()
-            },
-            UnexpectedPrice(OrderType::Market),
-        ),
-        (
-            OrderIntent {
-                order_type: OrderType::Limit,
-                ..base.clone()
-            },
-            UnexpectedTriggerPrice(OrderType::Limit),
-        ),
-        (
-            OrderIntent {
-                trail_amount: Some(5.0),
-                ..base.clone()
-            },
-            UnexpectedTrailAmount(OrderType::StopLimit),
-        ),
-        (
-            OrderIntent {
-                trail_percent: Some(2.0),
-                ..base.clone()
-            },
-            UnexpectedTrailPercent(OrderType::StopLimit),
-        ),
-        (
-            OrderIntent {
-                order_type: OrderType::TrailingStop,
-                price: None,
-                trigger_price: None,
-                trail_amount: None,
-                trail_percent: None,
-                ..base.clone()
-            },
-            MissingTrail(OrderType::TrailingStop),
-        ),
-        (
-            OrderIntent {
-                order_type: OrderType::TrailingStop,
-                price: None,
-                trigger_price: None,
-                trail_amount: Some(5.0),
-                trail_percent: Some(2.0),
-                ..base.clone()
-            },
-            ConflictingTrail(OrderType::TrailingStop),
-        ),
-        (
-            OrderIntent {
-                order_type: OrderType::TrailingStop,
-                price: None,
-                trigger_price: None,
-                trail_amount: Some(-1.0),
-                trail_percent: None,
-                ..base.clone()
-            },
-            InvalidTrailAmount(-1.0),
-        ),
-        (
-            OrderIntent {
-                order_type: OrderType::TrailingStop,
-                price: None,
-                trigger_price: None,
-                trail_amount: None,
-                trail_percent: Some(150.0),
-                ..base.clone()
-            },
-            InvalidTrailPercent(150.0),
-        ),
-        (
-            OrderIntent {
-                order_type: OrderType::TrailingStop,
-                price: Some(100.0),
-                trigger_price: None,
-                trail_amount: Some(5.0),
-                trail_percent: None,
-                ..base.clone()
-            },
-            UnexpectedPrice(OrderType::TrailingStop),
-        ),
-    ];
-    for (intent, err) in cases {
-        assert_eq!(intent.validate(), Err(err), "{intent:?}");
+    let base = OrderIntent::stop_limit_buy(any_instrument(), q(1.0), p(10.0), p(10.5));
+    let zero_q = Quantity::new(Decimal::ZERO);
+    let neg_q = Quantity::new(Decimal::from(-1));
+
+    for bad_q in [zero_q, neg_q] {
+        let intent = OrderIntent {
+            quantity: bad_q,
+            ..base.clone()
+        };
+        assert_eq!(intent.validate(), Err(NonPositiveQuantity(bad_q)));
     }
-    assert!(
-        OrderIntent {
-            quantity: f64::NAN,
-            ..base
-        }
-        .validate()
-        .is_err()
-    );
 }
 
 #[test]
-fn into_order_keeps_trigger_price_and_trail() {
-    let order = OrderIntent::stop_buy(any_instrument(), 1.0, 10.0)
-        .into_order(OrderId::new("O"), 1.into())
+fn into_order_keeps_order_type_and_prices() {
+    let order = OrderIntent::stop_buy(any_instrument(), q(1.0), p(10.0))
+        .into_order("algo-1")
         .unwrap();
-    assert_eq!(order.trigger_price(), Some(10.0));
-    assert_eq!(order.price(), None);
-    assert_eq!(order.trail_amount(), None);
+    assert_eq!(order.order_type, OrderType::StopLoss(p(10.0)));
+    assert_eq!(order.order_type.limit_price(), None);
 
-    let order = OrderIntent::market_buy(any_instrument(), 1.0)
-        .into_order(OrderId::new("O"), 1.into())
+    let order = OrderIntent::market_buy(any_instrument(), q(1.0))
+        .into_order("algo-1")
         .unwrap();
-    assert_eq!(order.trigger_price(), None);
+    assert_eq!(order.order_type, OrderType::Market);
 
-    let ts_amt = OrderIntent::trailing_stop_amount_sell(any_instrument(), 1.0, 12.5)
-        .into_order(OrderId::new("O"), 1.into())
+    let sl = OrderIntent::stop_limit_sell(any_instrument(), q(2.0), p(100.0), p(99.5))
+        .into_order("algo-1")
         .unwrap();
-    assert_eq!(ts_amt.order_type(), OrderType::TrailingStop);
-    assert_eq!(ts_amt.trail_amount(), Some(12.5));
-    assert_eq!(ts_amt.trail_percent(), None);
-
-    let ts_pct = OrderIntent::trailing_stop_percent_buy(any_instrument(), 1.0, 3.0)
-        .into_order(OrderId::new("O"), 1.into())
-        .unwrap();
-    assert_eq!(ts_pct.order_type(), OrderType::TrailingStop);
-    assert_eq!(ts_pct.trail_amount(), None);
-    assert_eq!(ts_pct.trail_percent(), Some(3.0));
+    assert_eq!(
+        sl.order_type,
+        OrderType::StopLimit {
+            trigger: p(100.0),
+            limit: p(99.5),
+        }
+    );
+    assert_eq!(sl.order_type.limit_price(), Some(p(99.5)));
 }
 
 #[test]
 fn into_order_rejects_invalid_intents() {
-    let o = OrderId::new("O");
+    let neg_q = Quantity::new(Decimal::from(-1));
     assert_eq!(
-        OrderIntent::market_buy(any_instrument(), -1.0).into_order(o.clone(), 1.into()),
-        Err(IntentError::NonPositiveQuantity(-1.0))
-    );
-    let no_price = OrderIntent {
-        price: None,
-        ..OrderIntent::limit_sell(any_instrument(), 1.0, 10.0)
-    };
-    assert_eq!(
-        no_price.into_order(o.clone(), 1.into()),
-        Err(IntentError::MissingPrice(OrderType::Limit))
-    );
-    assert_eq!(
-        OrderIntent::stop_sell(any_instrument(), 1.0, f64::INFINITY).into_order(o, 1.into()),
-        Err(IntentError::NonFinitePrice)
+        OrderIntent::market_buy(any_instrument(), neg_q).into_order("algo-1"),
+        Err(IntentError::NonPositiveQuantity(neg_q))
     );
 }

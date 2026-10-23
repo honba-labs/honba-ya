@@ -2,9 +2,11 @@
 
 use chrono::Utc;
 use honba_core::{OrderAck, OrderStatus};
-use honba_kokoro_oms::{OrderStateMachine, OrderState, TransitionError};
-use honba_persistence::{SqliteAuditLedger, messages::RiskBreachEvent as PersistenceRiskBreachEvent};
-use honba_te_core::{BrokerError, BrokerExecutor};
+use honba_kokoro_oms::{OrderState, OrderStateMachine};
+use honba_persistence::{
+    SqliteAuditLedger, messages::RiskBreachEvent as PersistenceRiskBreachEvent,
+};
+use honba_te_core::BrokerExecutor;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -99,173 +101,166 @@ impl ExecutionActor {
 
     async fn process_msg(&mut self, msg: ExecutionMsg) {
         match msg {
-                ExecutionMsg::ExecuteOrder { request, reply_to } => {
-                    // 0. OMS: Check idempotency and register order
-                    if let Some(ref mut oms) = self.oms {
-                        let client_order_id_str = request.client_order_id.to_string();
-                        // Check if client_order_id is already registered
-                        if let Err(e) = oms.check_idempotency(&client_order_id_str) {
-                            let _ = reply_to.send(Err(crate::messages::BrokerError::InvalidRequest(
-                                format!("Idempotency check failed: {}", e)
-                            )));
-                            return;
-                        }
-                        // Register the order in the OMS
-                        oms.register_order(
-                            client_order_id_str,
-                            OrderState::PendingNew,
-                            Utc::now(),
-                        );
+            ExecutionMsg::ExecuteOrder { request, reply_to } => {
+                // 0. OMS: Check idempotency and register order
+                if let Some(ref mut oms) = self.oms {
+                    let client_order_id_str = request.client_order_id.to_string();
+                    // Check if client_order_id is already registered
+                    if let Err(e) = oms.check_idempotency(&client_order_id_str) {
+                        let _ = reply_to.send(Err(crate::messages::BrokerError::InvalidRequest(
+                            format!("Idempotency check failed: {}", e),
+                        )));
+                        return;
                     }
-
-                    // 1. Structured tracing span: BrokerSubmitted
-                    let submit_span = span_broker_submitted(&request, self.broker.name());
-                    let _enter = submit_span.enter();
-
-                    // 2. Persist order attempt in SEBI audit ledger
-                    if let Some(ref audit) = self.audit_ledger {
-                        let _ = audit.record_order_attempt(&request).await;
-                    }
-
-                    // 3. Dispatch to broker adapter with latency timer
-                    let dispatch_start = Instant::now();
-                    let res = self.broker.place_order(request.clone()).await;
-                    let dispatch_duration = dispatch_start.elapsed();
-                    let dispatch_duration_us = dispatch_duration.as_micros() as u64;
-
-                    match &res {
-                        Ok(ack) => {
-                            // Structured tracing span: BrokerAcked
-                            let ack_span = span_broker_acked(&request, ack, dispatch_duration_us);
-                            let _enter_ack = ack_span.enter();
-
-                            if let Some(ref m) = self.metrics {
-                                m.record_broker_dispatch(
-                                    &request,
-                                    self.broker.name(),
-                                    dispatch_duration,
-                                    true,
-                                );
-                            }
-
-                            if let Some(ref audit) = self.audit_ledger {
-                                let _ = audit
-                                    .record_broker_ack(&request, ack, dispatch_duration_us)
-                                    .await;
-                            }
-
-                            // OMS: Process the successful ack as a fill (for now, just mark as New)
-                            if let Some(ref mut oms) = self.oms {
-                                let client_order_id_str = request.client_order_id.to_string();
-                                // When broker acks, order transitions to New
-                                if let Some(state) = oms.get_state(&client_order_id_str).cloned() {
-                                    let _ = OrderState::transition(state, OrderState::New);
-                                }
-                            }
-                        }
-                        Err(_e) => {
-                            if let Some(ref m) = self.metrics {
-                                m.record_broker_dispatch(
-                                    &request,
-                                    self.broker.name(),
-                                    dispatch_duration,
-                                    false,
-                                );
-                            }
-
-                            // OMS: Mark order as rejected on broker error
-                            if let Some(ref mut oms) = self.oms {
-                                let client_order_id_str = request.client_order_id.to_string();
-                                if let Some(state) = oms.get_state(&client_order_id_str).cloned() {
-                                    let _ = OrderState::transition(state, OrderState::Rejected);
-                                }
-                            }
-                        }
-                    }
-
-                    // Convert execution::BrokerError to messages::BrokerError for the reply channel
-                    let res_converted: Result<OrderAck, crate::messages::BrokerError> = res.map_err(|e| {
-                        crate::messages::BrokerError::InvalidRequest(e.to_string())
-                    });
-                    let _ = reply_to.send(res_converted);
+                    // Register the order in the OMS
+                    oms.register_order(client_order_id_str, OrderState::PendingNew, Utc::now());
                 }
 
-                ExecutionMsg::CancelOrder {
-                    order_id,
-                    algo_id,
-                    reply_to,
-                } => {
-                    let cancel_start = Instant::now();
-                    let res = self.broker.cancel_order(&order_id).await;
-                    let cancel_duration_us = cancel_start.elapsed().as_micros() as u64;
+                // 1. Structured tracing span: BrokerSubmitted
+                let submit_span = span_broker_submitted(&request, self.broker.name());
+                let _enter = submit_span.enter();
 
-                    if res.is_ok() {
-                        let correlation_id = Uuid::new_v4();
-                        let cancel_span = span_cancelled(
-                            &algo_id,
-                            "default",
-                            correlation_id,
-                            &order_id,
-                            "unknown",
-                            cancel_duration_us,
-                        );
-                        let _enter = cancel_span.enter();
+                // 2. Persist order attempt in SEBI audit ledger
+                if let Some(ref audit) = self.audit_ledger {
+                    let _ = audit.record_order_attempt(&request).await;
+                }
+
+                // 3. Dispatch to broker adapter with latency timer
+                let dispatch_start = Instant::now();
+                let res = self.broker.place_order(request.clone()).await;
+                let dispatch_duration = dispatch_start.elapsed();
+                let dispatch_duration_us = dispatch_duration.as_micros() as u64;
+
+                match &res {
+                    Ok(ack) => {
+                        // Structured tracing span: BrokerAcked
+                        let ack_span = span_broker_acked(&request, ack, dispatch_duration_us);
+                        let _enter_ack = ack_span.enter();
+
+                        if let Some(ref m) = self.metrics {
+                            m.record_broker_dispatch(
+                                &request,
+                                self.broker.name(),
+                                dispatch_duration,
+                                true,
+                            );
+                        }
 
                         if let Some(ref audit) = self.audit_ledger {
                             let _ = audit
-                                .record_cancellation(
-                                    &algo_id,
-                                    "default",
-                                    correlation_id,
-                                    &order_id,
-                                    "unknown",
-                                    "broker cancel acked",
-                                    cancel_duration_us,
-                                )
+                                .record_broker_ack(&request, ack, dispatch_duration_us)
                                 .await;
                         }
 
+                        // OMS: Process the successful ack as a fill (for now, just mark as New)
+                        if let Some(ref mut oms) = self.oms {
+                            let client_order_id_str = request.client_order_id.to_string();
+                            // When broker acks, order transitions to New
+                            if let Some(state) = oms.get_state(&client_order_id_str).cloned() {
+                                let _ = OrderState::transition(state, OrderState::New);
+                            }
+                        }
+                    }
+                    Err(_e) => {
                         if let Some(ref m) = self.metrics {
-                            m.record_cancellation(&algo_id, "unknown");
+                            m.record_broker_dispatch(
+                                &request,
+                                self.broker.name(),
+                                dispatch_duration,
+                                false,
+                            );
                         }
 
-                        if let Some(ref r_tx) = self.risk_tx {
-                            let _ = r_tx.send(RiskMsg::RecordCancellation { algo_id }).await;
+                        // OMS: Mark order as rejected on broker error
+                        if let Some(ref mut oms) = self.oms {
+                            let client_order_id_str = request.client_order_id.to_string();
+                            if let Some(state) = oms.get_state(&client_order_id_str).cloned() {
+                                let _ = OrderState::transition(state, OrderState::Rejected);
+                            }
                         }
-                    }
-                    // Convert execution::BrokerError to messages::BrokerError for the reply channel
-                        let res_converted: Result<(), crate::messages::BrokerError> = res.map_err(|e| {
-                            crate::messages::BrokerError::InvalidRequest(e.to_string())
-                        });
-                        let _ = reply_to.send(res_converted);
-                    }
-
-                ExecutionMsg::QueryStatus { order_id, reply_to } => {
-                    let res = self.broker.get_order_status(&order_id).await;
-                    let res_converted: Result<OrderStatus, crate::messages::BrokerError> = res.map_err(|e| {
-                        crate::messages::BrokerError::InvalidRequest(e.to_string())
-                    });
-                    let _ = reply_to.send(res_converted);
-                }
-
-                ExecutionMsg::RiskBreachEvent(event) => {
-                    // Persist risk breach event to SEBI audit ledger
-                    if let Some(ref audit) = self.audit_ledger {
-                        let persistence_event = PersistenceRiskBreachEvent {
-                            ts: event.ts,
-                            algo_id: event.algo_id,
-                            instrument: event.instrument,
-                            refusal_reason: event.refusal_reason,
-                            rule_code: event.rule_code,
-                            eval_duration_us: event.eval_duration_us,
-                            requested_qty: event.requested_qty,
-                            requested_price: event.requested_price,
-                        };
-                        let _ = audit.record_risk_breach_event(&persistence_event).await;
                     }
                 }
 
-                ExecutionMsg::Shutdown => {}
+                // Convert execution::BrokerError to messages::BrokerError for the reply channel
+                let res_converted: Result<OrderAck, crate::messages::BrokerError> =
+                    res.map_err(|e| crate::messages::BrokerError::InvalidRequest(e.to_string()));
+                let _ = reply_to.send(res_converted);
             }
+
+            ExecutionMsg::CancelOrder {
+                order_id,
+                algo_id,
+                reply_to,
+            } => {
+                let cancel_start = Instant::now();
+                let res = self.broker.cancel_order(&order_id).await;
+                let cancel_duration_us = cancel_start.elapsed().as_micros() as u64;
+
+                if res.is_ok() {
+                    let correlation_id = Uuid::new_v4();
+                    let cancel_span = span_cancelled(
+                        &algo_id,
+                        "default",
+                        correlation_id,
+                        &order_id,
+                        "unknown",
+                        cancel_duration_us,
+                    );
+                    let _enter = cancel_span.enter();
+
+                    if let Some(ref audit) = self.audit_ledger {
+                        let _ = audit
+                            .record_cancellation(
+                                &algo_id,
+                                "default",
+                                correlation_id,
+                                &order_id,
+                                "unknown",
+                                "broker cancel acked",
+                                cancel_duration_us,
+                            )
+                            .await;
+                    }
+
+                    if let Some(ref m) = self.metrics {
+                        m.record_cancellation(&algo_id, "unknown");
+                    }
+
+                    if let Some(ref r_tx) = self.risk_tx {
+                        let _ = r_tx.send(RiskMsg::RecordCancellation { algo_id }).await;
+                    }
+                }
+                // Convert execution::BrokerError to messages::BrokerError for the reply channel
+                let res_converted: Result<(), crate::messages::BrokerError> =
+                    res.map_err(|e| crate::messages::BrokerError::InvalidRequest(e.to_string()));
+                let _ = reply_to.send(res_converted);
+            }
+
+            ExecutionMsg::QueryStatus { order_id, reply_to } => {
+                let res = self.broker.get_order_status(&order_id).await;
+                let res_converted: Result<OrderStatus, crate::messages::BrokerError> =
+                    res.map_err(|e| crate::messages::BrokerError::InvalidRequest(e.to_string()));
+                let _ = reply_to.send(res_converted);
+            }
+
+            ExecutionMsg::RiskBreachEvent(event) => {
+                // Persist risk breach event to SEBI audit ledger
+                if let Some(ref audit) = self.audit_ledger {
+                    let persistence_event = PersistenceRiskBreachEvent {
+                        ts: event.ts,
+                        algo_id: event.algo_id,
+                        instrument: event.instrument,
+                        refusal_reason: event.refusal_reason,
+                        rule_code: event.rule_code,
+                        eval_duration_us: event.eval_duration_us,
+                        requested_qty: event.requested_qty,
+                        requested_price: event.requested_price,
+                    };
+                    let _ = audit.record_risk_breach_event(&persistence_event).await;
+                }
+            }
+
+            ExecutionMsg::Shutdown => {}
+        }
     }
 }

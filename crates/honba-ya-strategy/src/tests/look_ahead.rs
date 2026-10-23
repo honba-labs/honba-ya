@@ -7,13 +7,12 @@
 //! an indicator warmed over the whole series) would fail on the shortest prefix that hides the
 //! bar it peeked at.
 
-use honba_engine::{Handler, Result};
-use honba_messages::{Bar, InstrumentId, UnixNanos};
-use honba_sim::BarFillEngine;
-use honba_testing::{VecFeed, fixtures::any_instrument};
+use honba_core::{Bar, InstrumentId, MarketEvent, Quantity};
+use honba_testing::fixtures::{any_instrument, flat_bar, utc_nanos};
 
 use crate::{
-    BuyAndHold, OrderIntent, RsiReversal, SmaCrossover, Strategy, StrategyContext, StrategyRunner,
+    BuyAndHold, OrderIntent, Result, RsiReversal, SmaCrossover, Strategy, StrategyContext,
+    StrategyRunner,
 };
 
 /// A synthetic close series with enough turns for the reference strategies to trade.
@@ -30,26 +29,26 @@ fn series() -> Vec<(f64, u64)> {
         .collect()
 }
 
-/// Runs `strategy` over `bars` through a [`BarFillEngine`] and returns every submitted intent
-/// as `(ts_init, intent)`, in submission order.
-///
-/// The fill engine is fed each bar before the runner, mirroring the handler order the real
-/// `Engine` uses (execution handler first), so a bar's own close is the fill price.
+/// Runs `strategy` over `bars` and returns every submitted intent as `(ts_init, intent)`,
+/// in submission order.
 fn decisions<S: Strategy>(strategy: S, bars: &[(f64, u64)]) -> Vec<(u64, OrderIntent)> {
-    let mut execution = BarFillEngine::new();
-    let mut runner = StrategyRunner::new(strategy, execution.clone());
+    let mut runner = StrategyRunner::new(strategy);
     runner.on_start().unwrap();
     for (close, ts) in bars {
-        let message = VecFeed::bar("X", *close, *ts);
-        let event = message.event().clone();
-        let at = UnixNanos::from_u64(*ts);
-        execution.on_event(&event, at).unwrap();
+        let bar = flat_bar("X", *close, *ts);
+        let event = MarketEvent::Bar(bar);
+        let at = utc_nanos(*ts);
         runner.on_event(&event, at).unwrap();
     }
     runner
         .submitted()
         .iter()
-        .map(|submitted| (submitted.ts_init.as_u64(), submitted.intent.clone()))
+        .map(|submitted| {
+            (
+                submitted.ts_init.timestamp_nanos_opt().unwrap_or(0) as u64,
+                submitted.intent.clone(),
+            )
+        })
         .collect()
 }
 
@@ -85,17 +84,17 @@ fn truncation_property() {
 
     assert_truncation_property(
         "buy_and_hold",
-        |_| BuyAndHold::new(any_instrument(), 1.0),
+        |_| BuyAndHold::new(any_instrument(), Quantity::from_u64(1)),
         &bars,
     );
     assert_truncation_property(
         "sma_crossover",
-        |_| SmaCrossover::new(any_instrument(), 2, 4, 1.0),
+        |_| SmaCrossover::new(any_instrument(), 2, 4, Quantity::from_u64(1)),
         &bars,
     );
     assert_truncation_property(
         "rsi_reversal",
-        |_| RsiReversal::new(any_instrument(), 3, 30.0, 70.0, 1.0),
+        |_| RsiReversal::new(any_instrument(), 3, 30.0, 70.0, Quantity::from_u64(1)),
         &bars,
     );
 }
@@ -118,9 +117,15 @@ impl Strategy for Peeking {
         self.seen += 1;
         if let Some(&next) = self.closes.get(self.seen) {
             if next > current {
-                ctx.submit(OrderIntent::market_buy(self.instrument.clone(), 1.0));
+                ctx.submit(OrderIntent::market_buy(
+                    self.instrument.clone(),
+                    Quantity::from_u64(1),
+                ));
             } else {
-                ctx.submit(OrderIntent::market_sell(self.instrument.clone(), 1.0));
+                ctx.submit(OrderIntent::market_sell(
+                    self.instrument.clone(),
+                    Quantity::from_u64(1),
+                ));
             }
         }
         Ok(())

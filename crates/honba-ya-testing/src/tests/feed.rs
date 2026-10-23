@@ -17,7 +17,7 @@ async fn feed_yields_items_in_insertion_order_not_time_order() {
     let mut feed = VecFeed::new(vec![VecFeed::bar("X", 1.0, 5), VecFeed::bar("X", 2.0, 1)]);
     let mut ts = Vec::new();
     while let Some(item) = feed.next().await.unwrap() {
-        ts.push(item.timestamp().timestamp_nanos());
+        ts.push(item.timestamp().timestamp_nanos_opt().unwrap_or(0));
     }
     assert_eq!(ts, [5, 1]);
 }

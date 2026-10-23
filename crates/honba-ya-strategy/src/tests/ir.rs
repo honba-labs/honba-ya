@@ -1,12 +1,14 @@
 //! Tests for the verified strategy IR (docs/archive/plan.md E0-S8).
 
-use honba_messages::{BarAggregation, Exchange, InstrumentId, SCHEMA_VERSION};
+use honba_core::{Exchange, InstrumentId, SCHEMA_VERSION};
 
 use crate::ir::{IrError, StrategyIr};
-use crate::manifest::{ManifestError, StrategyManifest, Subscriptions, TimeframeSpec, Universe};
+use crate::manifest::{
+    BarAggregation, ManifestError, StrategyManifest, Subscriptions, TimeframeSpec, Universe,
+};
 
 fn id(symbol: &str) -> InstrumentId {
-    InstrumentId::new(symbol, Exchange::new("NSE"))
+    InstrumentId::new(Exchange::Nse, symbol)
 }
 
 fn five_min() -> TimeframeSpec {

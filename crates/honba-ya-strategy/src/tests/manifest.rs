@@ -1,15 +1,15 @@
 //! Tests for the strategy manifest (docs/archive/plan.md E0-S8, E4-S2).
 
-use honba_messages::{BarAggregation, Exchange, InstrumentId};
+use honba_core::{Exchange, InstrumentId};
 use serde_json::json;
 
 use crate::manifest::{
-    ManifestError, ParameterSpec, STRATEGY_API_VERSION, StrategyManifest, Subscriptions,
-    TimeframeSpec, Universe, param_range_to_schema,
+    BarAggregation, ManifestError, ParameterSpec, STRATEGY_API_VERSION, StrategyManifest,
+    Subscriptions, TimeframeSpec, Universe, param_range_to_schema,
 };
 
 fn any_id(symbol: &str) -> InstrumentId {
-    InstrumentId::new(symbol, Exchange::new("NSE"))
+    InstrumentId::new(Exchange::Nse, symbol)
 }
 
 fn daily() -> TimeframeSpec {
@@ -50,8 +50,6 @@ fn an_empty_name_is_rejected() {
 
 #[test]
 fn a_missing_source_hash_is_rejected() {
-    // Without the hash a run cannot be tied to the code that produced it, so a
-    // cached result could be silently reused for different logic.
     let m = StrategyManifest::new("sma", "", Universe::Explicit(vec![]), daily());
     assert_eq!(m.validate(), Err(ManifestError::EmptySourceHash));
 }
@@ -70,7 +68,6 @@ fn an_unknown_contract_version_is_rejected() {
 
 #[test]
 fn a_zero_timeframe_interval_is_rejected() {
-    // A zero interval would never emit a bar, so the strategy would never act.
     let m = StrategyManifest::new(
         "sma",
         "sha256:abc",
@@ -139,8 +136,6 @@ fn subscriptions_report_whether_an_instrument_is_covered() {
 
 #[test]
 fn a_manifest_round_trips_through_json() {
-    // The manifest is what a frontend posts and a server stores, so the wire
-    // form has to be lossless.
     let m = sample();
     let text = serde_json::to_string(&m).unwrap();
     let back: StrategyManifest = serde_json::from_str(&text).unwrap();
@@ -203,14 +198,12 @@ fn param_range_to_schema_parses_valid_range() {
 
 #[test]
 fn param_range_to_schema_rejects_default_outside_range() {
-    // default below min
     let err = param_range_to_schema("10:50:5", json!(5)).unwrap_err();
     assert!(matches!(
         err,
         ManifestError::ParameterDefaultOutOfRange { .. }
     ));
 
-    // default above max
     let err = param_range_to_schema("10:50:5", json!(60)).unwrap_err();
     assert!(matches!(
         err,
@@ -220,19 +213,16 @@ fn param_range_to_schema_rejects_default_outside_range() {
 
 #[test]
 fn param_range_to_schema_rejects_invalid_syntax_and_bounds() {
-    // not 3 parts
     assert!(matches!(
         param_range_to_schema("10:50", json!(20)),
         Err(ManifestError::InvalidParameterRange { .. })
     ));
 
-    // min > max
     assert!(matches!(
         param_range_to_schema("50:10:5", json!(20)),
         Err(ManifestError::InvalidParameterRange { .. })
     ));
 
-    // negative step
     assert!(matches!(
         param_range_to_schema("10:50:-5", json!(20)),
         Err(ManifestError::InvalidParameterRange { .. })

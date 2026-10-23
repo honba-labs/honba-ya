@@ -1,73 +1,89 @@
 //! Unit tests for the runner's rejection queue (cross-language vectors: `tests/order_rejections.rs`).
 
-use honba_engine::Handler;
-use honba_messages::UnixNanos;
-use honba_sim::{BarFillEngine, Behavior, ScriptedExecution};
-use honba_testing::VecFeed;
-use honba_testing::fixtures::any_instrument;
+use honba_core::uuid::Uuid;
+use honba_core::{FillReport, MarketEvent, OrderEvent, OrderSide, Price, Quantity, RejectReason};
+use honba_testing::fixtures::{any_instrument, flat_bar, utc_nanos};
+use rust_decimal::Decimal;
 
 use crate::{BuyAndHold, StrategyContext, StrategyRunner};
 
-fn bar(r: &mut impl Handler, ts: u64) {
-    let bar = VecFeed::bar("X", 10.0, ts).event().clone();
-    r.on_event(&bar, UnixNanos::from_u64(ts)).unwrap();
+fn bar(r: &mut StrategyRunner<BuyAndHold>, ts: u64) {
+    let bar = flat_bar("X", 10.0, ts);
+    r.on_event(&MarketEvent::Bar(bar), utc_nanos(ts)).unwrap();
 }
 
 fn first_order_id() -> String {
     format!(
         "{}-0",
-        crate::Strategy::name(&BuyAndHold::new(any_instrument(), 1.0))
+        crate::Strategy::name(&BuyAndHold::new(any_instrument(), Quantity::from_u64(1)))
     )
 }
 
 #[test]
 fn an_engine_that_never_rejects_records_nothing() {
-    let mut exec = BarFillEngine::new();
-    let mut r = StrategyRunner::new(BuyAndHold::new(any_instrument(), 1.0), exec.clone());
-    r.cancel(&first_order_id()).unwrap();
-    bar(&mut exec, 1); // the engine observes the price before the runner acts
+    let mut r = StrategyRunner::new(BuyAndHold::new(any_instrument(), Quantity::from_u64(1)));
+    r.on_order_event(&OrderEvent::Cancelled {
+        order_id: first_order_id(),
+    })
+    .unwrap();
     bar(&mut r, 1);
+    let fill = FillReport::new(
+        "F-0",
+        first_order_id(),
+        Uuid::nil(),
+        any_instrument(),
+        OrderSide::Buy,
+        Price::new(Decimal::from(10)),
+        Quantity::from_u64(1),
+        "buy_and_hold",
+        utc_nanos(1),
+    );
+    r.on_fill(&fill).unwrap();
     assert_eq!(r.fills().len(), 1);
     assert!(r.order_rejections().is_empty());
 }
 
 #[test]
 fn a_rejection_is_recorded_and_releases_the_instrument() {
-    let exec =
-        ScriptedExecution::new(10.0).with(first_order_id(), Behavior::reject("insufficient_funds"));
-    let mut r = StrategyRunner::new(BuyAndHold::new(any_instrument(), 1.0), exec);
+    let mut r = StrategyRunner::new(BuyAndHold::new(any_instrument(), Quantity::from_u64(1)));
     bar(&mut r, 1);
+    r.on_order_event(&OrderEvent::Rejected {
+        order_id: first_order_id(),
+        reason: RejectReason::InsufficientFunds,
+    })
+    .unwrap();
     assert_eq!(r.order_rejections().len(), 1);
-    assert_eq!(r.order_rejections()[0].reason, "insufficient_funds");
-    assert!(!r.order_rejections()[0].is_cancelled());
+    assert!(r.order_rejections()[0].reason.contains("InsufficientFunds"));
     assert!(!r.context().busy(&any_instrument()));
 }
 
 #[test]
 fn cancel_books_the_remainder_at_once() {
     let id = first_order_id();
-    let exec = ScriptedExecution::new(10.0).with(id.clone(), Behavior::Hold);
-    let mut r = StrategyRunner::new(BuyAndHold::new(any_instrument(), 1.0), exec);
+    let mut r = StrategyRunner::new(BuyAndHold::new(any_instrument(), Quantity::from_u64(1)));
     bar(&mut r, 1);
     assert!(r.context().busy(&any_instrument()));
     assert!(r.order_rejections().is_empty());
 
-    r.cancel(&id).unwrap();
+    r.on_order_event(&OrderEvent::Cancelled { order_id: id })
+        .unwrap();
     assert!(!r.context().busy(&any_instrument()));
     let got = &r.order_rejections()[0];
-    assert!(got.is_cancelled());
     assert_eq!(got.reason, "cancelled");
-    assert_eq!(got.quantity, 1.0);
+    assert_eq!(got.quantity, Quantity::from_u64(1));
 }
 
 #[test]
 fn cancelling_twice_releases_once_and_a_later_bar_does_not_resurrect_pending() {
     let id = first_order_id();
-    let exec = ScriptedExecution::new(10.0).with(id.clone(), Behavior::Hold);
-    let mut r = StrategyRunner::new(BuyAndHold::new(any_instrument(), 1.0), exec);
+    let mut r = StrategyRunner::new(BuyAndHold::new(any_instrument(), Quantity::from_u64(1)));
     bar(&mut r, 1);
-    r.cancel(&id).unwrap();
-    r.cancel(&id).unwrap();
+    r.on_order_event(&OrderEvent::Cancelled {
+        order_id: id.clone(),
+    })
+    .unwrap();
+    r.on_order_event(&OrderEvent::Cancelled { order_id: id })
+        .unwrap();
     bar(&mut r, 2);
     assert_eq!(r.order_rejections().len(), 1);
     assert!(!r.context().busy(&any_instrument()));

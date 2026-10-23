@@ -101,7 +101,7 @@ impl Recorder {
             .lock()
             .unwrap()
             .iter()
-            .map(|item| item.timestamp().timestamp_nanos())
+            .map(|item| item.timestamp().timestamp_nanos_opt().unwrap_or(0))
             .collect()
     }
 

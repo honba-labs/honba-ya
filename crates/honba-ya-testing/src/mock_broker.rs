@@ -1,8 +1,7 @@
 //! Simple mock [`BrokerExecutor`] for tests.
 
 use async_trait::async_trait;
-use chrono::Utc;
-use honba_core::{OrderAck, OrderRequest, OrderStatus, Price, Quantity, uuid::Uuid};
+use honba_core::{OrderAck, OrderRequest, OrderStatus};
 use honba_te_core::{BrokerError, BrokerExecutor, BrokerHealth};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -54,7 +53,9 @@ impl BrokerExecutor for MockBrokerExecutor {
         self.inner.orders.lock().await.push(req.clone());
 
         if !self.inner.should_succeed {
-            return Err(BrokerError::Rejected("mock broker configured to fail".into()));
+            return Err(BrokerError::Rejected(
+                "mock broker configured to fail".into(),
+            ));
         }
 
         let ack = OrderAck::new(
@@ -66,14 +67,19 @@ impl BrokerExecutor for MockBrokerExecutor {
         Ok(ack)
     }
 
-    async fn cancel_order(&self, order_id: &str) -> Result<(), BrokerError> {
+    async fn cancel_order(&self, _order_id: &str) -> Result<(), BrokerError> {
         if !self.inner.should_succeed {
-            return Err(BrokerError::Rejected("mock broker configured to fail".into()));
+            return Err(BrokerError::Rejected(
+                "mock broker configured to fail".into(),
+            ));
         }
         Ok(())
     }
 
-    async fn get_order_status(&self, _order_id: &str) -> Result<honba_core::OrderStatus, BrokerError> {
+    async fn get_order_status(
+        &self,
+        _order_id: &str,
+    ) -> Result<honba_core::OrderStatus, BrokerError> {
         Ok(OrderStatus::New)
     }
 }

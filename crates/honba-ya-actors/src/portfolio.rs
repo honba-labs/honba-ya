@@ -1,20 +1,24 @@
 //! Portfolio actor managing position tracking, FIFO tax-lot accounting, MTM valuation,
 //! and integration with the double-entry ledger.
 
-use honba_core::{FillReport, InstrumentId, Money, OrderSide, Price, Quantity};
+use honba_core::{FillReport, InstrumentId, Money, OrderSide, Price};
 use honba_kokoro_ledger::{Transaction, post_transaction};
-use honba_portfolio::{
-    apply_fill_to_account, HeldPosition, PortfolioState, PositionSide as PortfolioPositionSide,
-    TaxSummary, AccountState, Marks, CorporateAction, compute_capital_gains,
-};
 use honba_persistence::SqliteAuditLedger;
+use honba_portfolio::{
+    AccountState, CorporateAction, HeldPosition, Marks, PortfolioState,
+    PositionSide as PortfolioPositionSide, TaxSummary, apply_fill_to_account,
+    compute_capital_gains,
+};
 use rust_decimal::Decimal;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tracing::info;
 
-use crate::messages::{ActorStatus, PortfolioMsg, PortfolioUpdate, PortfolioSnapshot, PortfolioError, FeeBreakdown, PortfolioSettleResult};
+use crate::messages::{
+    ActorStatus, FeeBreakdown, PortfolioError, PortfolioMsg, PortfolioSettleResult,
+    PortfolioSnapshot, PortfolioUpdate,
+};
 
 /// Portfolio actor managing position tracking and tax-lot accounting.
 pub struct PortfolioActor {
@@ -23,7 +27,14 @@ pub struct PortfolioActor {
     /// Marks (last prices) for MTM valuation
     marks: Marks,
     /// Accumulated fills for tax summary
-    fills_history: Vec<(AccountState, InstrumentId, PortfolioPositionSide, u64, Price, chrono::NaiveDate)>,
+    fills_history: Vec<(
+        AccountState,
+        InstrumentId,
+        PortfolioPositionSide,
+        u64,
+        Price,
+        chrono::NaiveDate,
+    )>,
     /// Corporate actions to apply
     corporate_actions: Vec<CorporateAction>,
     /// Connected ledger for double-entry accounting
@@ -41,8 +52,10 @@ impl PortfolioActor {
     pub fn new(initial_cash: Money, rx: mpsc::Receiver<PortfolioMsg>) -> Self {
         let mut portfolio = PortfolioState::new(initial_cash.currency);
         let default_account = AccountState::new(initial_cash.currency, vec![]);
-        portfolio.accounts.insert("default".to_string(), default_account);
-        
+        portfolio
+            .accounts
+            .insert("default".to_string(), default_account);
+
         Self {
             portfolio,
             marks: Marks::new(),
@@ -76,7 +89,11 @@ impl PortfolioActor {
                     let snapshot = self.get_snapshot();
                     let _ = reply_to.send(snapshot);
                 }
-                PortfolioMsg::GetTaxSummary { period_start, period_end, reply_to } => {
+                PortfolioMsg::GetTaxSummary {
+                    period_start,
+                    period_end,
+                    reply_to,
+                } => {
                     let summary = self.get_tax_summary(period_start, period_end);
                     let _ = reply_to.send(summary);
                 }
@@ -84,7 +101,10 @@ impl PortfolioActor {
                     self.corporate_actions = actions;
                     let _ = reply_to.send(());
                 }
-                PortfolioMsg::SettleTrades { current_date, reply_to } => {
+                PortfolioMsg::SettleTrades {
+                    current_date,
+                    reply_to,
+                } => {
                     let result = self.settle_trades(current_date);
                     let _ = reply_to.send(result);
                 }
@@ -116,7 +136,10 @@ impl PortfolioActor {
         let default_currency = self.base_currency;
         // Get or create default account
         if !self.portfolio.accounts.contains_key("default") {
-            self.portfolio.accounts.insert("default".to_string(), AccountState::new(default_currency, vec![]));
+            self.portfolio.accounts.insert(
+                "default".to_string(),
+                AccountState::new(default_currency, vec![]),
+            );
         }
 
         // Apply fill to portfolio (FIFO tax-lot matching) - limit mutable borrow scope
@@ -135,7 +158,14 @@ impl PortfolioActor {
         // Add to fills history for tax summary - need account data again
         let fill_data = {
             let account = self.portfolio.accounts.get("default").unwrap();
-            (account.clone(), instrument.clone(), side, qty, price, fill_date)
+            (
+                account.clone(),
+                instrument.clone(),
+                side,
+                qty,
+                price,
+                fill_date,
+            )
         };
         self.fills_history.push(fill_data);
 
@@ -143,7 +173,9 @@ impl PortfolioActor {
         self.marks.marks.insert(instrument.clone(), price);
 
         // Build response
-        let positions: BTreeMap<String, Vec<HeldPosition>> = self.portfolio.accounts
+        let positions: BTreeMap<String, Vec<HeldPosition>> = self
+            .portfolio
+            .accounts
             .iter()
             .map(|(k, v)| (k.clone(), v.positions.clone()))
             .collect();
@@ -161,7 +193,7 @@ impl PortfolioActor {
     /// Calculate Indian statutory fees for a fill.
     fn calculate_fees(&self, fill: &FillReport, is_delivery: bool) -> FeeBreakdown {
         let notional = fill.price.0 * fill.quantity.0;
-        
+
         // STT
         let stt_rate = if is_delivery {
             Decimal::from(1i64) / Decimal::from(1000i64) // 0.1%
@@ -218,8 +250,8 @@ impl PortfolioActor {
     fn record_fill_ledger(
         &mut self,
         fill: &FillReport,
-        fees: &FeeBreakdown,
-        realized_pnl: &Money,
+        _fees: &FeeBreakdown,
+        _realized_pnl: &Money,
     ) -> Result<(), PortfolioError> {
         let tx = Transaction {
             id: fill.fill_id.clone(),
@@ -240,7 +272,6 @@ impl PortfolioActor {
     fn get_snapshot(&self) -> PortfolioSnapshot {
         let mut total_unrealized = Money::inr(Decimal::ZERO);
         let mut total_realized = Money::inr(Decimal::ZERO);
-        let mut total_equity = Money::inr(Decimal::ZERO);
         let mut cash = Money::inr(Decimal::ZERO);
 
         for (_, account) in &self.portfolio.accounts {
@@ -263,12 +294,15 @@ impl PortfolioActor {
         }
 
         // Get realized PnL from fills history
-        for (account, instrument_id, side, fill_qty, fill_price, fill_date) in &self.fills_history {
-            if let Some(idx) = account.positions.iter().position(|p| p.instrument == *instrument_id) {
+        for (account, instrument_id, _side, fill_qty, fill_price, fill_date) in &self.fills_history
+        {
+            if let Some(idx) = account
+                .positions
+                .iter()
+                .position(|p| p.instrument == *instrument_id)
+            {
                 let pos = &account.positions[idx];
-                let (pnl, _) = compute_capital_gains(
-                    pos, *fill_qty, *fill_price, *fill_date,
-                );
+                let (pnl, _) = compute_capital_gains(pos, *fill_qty, *fill_price, *fill_date);
                 total_realized = Money {
                     amount: total_realized.amount + pnl.amount,
                     currency: honba_core::Currency::Inr,
@@ -276,12 +310,14 @@ impl PortfolioActor {
             }
         }
 
-        total_equity = Money {
+        let total_equity = Money {
             amount: cash.amount + total_unrealized.amount,
             currency: honba_core::Currency::Inr,
         };
 
-        let positions: BTreeMap<String, Vec<HeldPosition>> = self.portfolio.accounts
+        let positions: BTreeMap<String, Vec<HeldPosition>> = self
+            .portfolio
+            .accounts
             .iter()
             .map(|(k, v)| (k.clone(), v.positions.clone()))
             .collect();
@@ -296,14 +332,27 @@ impl PortfolioActor {
     }
 
     /// Get tax summary for a period.
-    fn get_tax_summary(&self, period_start: chrono::NaiveDate, period_end: chrono::NaiveDate) -> TaxSummary {
+    fn get_tax_summary(
+        &self,
+        period_start: chrono::NaiveDate,
+        period_end: chrono::NaiveDate,
+    ) -> TaxSummary {
         // Convert owned fills to references for the function
-        let fills_refs: Vec<(&AccountState, InstrumentId, PortfolioPositionSide, u64, Price, chrono::NaiveDate)> = self.fills_history.iter()
+        let fills_refs: Vec<(
+            &AccountState,
+            InstrumentId,
+            PortfolioPositionSide,
+            u64,
+            Price,
+            chrono::NaiveDate,
+        )> = self
+            .fills_history
+            .iter()
             .map(|(acc, inst, side, qty, price, date)| {
                 (&*acc, inst.clone(), *side, *qty, *price, *date)
             })
             .collect();
-        
+
         TaxSummary::from_fills(
             &fills_refs,
             period_start,
@@ -313,7 +362,7 @@ impl PortfolioActor {
     }
 
     /// Perform T+1 settlement.
-    fn settle_trades(&mut self, current_date: chrono::NaiveDate) -> PortfolioSettleResult {
+    fn settle_trades(&mut self, _current_date: chrono::NaiveDate) -> PortfolioSettleResult {
         // Convert portfolio trades to settlement format
         // This is a simplified implementation
         PortfolioSettleResult {
@@ -325,9 +374,6 @@ impl PortfolioActor {
         }
     }
 }
-
-// Re-export honba-core Currency for internal use
-use honba_core::Currency;
 
 /// Maps exchange-specific tokens to canonical InstrumentIds.
 #[derive(Debug, Default, Clone)]

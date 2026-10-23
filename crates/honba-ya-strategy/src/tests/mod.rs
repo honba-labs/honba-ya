@@ -14,9 +14,9 @@ mod runner_rejections;
 mod runner_risk;
 mod runner_warmup;
 
-use honba_messages::{Exchange, InstrumentId};
+use honba_core::{Exchange, InstrumentId};
 
 /// A placeholder instrument for tests where the instrument does not matter.
 fn any_instrument() -> InstrumentId {
-    InstrumentId::new("X", Exchange::new("NSE"))
+    InstrumentId::new(Exchange::Nse, "X")
 }

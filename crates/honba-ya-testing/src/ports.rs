@@ -377,7 +377,7 @@ impl FixedClock {
     /// Creates a clock reading `start`.
     pub fn new(start: DateTime<Utc>) -> Self {
         Self {
-            now_nanos: AtomicU64::new(start.timestamp_nanos() as u64),
+            now_nanos: AtomicU64::new(start.timestamp_nanos_opt().unwrap_or(0) as u64),
         }
     }
 }
@@ -683,15 +683,17 @@ pub async fn check_clock_contract<C: Clock + ?Sized>(clock: &C) -> PortResult<()
         .map_err(|e| violation(format!("sleep() failed: {e}")))?;
     let after = clock.now().await;
 
+    let before_nanos = before.timestamp_nanos_opt().unwrap_or(0);
+    let after_nanos = after.timestamp_nanos_opt().unwrap_or(0);
+
     if after < before {
         return Err(violation(format!(
             "now() moved backwards: {} then {}",
-            before.timestamp_nanos(),
-            after.timestamp_nanos()
+            before_nanos, after_nanos
         )));
     }
 
-    let waited = after.timestamp_nanos() - before.timestamp_nanos();
+    let waited = after_nanos - before_nanos;
     let requested = i64::try_from(PROBE_SLEEP.as_nanos()).unwrap_or(i64::MAX);
     if waited < requested {
         return Err(violation(format!(

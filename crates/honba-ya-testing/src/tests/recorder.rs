@@ -1,6 +1,5 @@
 //! Unit tests for `crate::recorder`.
 
-use crate::ports::MarketDataFeed;
 use crate::{Handler, Recorder, VecFeed};
 
 #[test]

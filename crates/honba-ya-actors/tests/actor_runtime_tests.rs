@@ -4,11 +4,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
-use honba_actors::{*, RestartStrategy};
+use honba_actors::{RestartStrategy, *};
 use honba_core::*;
 use honba_mon::{OtrConfig, RiskEngine, RiskLimits, RiskRefusal};
-use honba_ya_testing::MockBrokerExecutor;
 use honba_te_core::BrokerError;
+use honba_ya_testing::MockBrokerExecutor;
 
 struct SimpleBreakoutStrategy {
     symbol: InstrumentId,
@@ -65,7 +65,13 @@ async fn test_actor_runtime_end_to_end_pipeline() {
     let risk_engine = RiskEngine::new(limits, OtrConfig::default());
     let broker = Arc::new(MockBrokerExecutor::new(true));
 
-    let supervisor = Supervisor::spawn_with_strategy(strategy, risk_engine, broker, 64, RestartStrategy::OneForOne);
+    let supervisor = Supervisor::spawn_with_strategy(
+        strategy,
+        risk_engine,
+        broker,
+        64,
+        RestartStrategy::OneForOne,
+    );
     let mut tick_rx = supervisor.resubscribe_ticks();
 
     // 1. Subscribe to the instrument first
@@ -203,7 +209,7 @@ async fn test_risk_actor_blocks_out_of_band_orders() {
 async fn test_market_data_backpressure_policies() {
     let inst = InstrumentId::new(Exchange::Nse, "INFY");
     let (md_tx, md_rx) = mpsc::channel(64);
-    let (strat_tx, mut strat_rx) = mpsc::channel(64);
+    let (strat_tx, _strat_rx) = mpsc::channel(64);
 
     let (actor, mut tick_rx) = MarketDataActor::new(md_rx, vec![strat_tx], 64);
     let actor = actor
@@ -214,7 +220,10 @@ async fn test_market_data_backpressure_policies() {
     let actor_handle = tokio::spawn(async move { actor.run().await });
 
     // 1. Subscribe
-    md_tx.send(MarketDataMsg::Subscribe(inst.clone())).await.unwrap();
+    md_tx
+        .send(MarketDataMsg::Subscribe(inst.clone()))
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_millis(10)).await;
 
     // 2. Send 4 ticks quickly: first 2 fill buffer, 3rd and 4th dropped by DropNewest
@@ -266,7 +275,7 @@ async fn test_supervisor_restart_strategies() {
     // Test OneForOne restart of market data
     let dummy_handle = tokio::spawn(async { ActorStatus::Running });
     supervisor.restart_actor_handle("market_data", dummy_handle);
-    let (md_r, strat_r, risk_r, exec_r) = supervisor.restart_counts();
+    let (md_r, strat_r, _risk_r, _exec_r) = supervisor.restart_counts();
     assert_eq!(md_r, 1);
     assert_eq!(strat_r, 0);
 

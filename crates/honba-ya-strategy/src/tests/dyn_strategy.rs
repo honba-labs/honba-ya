@@ -2,14 +2,15 @@
 
 use std::sync::{Arc, Mutex};
 
-use honba_engine::Result;
-use honba_entities::{Currency, Trade};
-use honba_messages::{
-    AggressorSide, Bar, BarAggregation, BarSpecification, BarType, Exchange, InstrumentId, OrderId,
-    OrderSide, PriceType, QuoteTick, TradeId, TradeTick, UnixNanos,
-};
+use honba_core::uuid::Uuid;
+use honba_core::{Bar, Exchange, FillReport, InstrumentId, OrderSide, Price, Quantity, Tick};
+use honba_testing::fixtures::{exact_decimal, flat_bar, utc_nanos};
+use rust_decimal::Decimal;
 
-use crate::{DynStrategy, IntentError, LedgerContext, OrderIntent, Strategy, StrategyContext};
+use crate::{
+    DynStrategy, IntentError, LedgerContext, OrderIntent, Result, Strategy, StrategyContext,
+    StrategyError,
+};
 
 type Hooks = Arc<Mutex<Vec<&'static str>>>;
 
@@ -42,17 +43,17 @@ impl Strategy for Recorder {
         Ok(())
     }
 
-    fn on_quote(&mut self, _ctx: &mut dyn StrategyContext, _quote: &QuoteTick) -> Result<()> {
+    fn on_quote(&mut self, _ctx: &mut dyn StrategyContext, _quote: &Tick) -> Result<()> {
         self.record("on_quote");
         Ok(())
     }
 
-    fn on_trade(&mut self, _ctx: &mut dyn StrategyContext, _trade: &TradeTick) -> Result<()> {
+    fn on_trade(&mut self, _ctx: &mut dyn StrategyContext, _trade: &Tick) -> Result<()> {
         self.record("on_trade");
         Ok(())
     }
 
-    fn on_fill(&mut self, _ctx: &mut dyn StrategyContext, _fill: &Trade) -> Result<()> {
+    fn on_fill(&mut self, _ctx: &mut dyn StrategyContext, _fill: &FillReport) -> Result<()> {
         self.record("on_fill");
         Ok(())
     }
@@ -81,62 +82,51 @@ impl Strategy for Failing {
     }
 
     fn on_bar(&mut self, _ctx: &mut dyn StrategyContext, _bar: &Bar) -> Result<()> {
-        Err(honba_engine::AlgoError::Component("no bar".to_string()))
+        Err(StrategyError::other("no bar"))
     }
 }
 
 fn any_bar() -> Bar {
-    let spec = BarSpecification::new(1, BarAggregation::Minute, PriceType::Last);
-    let at = UnixNanos::from_u64(1);
-    Bar::new(
-        BarType::new(InstrumentId::new("X", Exchange::new("NSE")), spec),
-        10.0,
-        11.0,
-        9.0,
-        10.5,
-        100.0,
-        at,
-        at,
-    )
+    flat_bar("X", 10.5, 1)
 }
 
-fn any_quote() -> QuoteTick {
-    let at = UnixNanos::from_u64(1);
-    QuoteTick::new(
-        InstrumentId::new("X", Exchange::new("NSE")),
-        10.4,
-        10.6,
-        5.0,
-        5.0,
-        at,
-        at,
-    )
+fn any_quote() -> Tick {
+    let at = utc_nanos(1);
+    Tick::Quote {
+        instrument: InstrumentId::new(Exchange::Nse, "X"),
+        bid: Price::new(exact_decimal(10.4)),
+        ask: Price::new(exact_decimal(10.6)),
+        bid_qty: Quantity::from_u64(5),
+        ask_qty: Quantity::from_u64(5),
+        last_price: None,
+        exchange_ts: at,
+        receive_ts: at,
+        band: None,
+    }
 }
 
-fn any_trade_tick() -> TradeTick {
-    let at = UnixNanos::from_u64(1);
-    TradeTick::new(
-        InstrumentId::new("X", Exchange::new("NSE")),
-        10.5,
-        5.0,
-        AggressorSide::Buyer,
-        TradeId::new("T-1"),
-        at,
-        at,
-    )
+fn any_trade_tick() -> Tick {
+    let at = utc_nanos(1);
+    Tick::Ltp {
+        instrument: InstrumentId::new(Exchange::Nse, "X"),
+        price: Price::new(exact_decimal(10.5)),
+        volume: Quantity::from_u64(5),
+        exchange_ts: at,
+        receive_ts: at,
+    }
 }
 
-fn any_fill() -> Trade {
-    let at = UnixNanos::from_u64(1);
-    Trade::new(
-        OrderId::new("O-1"),
-        InstrumentId::new("X", Exchange::new("NSE")),
+fn any_fill() -> FillReport {
+    FillReport::new(
+        "F-1",
+        "O-1",
+        Uuid::nil(),
+        InstrumentId::new(Exchange::Nse, "X"),
         OrderSide::Buy,
-        1.0,
-        10.5,
-        Currency::Inr,
-        at,
-        at,
+        Price::new(exact_decimal(10.5)),
+        Quantity::from_u64(1),
+        "recorder",
+        utc_nanos(1),
     )
 }
 
@@ -155,8 +145,8 @@ fn every_hook_reaches_the_boxed_strategy() {
     strategy
         .on_intent_rejected(
             &mut ctx,
-            &OrderIntent::market_buy(InstrumentId::new("X", Exchange::new("NSE")), 1.0),
-            &IntentError::NonPositiveQuantity(-1.0),
+            &OrderIntent::market_buy(InstrumentId::new(Exchange::Nse, "X"), Quantity::from_u64(1)),
+            &IntentError::NonPositiveQuantity(Quantity::new(Decimal::from(-1))),
         )
         .unwrap();
     strategy.on_stop(&mut ctx).unwrap();
@@ -181,6 +171,6 @@ fn an_error_from_a_hook_reaches_the_caller() {
     let mut ctx = LedgerContext::new();
     assert_eq!(
         strategy.on_bar(&mut ctx, &any_bar()).unwrap_err(),
-        honba_engine::AlgoError::Component("no bar".to_string())
+        StrategyError::other("no bar")
     );
 }

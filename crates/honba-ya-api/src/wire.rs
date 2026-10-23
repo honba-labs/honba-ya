@@ -13,7 +13,6 @@
 
 use std::fmt;
 use std::marker::PhantomData;
-use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
@@ -21,7 +20,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use honba_core::{Bar, Currency, FillReport, InstrumentId, OrderRequest, OrderSide};
+use honba_core::{Bar, Currency, FillReport, InstrumentId, OrderRequest};
 
 /// The wire `schema_version` this crate emits and stamps on every journal
 /// message. Bumped whenever a wire shape changes incompatibly (ADR 0012).
@@ -222,7 +221,9 @@ impl fmt::Display for ErrorDetail {
 }
 
 /// The operator trading state every write route evaluates against (ADR 0018).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum TradingState {
     /// Orders flow normally.
@@ -271,7 +272,9 @@ impl Serialize for HttpMethod {
 }
 
 /// Access tier a route is gated by.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Access {
     /// Reads state; never moves money.
@@ -283,7 +286,9 @@ pub enum Access {
 }
 
 /// Where a route reads its parameters from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ParamLocation {
     /// `{placeholder}` segments of the path.
@@ -709,7 +714,9 @@ impl Instrument {
 }
 
 /// Bar length unit of a [`BarSpecification`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum BarAggregation {
     /// Seconds.
@@ -727,7 +734,9 @@ pub enum BarAggregation {
 }
 
 /// Which price of a bar an indicator or query reads.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum PriceType {
     /// The close (last traded) price.

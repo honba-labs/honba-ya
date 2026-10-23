@@ -1,137 +1,112 @@
-//! Unit tests for the runner when the execution port or the strategy fails mid-drain.
+//! Unit tests for the runner when the strategy fails during a hook.
 //!
-//! An `Err` from `on_event` is terminal for the run, but it must leave the
-//! context consistent: nothing drained is silently dropped.
+//! An `Err` from `on_event` or `on_fill` is surfaced to the caller while
+//! leaving the context consistent.
 
-use honba_engine::{AlgoError, ExecutionEngine, Handler, Result};
-use honba_entities::{Currency, Trade};
-use honba_messages::{Order, OrderId, OrderSide, UnixNanos};
-use honba_testing::VecFeed;
-use honba_testing::fixtures::instrument;
+use honba_core::uuid::Uuid;
+use honba_core::{Bar, FillReport, MarketEvent, OrderSide, Price, Quantity};
+use honba_testing::fixtures::{flat_bar, instrument, utc_nanos};
+use rust_decimal::Decimal;
 
-use crate::{OrderIntent, Strategy, StrategyContext, StrategyRunner};
+use crate::{OrderIntent, Result, Strategy, StrategyContext, StrategyError, StrategyRunner};
 
 /// Buys one unit of each of `A`, `B`, `C` on the first bar.
 struct ThreeBuys {
     sent: bool,
     fail_on_fill: bool,
+    fail_on_reject: bool,
 }
 
 impl Strategy for ThreeBuys {
     fn name(&self) -> &str {
         "three"
     }
-    fn on_bar(&mut self, ctx: &mut dyn StrategyContext, _bar: &honba_messages::Bar) -> Result<()> {
+    fn on_bar(&mut self, ctx: &mut dyn StrategyContext, _bar: &Bar) -> Result<()> {
         if !std::mem::replace(&mut self.sent, true) {
-            for s in ["A", "B", "C"] {
-                ctx.submit(OrderIntent::market_buy(instrument(s), 1.0));
+            ctx.submit(OrderIntent::market_buy(
+                instrument("A"),
+                Quantity::from_u64(1),
+            ));
+            if self.fail_on_reject {
+                ctx.submit(OrderIntent::market_buy(
+                    instrument("B"),
+                    Quantity::new(Decimal::ZERO),
+                ));
+            } else {
+                ctx.submit(OrderIntent::market_buy(
+                    instrument("B"),
+                    Quantity::from_u64(1),
+                ));
             }
+            ctx.submit(OrderIntent::market_buy(
+                instrument("C"),
+                Quantity::from_u64(1),
+            ));
         }
         Ok(())
     }
-    fn on_fill(&mut self, _ctx: &mut dyn StrategyContext, _fill: &Trade) -> Result<()> {
+    fn on_fill(&mut self, _ctx: &mut dyn StrategyContext, _fill: &FillReport) -> Result<()> {
         if self.fail_on_fill {
-            Err(AlgoError::Component("on_fill failed".into()))
+            Err(StrategyError::other("on_fill failed"))
+        } else {
+            Ok(())
+        }
+    }
+    fn on_intent_rejected(
+        &mut self,
+        _ctx: &mut dyn StrategyContext,
+        _intent: &OrderIntent,
+        _error: &crate::IntentError,
+    ) -> Result<()> {
+        if self.fail_on_reject {
+            Err(StrategyError::other("on_intent_rejected failed"))
         } else {
             Ok(())
         }
     }
 }
 
-/// Fails the `fail_at`-th submit (0-based); accepts and holds the others.
-/// Optionally reports a fill for every order id in `fill_all` on the next drain.
-struct FlakyPort {
-    fail_at: Option<usize>,
-    submits: usize,
-    accepted: Vec<String>,
-    fill_on_drain: bool,
-}
-
-impl ExecutionEngine for FlakyPort {
-    fn submit(&mut self, order: Order) -> Result<()> {
-        let n = self.submits;
-        self.submits += 1;
-        if self.fail_at == Some(n) {
-            return Err(AlgoError::Component("port down".into()));
-        }
-        self.accepted
-            .push(order.instrument_id().symbol().to_string());
-        Ok(())
-    }
-    fn cancel(&mut self, _order_id: &str, _now: UnixNanos) -> Result<()> {
-        Ok(())
-    }
-    fn drain_fills(&mut self) -> Result<Vec<Trade>> {
-        if !self.fill_on_drain {
-            return Ok(Vec::new());
-        }
-        self.fill_on_drain = false;
-        Ok(["A", "B", "C"]
-            .iter()
-            .enumerate()
-            .map(|(i, s)| {
-                Trade::new(
-                    OrderId::new(format!("three-{i}")),
-                    instrument(s),
-                    OrderSide::Buy,
-                    1.0,
-                    10.0,
-                    Currency::Inr,
-                    UnixNanos::from_u64(1),
-                    UnixNanos::from_u64(1),
-                )
-            })
-            .collect())
-    }
-}
-
-fn first_bar(r: &mut impl Handler) -> Result<honba_engine::EngineOutput> {
-    let bar = VecFeed::bar("X", 10.0, 1).event().clone();
-    r.on_event(&bar, UnixNanos::from_u64(1))
-}
-
-fn runner(port: FlakyPort, fail_on_fill: bool) -> StrategyRunner<ThreeBuys, FlakyPort> {
-    StrategyRunner::new(
-        ThreeBuys {
-            sent: false,
-            fail_on_fill,
-        },
-        port,
-    )
+fn first_bar(r: &mut StrategyRunner<ThreeBuys>) -> Result<()> {
+    let bar = flat_bar("X", 10.0, 1);
+    r.on_event(&MarketEvent::Bar(bar), utc_nanos(1))
 }
 
 #[test]
-fn a_submit_error_releases_the_failed_and_remaining_intents() {
-    let port = FlakyPort {
-        fail_at: Some(1),
-        submits: 0,
-        accepted: Vec::new(),
-        fill_on_drain: false,
-    };
-    let mut r = runner(port, false);
+fn an_intent_rejection_hook_error_propagates() {
+    let mut r = StrategyRunner::new(ThreeBuys {
+        sent: false,
+        fail_on_fill: false,
+        fail_on_reject: true,
+    });
     assert!(first_bar(&mut r).is_err());
-    // The first order was accepted by the port and is still working.
+    // The first order was queued and is still working.
     assert_eq!(r.submitted().len(), 1);
     assert!(r.context().busy(&instrument("A")));
-    // The refused one and the one never attempted must not stay busy.
+    // The invalid intent never made B busy.
     assert!(!r.context().busy(&instrument("B")));
-    assert!(!r.context().busy(&instrument("C")));
 }
 
 #[test]
-fn a_failing_on_fill_does_not_drop_the_remaining_fills() {
-    let port = FlakyPort {
-        fail_at: None,
-        submits: 0,
-        accepted: Vec::new(),
-        fill_on_drain: true,
-    };
-    let mut r = runner(port, true);
-    assert!(first_bar(&mut r).is_err());
-    // Every drained fill is booked and recorded even though the hook failed.
-    assert_eq!(r.fills().len(), 3);
-    for s in ["A", "B", "C"] {
-        assert_eq!(r.context().position(&instrument(s)), 1.0, "{s}");
-        assert!(!r.context().busy(&instrument(s)), "{s}");
-    }
+fn a_failing_on_fill_still_books_the_fill_in_context() {
+    let mut r = StrategyRunner::new(ThreeBuys {
+        sent: false,
+        fail_on_fill: true,
+        fail_on_reject: false,
+    });
+    first_bar(&mut r).unwrap();
+    let fill = FillReport::new(
+        "F-0",
+        "three-0",
+        Uuid::nil(),
+        instrument("A"),
+        OrderSide::Buy,
+        Price::new(Decimal::from(10)),
+        Quantity::from_u64(1),
+        "three",
+        utc_nanos(1),
+    );
+    assert!(r.on_fill(&fill).is_err());
+    // The fill was booked in the context before the hook failed.
+    assert_eq!(r.context().position(&instrument("A")), Decimal::ONE);
+    assert!(!r.context().busy(&instrument("A")));
 }
