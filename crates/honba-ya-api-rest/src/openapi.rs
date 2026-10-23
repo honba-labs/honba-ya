@@ -9,13 +9,12 @@ use honba_core::{
 };
 use honba_mon::{RiskLimits, RiskRefusal};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use schemars::schema::*;
-use schemars::{JsonSchema, schema_for};
+use schemars::schema_for;
 use std::collections::BTreeMap;
 
 /// OpenAPI 3.1 info block.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenApiInfo {
     pub title: String,
     pub version: String,
@@ -23,14 +22,14 @@ pub struct OpenApiInfo {
 }
 
 /// OpenAPI 3.1 server object.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenApiServer {
     pub url: String,
     pub description: String,
 }
 
 /// OpenAPI 3.1 security scheme.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum SecurityScheme {
     Http { scheme: String, bearer_format: Option<String> },
@@ -38,14 +37,14 @@ pub enum SecurityScheme {
 }
 
 /// OpenAPI 3.1 security requirement.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityRequirement {
     #[serde(flatten)]
     pub scheme: BTreeMap<String, Vec<String>>,
 }
 
 /// Complete OpenAPI 3.1 document for the Honba REST API.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenApiDocument {
     pub openapi: String,
     pub info: OpenApiInfo,
@@ -56,7 +55,7 @@ pub struct OpenApiDocument {
 }
 
 /// A single path item in the OpenAPI document.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PathItem {
     pub get: Option<Operation>,
@@ -66,7 +65,7 @@ pub struct PathItem {
 }
 
 /// An OpenAPI operation.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Operation {
     pub tags: Vec<String>,
@@ -79,7 +78,7 @@ pub struct Operation {
 }
 
 /// An OpenAPI parameter.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Parameter {
     pub name: String,
@@ -89,7 +88,7 @@ pub struct Parameter {
 }
 
 /// An OpenAPI request body.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestBody {
     pub required: bool,
@@ -97,14 +96,14 @@ pub struct RequestBody {
 }
 
 /// An OpenAPI media type.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaType {
     pub schema: Schema,
 }
 
 /// An OpenAPI response.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Response {
     pub description: String,
@@ -112,14 +111,14 @@ pub struct Response {
 }
 
 /// An OpenAPI tag.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tag {
     pub name: String,
     pub description: String,
 }
 
 /// OpenAPI components (schemas, security schemes, etc.).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Components {
     pub schemas: BTreeMap<String, Schema>,
@@ -147,7 +146,7 @@ impl OpenApiDocument {
                             description: "List of instruments".to_string(),
                             content: BTreeMap::from([(
                                 "application/json".to_string(),
-                                MediaType { schema: schema_for!(Vec<InstrumentId>) },
+                                MediaType { schema: schema_for!(Vec<InstrumentId>).schema.into() },
                             )]),
                         },
                     )]),
@@ -176,7 +175,7 @@ impl OpenApiDocument {
                             description: "Latest quotes".to_string(),
                             content: BTreeMap::from([(
                                 "application/json".to_string(),
-                                MediaType { schema: schema_for!(serde_json::Value) },
+                                MediaType { schema: schema_for!(serde_json::Value).schema.into() },
                             )]),
                         },
                     )]),
@@ -205,7 +204,7 @@ impl OpenApiDocument {
                             description: "List of orders".to_string(),
                             content: BTreeMap::from([(
                                 "application/json".to_string(),
-                                MediaType { schema: schema_for!(serde_json::Value) },
+                                MediaType { schema: schema_for!(serde_json::Value).schema.into() },
                             )]),
                         },
                     )]),
@@ -223,7 +222,7 @@ impl OpenApiDocument {
                         content: BTreeMap::from([(
                             "application/json".to_string(),
                             MediaType {
-                                schema: schema_for!(serde_json::Value),
+                                schema: schema_for!(serde_json::Value).schema.into(),
                             },
                         )]),
                     }),
@@ -235,7 +234,7 @@ impl OpenApiDocument {
                                 content: BTreeMap::from([(
                                     "application/json".to_string(),
                                     MediaType {
-                                        schema: schema_for!(serde_json::Value),
+                                        schema: schema_for!(serde_json::Value).schema.into(),
                                     },
                                 )]),
                             },
@@ -247,7 +246,7 @@ impl OpenApiDocument {
                                 content: BTreeMap::from([(
                                     "application/json".to_string(),
                                     MediaType {
-                                        schema: schema_for!(serde_json::Value),
+                                        schema: schema_for!(serde_json::Value).schema.into(),
                                     },
                                 )]),
                             },
@@ -276,7 +275,7 @@ impl OpenApiDocument {
                         name: "id".to_string(),
                         r#in: "path".to_string(),
                         required: true,
-                        schema: schema_for!(String),
+                        schema: schema_for!(String).schema.into(),
                     }],
                     request_body: None,
                     responses: BTreeMap::from([(
@@ -286,7 +285,7 @@ impl OpenApiDocument {
                             content: BTreeMap::from([(
                                 "application/json".to_string(),
                                 MediaType {
-                                    schema: schema_for!(serde_json::Value),
+                                    schema: schema_for!(serde_json::Value).schema.into(),
                                 },
                             )]),
                         },
@@ -313,7 +312,7 @@ impl OpenApiDocument {
                             description: "Portfolio state".to_string(),
                             content: BTreeMap::from([(
                                 "application/json".to_string(),
-                                MediaType { schema: schema_for!(serde_json::Value) },
+                                MediaType { schema: schema_for!(serde_json::Value).schema.into() },
                             )]),
                         },
                     )]),
@@ -342,7 +341,7 @@ impl OpenApiDocument {
                             description: "OpenAPI 3.1 schema".to_string(),
                             content: BTreeMap::from([(
                                 "application/json".to_string(),
-                                MediaType { schema: schema_for!(serde_json::Value) },
+                                MediaType { schema: schema_for!(serde_json::Value).schema.into() },
                             )]),
                         },
                     )]),
@@ -357,27 +356,27 @@ impl OpenApiDocument {
         let mut schemas = BTreeMap::new();
         schemas.insert(
             "InstrumentId".to_string(),
-            schema_for!(InstrumentId),
+            schema_for!(InstrumentId).schema.into(),
         );
-        schemas.insert("OrderSide".to_string(), schema_for!(OrderSide));
+        schemas.insert("OrderSide".to_string(), schema_for!(OrderSide).schema.into());
         schemas.insert(
             "OrderStatus".to_string(),
-            schema_for!(OrderStatus),
+            schema_for!(OrderStatus).schema.into(),
         );
-        schemas.insert("OrderType".to_string(), schema_for!(OrderType));
-        schemas.insert("Price".to_string(), schema_for!(Price));
-        schemas.insert("Quantity".to_string(), schema_for!(Quantity));
+        schemas.insert("OrderType".to_string(), schema_for!(OrderType).schema.into());
+        schemas.insert("Price".to_string(), schema_for!(Price).schema.into());
+        schemas.insert("Quantity".to_string(), schema_for!(Quantity).schema.into());
         schemas.insert(
             "TimeInForce".to_string(),
-            schema_for!(TimeInForce),
+            schema_for!(TimeInForce).schema.into(),
         );
         schemas.insert(
             "RiskLimits".to_string(),
-            schema_for!(RiskLimits),
+            schema_for!(RiskLimits).schema.into(),
         );
         schemas.insert(
             "RiskRefusal".to_string(),
-            schema_for!(RiskRefusal),
+            schema_for!(RiskRefusal).schema.into(),
         );
 
         let mut security_schemes = BTreeMap::new();
