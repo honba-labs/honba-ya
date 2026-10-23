@@ -1,137 +1,323 @@
 //! The `POST /orders` risk gate (ADR 0018 decision 7): approval queue (E5-S4) ->
-//! risk stage -> execution gateway (an [`crate::ExecutionVenue`]: the embedded `NextOpenSim` by default; no real venue wired yet, E3-S7).
+//! risk stage -> embedded simulator ([`crate::exec`]).
 //!
-//! The handler builds a [`RiskRequest`] from the request body plus the ports the
-//! composition root already wires: rules come from the `null` profile over the
-//! `InstrumentMaster` set, `position` is the signed position the write ledger
-//! implies for the instrument ([`OrderLedger::position`]), `trading_state` is the
-//! app's operator-set [`AppState::trading_state`] (default `Active`; seeded via
+//! The handler parses the request body, confirms the instrument exists, then runs the risk
+//! gate: the operator's [`AppState::trading_state`] (default `Active`; seeded via
 //! `AppState::with_trading_state` and changed at runtime by `PUT /trading-state`, read afresh
-//! for every request),
-//! `reference_price` comes from `QuoteReader` (the close of the latest bar, via
-//! mid when a book exists; the limit price when no quote exists), and `ts` /
-//! `last_feed_ts` are the latest quote's `ts_event` (no wall clock; both 0 / `None`
-//! when no quote exists). Approved orders are also submitted to the embedded simulator ([`crate::exec`]);
-//! fills arrive when the market advances ([`AppState::advance_market`]) and move the
-//! ledger row to `Filled`. Known limits: market orders only (a limit order is
-//! `Rejected` by the simulator) and order rows still carry a zero timestamp. Rows report
-//! `filled_qty` / `avg_fill_price` from the venue's fills and `reject_reason` (stable
+//! for every request) is checked first (`Halted` refuses every placement, `Reducing` only those
+//! that reduce the ledger's existing opposite position), then `honba-mon`'s [`RiskEngine`] runs
+//! its own structural/SEBI/limit checks ([`check_risk`]). Approved orders are recorded in the
+//! write ledger ([`OrderLedger`]) and submitted to the embedded simulator ([`crate::exec`]);
+//! fills arrive when the market advances ([`AppState::advance_market`]) and move the ledger row
+//! to `Filled`. Known limits: the simulator handles market orders only (a limit order is
+//! `Rejected`) and is long-only (a sell with no simulated holding is `Rejected`). Rows report
+//! `filled_qty` / `avg_fill_price` from the simulator's fills and `reject_reason` (a stable
 //! `ErrorCode` plus message) from its refusals (ADR 0030). A risk refusal is still the 422
 //! below; when the request carries a `client_order_id` it is also recorded as a `Rejected` row
-//! (`reject_reason` = the refusal's code and message) and a repeat of that id replays the
-//! same 422. A keyless refusal is not recorded (the shared route key would poison later orders).
+//! (`reject_reason` = the refusal's code and message) and a repeat of that id replays the same
+//! 422. A keyless refusal is not recorded (the shared route key would poison later orders).
 //!
-//! When the approval queue is enabled (E5-S4), placements are held in the queue
-//! until approved by an operator. Cancel and modify bypass the queue.
-//! A refusal from the risk stage is the 422 of ADR 0018 decision 5 and never
-//! reaches the gateway. Approved placements land in the [`OrderLedger`] keyed by
-//! the ADR 0019 decision 3 idempotency key; the decision 6 audit record is not
-//! written yet.
-//! `DELETE /orders/{id}` cannot add exposure, so it is never risk-checked and is
-//! allowed in every state. `POST /positions/close` takes no body: for every instrument
-//! with a non-zero ledger position it generates one market order on the opposite side
-//! for the full net quantity (it can only reduce the position, so it passes the
-//! reduce-only state). Those orders take the same path as `POST /orders` (approval
-//! queue when enabled, else the risk stage, then the ledger), so a halted engine still
-//! refuses them. `Order` has no reduce-only flag; the reduction is by construction.
-
-//! The `POST /orders` risk gate (ADR 0018 decision 7): approval queue (E5-S4) ->
-//! risk stage -> execution gateway (an [`crate::ExecutionVenue`]: the embedded `NextOpenSim` by default; no real venue wired yet, E3-S7).
+//! When the approval queue is enabled (E5-S4), placements are held in the queue until approved
+//! by an operator. Cancel and modify bypass the queue. A refusal from the risk stage is the 422
+//! of ADR 0018 decision 5 and never reaches the simulator. Approved placements land in the
+//! [`OrderLedger`] keyed by the ADR 0019 decision 3 idempotency key; the decision 6 audit record
+//! is not written yet.
 //!
-//! The handler builds a [`RiskRequest`] from the request body plus the ports the
-//! composition root already wires: rules come from the `null` profile over the
-//! `InstrumentMaster` set, `position` is the signed position the write ledger
-//! implies for the instrument ([`OrderLedger::position`]), `trading_state` is the
-//! app's operator-set [`AppState::trading_state`] (default `Active`; seeded via
-//! `AppState::with_trading_state` and changed at runtime by `PUT /trading-state`, read afresh
-//! for every request),
-//! `reference_price` comes from `QuoteReader` (the close of the latest bar, via
-//! mid when a book exists; the limit price when no quote exists), and `ts` /
-//! `last_feed_ts` are the latest quote's `ts_event` (no wall clock; both 0 / `None`
-//! when no quote exists). Approved orders are also submitted to the embedded simulator ([`crate::exec`]);
-//! fills arrive when the market advances ([`AppState::advance_market`]) and move the
-//! ledger row to `Filled`. Known limits: market orders only (a limit order is
-//! `Rejected` by the simulator) and order rows still carry a zero timestamp. Rows report
-//! `filled_qty` / `avg_fill_price` from the venue's fills and `reject_reason` (stable
-//! `ErrorCode` plus message) from its refusals (ADR 0030). A risk refusal is still the 422
-//! below; when the request carries a `client_order_id` it is also recorded as a `Rejected` row
-//! (`reject_reason` = the refusal's code and message) and a repeat of that id replays the
-//! same 422. A keyless refusal is not recorded (the shared route key would poison later orders).
+//! `DELETE /orders/{id}` cannot add exposure, so it is never risk-checked and is allowed in
+//! every state. `POST /positions/close` takes no body: for every instrument with a non-zero
+//! ledger position it generates one market order on the opposite side for the full net quantity
+//! (it can only reduce the position, so it passes the reduce-only state). Those orders take the
+//! same path as `POST /orders` (approval queue when enabled, else the risk stage, then the
+//! ledger), so a halted engine still refuses them.
 //!
-//! When the approval queue is enabled (E5-S4), placements are held in the queue
-//! until approved by an operator. Cancel and modify bypass the queue.
-//! A refusal from the risk stage is the 422 of ADR 0018 decision 5 and never
-//! reaches the gateway. Approved placements land in the [`OrderLedger`] keyed by
-//! the ADR 0019 decision 3 idempotency key; the decision 6 audit record is not
-//! written yet.
+//! # Rebuilt on this migration, not a rename
 //!
-//! `DELETE /orders/{id}` cannot add exposure, so it is never risk-checked and is
-//! allowed in every state. `POST /positions/close` takes no body: for every instrument
-//! with a non-zero ledger position it generates one market order on the opposite side
-//! for the full net quantity (it can only reduce the position, so it passes the
-//! reduce-only state). Those orders take the same path as `POST /orders` (approval
-//! queue when enabled, else the risk stage, then the ledger), so a halted engine still
-//! refuses them. `Order` has no reduce-only flag; the reduction is by construction.
+//! This file used to depend on a rich, stateful `honba_messages::Order` ledger row (with
+//! `.order_id()`/`.with_status()`/etc.), a `RiskStage`/`RiskRequest`/`RiskDecision` facade that
+//! sourced per-instrument rules from a market profile (`NullMarketProfile`/`ProfileRulesSource`),
+//! and `UnixNanos` timestamps. None of those four have a successor: `honba_core` has no rich
+//! stateful order type (only the flat `OrderRequest`/`OrderAck`/`FillReport` wire DTOs), and
+//! `honba-mon`'s real surface (confirmed by reading `honba-mon/src/engine.rs`) is
+//! `RiskEngine::{check_order, check_order_fast, check_decision}` operating directly on
+//! `OrderRequest` with no market-profile rule-sourcing hook at all.
+//!
+//! So the ledger row ([`Order`], [`OrderStatus`], local [`OrderType`], [`RejectReason`]) is
+//! redefined locally in this file (AGENTS.md's zero-floats policy means it carries
+//! `rust_decimal::Decimal`, not `f64`, for quantity/price), and the risk gate calls
+//! `RiskEngine::check_order` directly (see [`check_risk`]'s doc for the resulting reduced scope:
+//! no per-instrument lot/tick/circuit rules sourced from a market profile, and every submission
+//! runs under one fixed, pre-registered SEBI algo id, [`REST_ALGO_ID`], since the REST request
+//! body has no algo-id concept of its own).
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::Response;
-use honba_core::{InstrumentId, OrderSide, OrderStatus, OrderType, Price, Quantity, TimeInForce};
-use honba_mon::{RiskLimits, RiskRefusal};
+use chrono::{DateTime, Utc};
+use honba_api::{ErrorCode, ErrorDetail, OrdersQuery, OrdersRequest};
+use honba_core::rust_decimal::Decimal;
+use honba_core::{InstrumentId, OrderSide, Price, Quantity, TimeInForce};
+use honba_mon::RiskRefusal;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::market::{ApiQuery, failure, success};
 use crate::state::AppState;
 
-/// Order idempotency key — an alias for `String` since `honba_messages::OrderId`
-/// was removed in Phase 1.3. Carries the caller-provided `client_order_id` when
-/// present, else a route-generated placeholder.
+/// Order idempotency key — a plain `String` since `honba_messages::OrderId` was removed in
+/// Phase 1.3. Carries the caller-provided `client_order_id` when present, else a
+/// route-generated placeholder.
 type OrderId = String;
 
-fn is_terminal(status: OrderStatus) -> bool {
-    matches!(
-        status,
-        OrderStatus::Filled | OrderStatus::Cancelled | OrderStatus::Rejected | OrderStatus::Expired
-    )
+/// The fixed SEBI algo id every `/orders` submission runs under, since the REST request body
+/// has no algo-id concept of its own. Registered once, at [`AppState::new`].
+pub(crate) const REST_ALGO_ID: &str = "rest-api";
+
+/// Local order lifecycle status for this crate's write ledger.
+///
+/// Distinct from [`honba_core::OrderStatus`] (a leaner post-ack broker state machine with no
+/// `Initialized`/`Submitted`/`Accepted` distinction): this ledger tracks a row from before it
+/// ever reaches a venue, which the wire status doesn't model. `honba_messages::OrderStatus` had
+/// this exact shape; it has no successor, so this is a genuine local redefinition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OrderStatus {
+    /// Row created, not yet submitted to the simulator.
+    Initialized,
+    /// Accepted by the risk gate and handed to the simulator.
+    Submitted,
+    /// Acknowledged by the simulator, not yet filled.
+    Accepted,
+    /// Partially filled.
+    PartiallyFilled,
+    /// Completely filled.
+    Filled,
+    /// Cancelled.
+    Cancelled,
+    /// Refused (by the risk gate or the simulator) with no fill.
+    Rejected,
+    /// Expired unfilled.
+    Expired,
+}
+
+impl OrderStatus {
+    /// A row in this status never changes again.
+    fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Filled | Self::Cancelled | Self::Rejected | Self::Expired
+        )
+    }
+}
+
+/// Local order-type tag. No embedded limit price (unlike `honba_core::OrderType::Limit`): the
+/// ledger row tracks price separately, as `Option<Decimal>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OrderType {
+    /// Fills at the simulator's next bar open.
+    Market,
+    /// Not supported by the embedded simulator (`Rejected`, `unsupported_order_type`).
+    Limit,
+}
+
+/// A ledger-row rejection: a stable [`ErrorCode`] plus the refusing party's own text.
+///
+/// `honba_core::order::RejectReason` is a closed 3-variant enum
+/// (`ExchangeRejected`/`Expired`/`InsufficientMargin`) with no `::new(code, message)`
+/// constructor and doesn't fit; this is the free-form shape ADR 0030 wants.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RejectReason {
+    /// The stable wire code.
+    pub code: ErrorCode,
+    /// Human-readable detail.
+    pub message: String,
+}
+
+impl RejectReason {
+    /// A rejection carrying `code` and `message`.
+    pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+/// One row of the write ledger (ADR 0019 decision 3): the order as submitted, plus whatever the
+/// risk gate and the simulator have reported about it since.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Order {
+    order_id: String,
+    instrument_id: InstrumentId,
+    side: OrderSide,
+    order_type: OrderType,
+    quantity: Decimal,
+    price: Option<Decimal>,
+    #[serde(skip)]
+    tif: TimeInForce,
+    created_at: DateTime<Utc>,
+    status: OrderStatus,
+    filled_qty: Decimal,
+    avg_fill_price: Option<Decimal>,
+    filled_at: Option<DateTime<Utc>>,
+    reject_reason: Option<RejectReason>,
+}
+
+impl Order {
+    /// A new, `Initialized` row. `created_at` is the REST edge's own wall clock (this is the
+    /// I/O boundary, not a zero-I/O domain crate — AGENTS.md §2.5's no-clock rule binds
+    /// `honba-core`/`honba-kokoro`/`honba-mon`, not this crate).
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        order_id: impl Into<String>,
+        instrument_id: InstrumentId,
+        side: OrderSide,
+        order_type: OrderType,
+        quantity: Decimal,
+        price: Option<Decimal>,
+        tif: TimeInForce,
+        created_at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            order_id: order_id.into(),
+            instrument_id,
+            side,
+            order_type,
+            quantity,
+            price,
+            tif,
+            created_at,
+            status: OrderStatus::Initialized,
+            filled_qty: Decimal::ZERO,
+            avg_fill_price: None,
+            filled_at: None,
+            reject_reason: None,
+        }
+    }
+
+    /// The idempotency key this row is stored under.
+    pub fn order_id(&self) -> &str {
+        &self.order_id
+    }
+
+    /// The traded instrument.
+    pub fn instrument_id(&self) -> &InstrumentId {
+        &self.instrument_id
+    }
+
+    /// Buy or sell.
+    pub fn side(&self) -> OrderSide {
+        self.side
+    }
+
+    /// Market or limit.
+    pub fn order_type(&self) -> OrderType {
+        self.order_type
+    }
+
+    /// The requested quantity.
+    pub fn quantity(&self) -> Decimal {
+        self.quantity
+    }
+
+    /// The limit price, when this is a limit order.
+    pub fn price(&self) -> Option<Decimal> {
+        self.price
+    }
+
+    /// Time in force.
+    pub fn time_in_force(&self) -> TimeInForce {
+        self.tif
+    }
+
+    /// The row's current lifecycle status.
+    pub fn status(&self) -> OrderStatus {
+        self.status
+    }
+
+    /// Cumulative filled quantity.
+    pub fn filled_qty(&self) -> Decimal {
+        self.filled_qty
+    }
+
+    /// Quantity-weighted average fill price, once any quantity has filled.
+    pub fn avg_fill_price(&self) -> Option<Decimal> {
+        self.avg_fill_price
+    }
+
+    /// Event time of the latest fill that moved [`Order::filled_qty`].
+    pub fn filled_at(&self) -> Option<DateTime<Utc>> {
+        self.filled_at
+    }
+
+    /// The recorded refusal, if this row (or its remainder) was refused.
+    pub fn reject_reason(&self) -> Option<&RejectReason> {
+        self.reject_reason.as_ref()
+    }
+
+    /// Returns `self` with its status changed to `status`.
+    pub fn with_status(mut self, status: OrderStatus) -> Self {
+        self.status = status;
+        self
+    }
+
+    /// Returns `self` with `filled_qty`/`avg_fill_price` set.
+    pub fn with_fill(mut self, filled_qty: Decimal, avg_price: Decimal) -> Self {
+        self.filled_qty = filled_qty;
+        self.avg_fill_price = Some(avg_price);
+        self
+    }
+
+    /// Returns `self` with `filled_at` set.
+    pub fn with_filled_at(mut self, ts: DateTime<Utc>) -> Self {
+        self.filled_at = Some(ts);
+        self
+    }
+
+    /// Returns `self` carrying `reason` as its recorded refusal.
+    pub fn with_reject_reason(mut self, reason: RejectReason) -> Self {
+        self.reject_reason = Some(reason);
+        self
+    }
+
+    /// Returns `self` with no recorded refusal.
+    pub fn without_reject_reason(mut self) -> Self {
+        self.reject_reason = None;
+        self
+    }
 }
 
 /// The unsigned quantity row `order` can contribute to the position: the part already filled
 /// plus the part that may still fill (see [`OrderLedger::position`]).
-fn exposure(order: &honba_core::Order) -> Decimal {
+fn exposure(order: &Order) -> Decimal {
     let filled = order.filled_qty();
-    let remaining = (order.quantity().0 - filled).max(Decimal::ZERO());
+    let remaining = (order.quantity() - filled).max(Decimal::ZERO);
     match order.status() {
-        honba_core::OrderStatus::Filled => order.quantity().0.max(filled),
-        honba_core::OrderStatus::Submitted | honba_core::OrderStatus::Accepted => {
-            filled + remaining
-        }
-        honba_core::OrderStatus::PartiallyFilled
-            if order.reject_reason().is_none() =>
-        {
-            filled + remaining
-        }
+        OrderStatus::Filled => order.quantity().max(filled),
+        OrderStatus::Submitted | OrderStatus::Accepted => filled + remaining,
+        OrderStatus::PartiallyFilled if order.reject_reason().is_none() => filled + remaining,
         // A refused remainder, a cancelled/expired/rejected row: only what filled.
-        honba_core::OrderStatus::PartiallyFilled
-        | honba_core::OrderStatus::Cancelled
-        | honba_core::OrderStatus::Expired
-        | honba_core::OrderStatus::Rejected => filled,
-        _ => Decimal::ZERO(),
+        OrderStatus::PartiallyFilled
+        | OrderStatus::Cancelled
+        | OrderStatus::Expired
+        | OrderStatus::Rejected => filled,
+        OrderStatus::Initialized => Decimal::ZERO,
     }
 }
 
 /// The in-memory order store behind the write ledger (ADR 0019 decision 3).
 ///
-/// One row per client order id, in insertion order. The store starts empty and
-/// only records orders the risk stage approved. Rows are advanced by the embedded
-/// simulator (`Submitted` -> `Filled` / `Rejected`); no venue gateway is wired.
+/// One row per client order id, in insertion order. The store starts empty and only records
+/// orders the risk stage approved. Rows are advanced by the embedded simulator (`Submitted` ->
+/// `Filled` / `Rejected`); no venue gateway is wired.
 #[derive(Clone, Debug, Default)]
 pub struct OrderLedger {
     inner: Arc<Mutex<BTreeMap<String, Order>>>,
-    /// The full error envelope of every risk refusal recorded as a `Rejected` row, by order
-    /// id, so a repeat of the id answers with the same 422 (context included).
+    /// The full error envelope of every risk refusal recorded as a `Rejected` row, by order id,
+    /// so a repeat of the id answers with the same 422 (context included).
     refusals: Arc<Mutex<BTreeMap<String, ErrorDetail>>>,
 }
 
@@ -145,53 +331,44 @@ impl OrderLedger {
     ///
     /// Terminal rows (`Filled`, `Cancelled`, `Rejected`, `Expired`) are never changed.
     pub fn set_status(&self, order_id: &str, status: OrderStatus) -> bool {
-        let mut guard = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(row) = guard.get_mut(order_id) else {
             return false;
         };
-        if is_terminal(row.status()) {
+        if row.status().is_terminal() {
             return true;
         }
         *row = row.clone().with_status(status);
         true
     }
 
-    /// Books one fill on row `order_id`: `filled_qty` becomes the venue's cumulative `cum_qty`
-    /// (capped at the order quantity, never decreasing), `avg_fill_price` is the running
-    /// quantity-weighted average where each `cum_qty` increase is priced at the fill that
-    /// reported it, `filled_at` becomes that fill's event time `ts`, and the status becomes
-    /// `status`. A fill that completes the row
-    /// (`Filled`) clears any `reject_reason` recorded for a refused remainder.
+    /// Books one fill on row `order_id`: `filled_qty` becomes the simulator's cumulative
+    /// `cum_qty` (capped at the order quantity, never decreasing), `avg_fill_price` is the
+    /// running quantity-weighted average where each `cum_qty` increase is priced at the fill
+    /// that reported it, `filled_at` becomes that fill's event time `ts`, and the status
+    /// becomes `status`. A fill that completes the row (`Filled`) clears any `reject_reason`
+    /// recorded for a refused remainder.
     ///
     /// A terminal row is left untouched (as in [`OrderLedger::set_status`]); an unknown id
     /// returns `false`.
     pub fn apply_fill(
         &self,
         order_id: &str,
-        fill_qty: f64,
-        fill_price: f64,
-        cum_qty: f64,
-        ts: UnixNanos,
+        fill_qty: Decimal,
+        fill_price: Decimal,
+        cum_qty: Decimal,
+        ts: DateTime<Utc>,
         status: OrderStatus,
     ) -> bool {
-        let mut guard = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(row) = guard.get_mut(order_id) else {
             return false;
         };
-        if is_terminal(row.status()) {
+        if row.status().is_terminal() {
             return true;
         }
-        // A venue sending a non-finite or non-positive price/quantity must not poison the row
-        // (it would fail validation or serialization of `GET /orders`): drop such a fill.
-        if !(fill_price.is_finite() && fill_price > 0.0 && fill_qty.is_finite() && fill_qty > 0.0)
-            || !cum_qty.is_finite()
-        {
+        // A venue sending a non-positive price/quantity must not poison the row: drop it.
+        if fill_price <= Decimal::ZERO || fill_qty <= Decimal::ZERO || cum_qty < Decimal::ZERO {
             return true;
         }
         // The venue's cumulative quantity is the truth for how much has filled; fill sizes only
@@ -203,7 +380,7 @@ impl OrderLedger {
         let filled = cum_qty.min(row.quantity()).max(prev_qty);
         let delta = filled - prev_qty;
         let mut next = row.clone().with_status(status);
-        if delta > 0.0 {
+        if delta > Decimal::ZERO {
             let prev_avg = row.avg_fill_price().unwrap_or(fill_price);
             let avg = (prev_qty * prev_avg + delta * fill_price) / filled;
             next = next.with_fill(filled, avg).with_filled_at(ts);
@@ -219,18 +396,15 @@ impl OrderLedger {
 
     /// Records why the venue refused row `order_id` (or, after a partial fill, its remainder).
     ///
-    /// The reason is stored on every non-terminal row. A row with no fill becomes `Rejected`;
-    /// a `PartiallyFilled` row keeps its status (the filled part stays exposure). A terminal
-    /// row is left untouched; an unknown id returns `false`.
+    /// The reason is stored on every non-terminal row. A row with no fill becomes `Rejected`; a
+    /// `PartiallyFilled` row keeps its status (the filled part stays exposure). A terminal row
+    /// is left untouched; an unknown id returns `false`.
     pub fn reject(&self, order_id: &str, reason: RejectReason) -> bool {
-        let mut guard = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(row) = guard.get_mut(order_id) else {
             return false;
         };
-        if is_terminal(row.status()) {
+        if row.status().is_terminal() {
             return true;
         }
         let status = if row.status() == OrderStatus::PartiallyFilled {
@@ -244,16 +418,13 @@ impl OrderLedger {
 
     /// Records `order` under its id, replacing any earlier row with the same id.
     pub fn record(&self, order: Order) {
-        let mut guard = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         // A replaced row is no longer a recorded refusal.
         self.refusals
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(order.order_id().as_str());
-        guard.insert(order.order_id().as_str().to_owned(), order);
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(order.order_id());
+        guard.insert(order.order_id().to_owned(), order);
     }
 
     /// Records a risk-refused `order` as a `Rejected` row carrying `detail` as its
@@ -261,23 +432,17 @@ impl OrderLedger {
     ///
     /// An id that already has a row is left untouched (the first answer for a key stands).
     pub fn record_refusal(&self, order: Order, detail: ErrorDetail) {
-        let id = order.order_id().as_str().to_owned();
+        let id = order.order_id().to_owned();
         let row = order
             .with_status(OrderStatus::Rejected)
             .with_reject_reason(RejectReason::new(detail.code, detail.message.clone()));
         // Both maps change under both locks (always `inner` then `refusals`), so a concurrent
         // repeat never sees the row without its refusal.
-        let mut guard = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         if guard.contains_key(&id) {
             return;
         }
-        let mut refusals = self
-            .refusals
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut refusals = self.refusals.lock().unwrap_or_else(PoisonError::into_inner);
         refusals.insert(id.clone(), detail);
         guard.insert(id, row);
     }
@@ -286,36 +451,21 @@ impl OrderLedger {
     pub fn refusal(&self, order_id: &str) -> Option<ErrorDetail> {
         self.refusals
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap_or_else(PoisonError::into_inner)
             .get(order_id)
             .cloned()
     }
 
     /// Looks up one row by client order id.
     pub fn get(&self, order_id: &str) -> Option<Order> {
-        let guard = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         guard.get(order_id).cloned()
     }
 
-    /// Signed position of `instrument_id` implied by the ledger: buys positive, sells
-    /// negative, summed over each row's exposure ([`exposure`]).
-    ///
-    /// A row's exposure is what it has filled plus what may still fill: a working row
-    /// (`Submitted`, `Accepted`, `PartiallyFilled`) counts at its full quantity, the filled
-    /// part plus the remainder, a conservative upper bound which is the safe side for risk
-    /// rules. A `PartiallyFilled` row whose remainder the venue refused (it carries a
-    /// `reject_reason`) counts only what filled, as does a row that stopped working after a
-    /// partial fill (`Cancelled`, `Expired`, `Rejected`). A `Filled` row counts at its
-    /// quantity; a row that never filled and no longer works, and an `Initialized` row, add
-    /// nothing.
-    pub fn position(&self, instrument_id: &InstrumentId) -> f64 {
-        let guard = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+    /// Signed position of `instrument_id` implied by the ledger: buys positive, sells negative,
+    /// summed over each row's exposure ([`exposure`]).
+    pub fn position(&self, instrument_id: &InstrumentId) -> Decimal {
+        let guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         guard
             .values()
             .filter(|o| o.instrument_id() == instrument_id)
@@ -324,20 +474,16 @@ impl OrderLedger {
                 match o.side() {
                     OrderSide::Buy => qty,
                     OrderSide::Sell => -qty,
-                    _ => 0.0,
                 }
             })
             .sum()
     }
 
-    /// The non-zero signed position of every instrument in the ledger, in
-    /// instrument order (see [`OrderLedger::position`] for the netting rules).
-    pub fn positions(&self) -> Vec<(InstrumentId, f64)> {
+    /// The non-zero signed position of every instrument in the ledger, in instrument order (see
+    /// [`OrderLedger::position`] for the netting rules).
+    pub fn positions(&self) -> Vec<(InstrumentId, Decimal)> {
         let ids: std::collections::BTreeSet<InstrumentId> = {
-            let guard = self
-                .inner
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
             guard.values().map(|o| o.instrument_id().clone()).collect()
         };
         ids.into_iter()
@@ -345,16 +491,13 @@ impl OrderLedger {
                 let qty = self.position(&id);
                 (id, qty)
             })
-            .filter(|(_, qty)| qty.abs() > 1e-9)
+            .filter(|(_, qty)| !qty.is_zero())
             .collect()
     }
 
     /// Every row, oldest insertion first.
     pub fn list(&self) -> Vec<Order> {
-        let guard = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         guard.values().cloned().collect()
     }
 
@@ -363,24 +506,16 @@ impl OrderLedger {
     where
         F: Fn(&Order) -> bool,
     {
-        self.list()
-            .into_iter()
-            .filter(|order| filter(order))
-            .collect()
+        self.list().into_iter().filter(|order| filter(order)).collect()
     }
 
-    /// Marks the row `order_id` cancelled when it is still working (ADR 0019:
-    /// `CancelRequested` is illegal from `Initialized` and from terminal states).
+    /// Marks the row `order_id` cancelled when it is still working.
     ///
-    /// An `Initialized` row never left the submitter, so there is nothing to
-    /// cancel and it is left untouched (`false`); a row that is filled, already
-    /// cancelled, rejected or expired is terminal and is left untouched
-    /// (`false`); an unknown id is `None`.
+    /// An `Initialized` row never left the submitter, so there is nothing to cancel and it is
+    /// left untouched (`false`); a row that is filled, already cancelled, rejected or expired is
+    /// terminal and is left untouched (`false`); an unknown id is `None`.
     pub fn cancel(&self, order_id: &str) -> Option<bool> {
-        let mut guard = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         let row = guard.get_mut(order_id)?;
         if matches!(
             row.status(),
@@ -394,47 +529,86 @@ impl OrderLedger {
     }
 }
 
-/// Builds the order-gate [`RiskRequest`].
+/// Whether an order for `side`/`quantity` only reduces `position` (ADR 0018's reduce-only rule
+/// for `TradingState::Reducing`): a flat or same-direction order never reduces; an
+/// opposite-direction order reduces only up to the held size.
+fn reduces_position(position: Decimal, side: OrderSide, quantity: Decimal) -> bool {
+    match side {
+        OrderSide::Buy => position < Decimal::ZERO && quantity <= -position,
+        OrderSide::Sell => position > Decimal::ZERO && quantity <= position,
+    }
+}
+
+/// The operator trading-state refusal (ADR 0018 rules 1-2), checked before the instrument and
+/// `RiskEngine` rules, or `None` when the order may proceed to them.
+fn state_refusal(
+    state: honba_api::TradingState,
+    side: OrderSide,
+    quantity: Decimal,
+    position: Decimal,
+) -> Option<RiskRefusal> {
+    match state {
+        honba_api::TradingState::Active => None,
+        honba_api::TradingState::Halted => Some(RiskRefusal::GlobalHalted {
+            reason: "operator halted trading".to_string(),
+        }),
+        honba_api::TradingState::Reducing if reduces_position(position, side, quantity) => None,
+        honba_api::TradingState::Reducing => Some(RiskRefusal::ReduceOnlyViolation {
+            details: "platform is reduce-only; order must reduce an existing opposite position"
+                .to_string(),
+        }),
+    }
+}
+
+/// Runs the order-gate risk checks (ADR 0018 decision 7): the operator trading-state rule
+/// ([`state_refusal`]), then `honba-mon`'s pre-trade [`honba_mon::RiskEngine`] (structural
+/// validation, SEBI algo-id/OTR, price bands, quantity/notional/loss/rate limits). `now` for the
+/// engine is the instrument's latest quote event time (no wall clock inside the engine call), or
+/// the Unix epoch when there is no quote yet.
 ///
-/// * `position`: the signed ledger position of the instrument ([`OrderLedger::position`]).
-/// * `ts` / `last_feed_ts`: this crate has no clock (and domain code must not read the
-///   wall clock), so event time is the `ts_event` of the instrument's latest quote from
-///   the `QuoteReader`. With a quote both are that value (feed age 0); with none, `ts`
-///   is 0 and `last_feed_ts` is `None` (a staleness rule, if configured, then refuses).
-async fn risk_request(
+/// # Reduced scope vs. the pre-migration design
+///
+/// The original design additionally sourced per-instrument rules (lot size, tick size, circuit
+/// bands) from a market profile (`NullMarketProfile`/`ProfileRulesSource`) through a
+/// `RiskStage`/`RiskRequest`/`RiskDecision` facade. None of those three types exist in the
+/// current `honba-mon`; its real surface is `RiskEngine::{check_order, check_order_fast,
+/// check_decision}` with no market-profile rule-sourcing hook. Porting that layer back is a
+/// design addition to `honba-mon` itself (a different repo, out of this crate's migration
+/// scope), so this gate runs only `RiskEngine`'s own built-in checks.
+async fn check_risk(
     state: &AppState,
-    order_id: OrderId,
     instrument_id: &InstrumentId,
     side: OrderSide,
-    quantity: f64,
-    price: Option<f64>,
-    reference_price: Option<f64>,
-) -> RiskRequest {
-    let quote = match state.quotes.read_quote(instrument_id, None).await {
-        Ok(Some(quote)) => Some(quote),
-        _ => None,
-    };
-    let feed_ts = quote.as_ref().map(|q| q.ts_event());
-    // The touch a market order would cross: ask for a buy, bid for a sell (price collar).
-    let expected_price = quote.as_ref().map(|q| match side {
-        OrderSide::Buy => q.ask_price(),
-        _ => q.bid_price(),
-    });
-    RiskRequest {
-        order_id,
-        instrument_id: instrument_id.clone(),
-        side,
-        quantity,
-        price,
-        trigger_price: None,
-        reference_price,
-        expected_price,
-        adv: None,
-        position: state.orders.position(instrument_id),
-        trading_state: state.trading_state(),
-        ts: feed_ts.unwrap_or_else(|| UnixNanos::new(0)),
-        last_feed_ts: feed_ts,
+    quantity: Decimal,
+    price: Option<Decimal>,
+) -> Result<(), RiskRefusal> {
+    let position = state.orders.position(instrument_id);
+    if let Some(refusal) = state_refusal(state.trading_state(), side, quantity, position) {
+        return Err(refusal);
     }
+    let quote = state
+        .quotes
+        .read_quote(instrument_id, None)
+        .await
+        .ok()
+        .flatten();
+    let now = quote
+        .as_ref()
+        .map(|q| q.ts_event().to_datetime())
+        .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
+    let order_type = match price {
+        Some(px) => honba_core::OrderType::Limit(Price::new(px)),
+        None => honba_core::OrderType::Market,
+    };
+    let request = honba_core::OrderRequest::new(
+        instrument_id.clone(),
+        side,
+        order_type,
+        Quantity::new(quantity),
+        REST_ALGO_ID,
+    );
+    let mut engine = state.risk_engine.lock().unwrap_or_else(PoisonError::into_inner);
+    engine.check_order(&request, now)
 }
 
 fn invalid(message: impl Into<String>) -> ErrorDetail {
@@ -443,7 +617,7 @@ fn invalid(message: impl Into<String>) -> ErrorDetail {
 
 fn parse_order(
     req: &OrdersRequest,
-) -> Result<(InstrumentId, OrderSide, f64, Option<f64>), ErrorDetail> {
+) -> Result<(InstrumentId, OrderSide, Decimal, Option<Decimal>), ErrorDetail> {
     let instrument_id = req.instrument_id.clone().ok_or_else(|| {
         ErrorDetail::new(
             ErrorCode::ValidationInvalidRequest,
@@ -460,7 +634,7 @@ fn parse_order(
         }
     };
     let quantity = match req.qty {
-        Some(qty) if qty.is_finite() && qty > 0.0 => qty,
+        Some(qty) if qty > Decimal::ZERO => qty,
         other => {
             return Err(invalid(format!(
                 "orders need a positive qty, got {other:?}"
@@ -485,19 +659,25 @@ fn parse_order(
     Ok((instrument_id, side, quantity, price))
 }
 
-fn refusal_detail(refusal: &honba_mon::RiskRefusal) -> ErrorDetail {
-    ErrorDetail::new(
-        refusal.error_code(),
-        format!("order refused by risk: {}", refusal.rule()),
-    )
-    .with_context(refusal.context())
+/// The `ErrorCode` a `RiskRefusal` is reported under. Only `MaxNotionalExceeded` and
+/// `InvalidOrder` have a dedicated code in the current, deliberately small `ErrorCode` taxonomy
+/// (see `honba-ya-api/src/wire.rs`); every other refusal is a `Conflict` (the request conflicts
+/// with the platform's current risk/trading state).
+fn refusal_detail(refusal: &RiskRefusal) -> ErrorDetail {
+    let code = match refusal {
+        RiskRefusal::MaxNotionalExceeded { .. } => ErrorCode::RiskMaxNotionalExceeded,
+        RiskRefusal::InvalidOrder { .. } => ErrorCode::ValidationInvalidRequest,
+        _ => ErrorCode::Conflict,
+    };
+    ErrorDetail::new(code, format!("order refused by risk: {}", refusal.rule()))
+        .with_context(serde_json::to_value(refusal).unwrap_or(serde_json::Value::Null))
 }
 
 /// The 422 for a risk refusal. With `record` (the caller supplied the idempotency key) the
 /// refusal also becomes a `Rejected` ledger row, so `GET /orders` shows it and a repeat of the
 /// key replays this answer; the response itself is unchanged. A keyless refusal has no stable
 /// identity (the route placeholder key is shared) and is never recorded.
-fn refuse(state: &AppState, record: Option<Order>, refusal: &honba_mon::RiskRefusal) -> Response {
+fn refuse(state: &AppState, record: Option<Order>, refusal: &RiskRefusal) -> Response {
     let detail = refusal_detail(refusal);
     if let Some(order) = record {
         state.orders.record_refusal(order, detail.clone());
@@ -505,26 +685,21 @@ fn refuse(state: &AppState, record: Option<Order>, refusal: &honba_mon::RiskRefu
     failure(StatusCode::UNPROCESSABLE_ENTITY, detail)
 }
 
-/// Method call on the instrument master through the [`AppState`] handle.
+/// Instrument-master lookup through the [`AppState`] handle.
 async fn known_instrument(
     state: &AppState,
     instrument_id: &InstrumentId,
-) -> Result<Option<honba_entities::Instrument>, ErrorDetail> {
+) -> Result<Option<honba_feed::wire::Instrument>, ErrorDetail> {
     crate::market::master_get(state, instrument_id).await
 }
 
-/// Last-price lookup through the [`AppState`] quote handle.
-async fn last_price(state: &AppState, instrument_id: &InstrumentId) -> Option<f64> {
-    crate::market::quote_last(state, instrument_id).await
-}
-
-/// `Access::Write` (`POST /orders`): approval queue (E5-S4) -> risk stage -> gateway.
-/// An approved order is acknowledged with 200 and recorded in the write ledger
-/// (E11-S7, ADR 0019 decision 3).
+/// `Access::Write` (`POST /orders`): approval queue (E5-S4) -> risk stage -> simulator. An
+/// approved order is acknowledged with 200 and recorded in the write ledger (E11-S7, ADR 0019
+/// decision 3).
 ///
-/// The ledger keys every order by the caller's idempotency key: `client_order_id`
-/// when the body carries one, else the route-provided `order_id`. A repeat of a
-/// seen key is a duplicate no-op that answers with the first row.
+/// The ledger keys every order by the caller's idempotency key: `client_order_id` when the body
+/// carries one, else the route-provided `order_id`. A repeat of a seen key is a duplicate no-op
+/// that answers with the first row.
 pub(crate) async fn post_orders(
     State(state): State<Arc<AppState>>,
     crate::ApiJson(req): crate::ApiJson<OrdersRequest>,
@@ -536,36 +711,26 @@ pub(crate) async fn post_orders(
             return failure(StatusCode::UNPROCESSABLE_ENTITY, detail);
         }
     };
-    let instrument = match known_instrument(&state, &instrument_id).await {
-        Ok(instrument) => instrument,
+    // An unknown instrument is refused here, directly (ADR 0018 decision 4 rule 3), after the
+    // state rules 1-2 that `check_risk` runs first.
+    match known_instrument(&state, &instrument_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return failure(
+                StatusCode::NOT_FOUND,
+                ErrorDetail::new(
+                    ErrorCode::NotFound,
+                    format!("unknown instrument {instrument_id}"),
+                ),
+            );
+        }
         Err(detail) => {
             return failure(StatusCode::INTERNAL_SERVER_ERROR, detail);
         }
-    };
-    let reference_price = match last_price(&state, &instrument_id).await {
-        Some(px) => Some(px),
-        None => price,
-    };
-    let profile = Arc::new(NullMarketProfile::default());
-    // An unknown instrument contributes no rules, so the stage itself raises
-    // `InstrumentUnknown` at rule 3, after the state rules 1-2 (ADR 0018
-    // decision 4); resolving it here first would hoist rule 3 above them.
-    let mut stage = match RiskStage::new(
-        state.risk_limits.clone(),
-        state.account_currency,
-        Arc::new(ProfileRulesSource::new(profile, instrument)),
-    ) {
-        Ok(stage) => stage,
-        Err(e) => {
-            return failure(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-            );
-        }
-    };
+    }
 
-    // The caller's key when present, else the route's placeholder; a seen key
-    // short-circuits with the first row before the risk stage runs again.
+    // The caller's key when present, else the route's placeholder; a seen key short-circuits
+    // with the first row before the risk stage runs again.
     let ledger_id = req
         .client_order_id
         .as_deref()
@@ -597,19 +762,9 @@ pub(crate) async fn post_orders(
         });
     }
 
-    // No approval queue: proceed directly to risk stage
-    let request = risk_request(
-        &state,
-        ledger_id.clone(),
-        &instrument_id,
-        side,
-        quantity,
-        price,
-        reference_price,
-    )
-    .await;
-    match stage.check(&request) {
-        RiskDecision::Approved => {
+    // No approval queue: proceed directly to the risk stage.
+    match check_risk(&state, &instrument_id, side, quantity, price).await {
+        Ok(()) => {
             let order = Order::new(
                 ledger_id,
                 instrument_id,
@@ -618,17 +773,16 @@ pub(crate) async fn post_orders(
                 quantity,
                 price,
                 TimeInForce::Day,
-                UnixNanos::new(0),
-                UnixNanos::new(0),
+                Utc::now(),
             )
             .with_status(OrderStatus::Submitted);
             state.orders.record(order.clone());
             state.exec.submit(&state.orders, order.clone());
             success(order_json(
-                &state.orders.get(order.order_id().as_str()).unwrap_or(order),
+                &state.orders.get(order.order_id()).unwrap_or(order),
             ))
         }
-        RiskDecision::Refused(refusal) => {
+        Err(refusal) => {
             let record = req.client_order_id.as_ref().map(|_| {
                 Order::new(
                     ledger_id,
@@ -638,8 +792,7 @@ pub(crate) async fn post_orders(
                     quantity,
                     price,
                     TimeInForce::Day,
-                    UnixNanos::new(0),
-                    UnixNanos::new(0),
+                    Utc::now(),
                 )
             });
             refuse(&state, record, &refusal)
@@ -658,9 +811,15 @@ fn order_json(order: &Order) -> serde_json::Value {
     serde_json::to_value(order).unwrap_or(serde_json::Value::Null)
 }
 
-/// `GET /orders`: the orders the risk stage approved, oldest first, filtered by
-/// `symbol` and `exchange` when given. Unknown query keys are a 422, never
-/// silently ignored; the ledger starts empty.
+/// The ledger's rows, serialized under `"orders"`.
+#[derive(Serialize)]
+struct OrdersListResponse {
+    orders: Vec<Order>,
+}
+
+/// `GET /orders`: the orders the risk stage approved, oldest first, filtered by `symbol` and
+/// `exchange` when given. Unknown query keys are a 422, never silently ignored; the ledger
+/// starts empty.
 pub(crate) async fn get_orders(
     State(state): State<Arc<AppState>>,
     ApiQuery(query): ApiQuery<OrdersQuery>,
@@ -668,46 +827,43 @@ pub(crate) async fn get_orders(
     let orders = state.orders.filter(|order| {
         let symbol_ok = match query.symbol.as_deref() {
             None => true,
-            Some(symbol) => order.instrument_id().symbol() == symbol,
+            Some(symbol) => order.instrument_id().symbol == symbol,
         };
         let exchange_ok = match query.exchange.as_deref() {
             None => true,
-            Some(exchange) => order.instrument_id().exchange().as_str() == exchange,
+            Some(exchange) => order.instrument_id().exchange.as_str() == exchange,
         };
         symbol_ok && exchange_ok
     });
-    success(OrdersResponse { orders })
+    success(OrdersListResponse { orders })
 }
 
-/// `DELETE /orders/{id}` is never risk-checked and is allowed in every state,
-/// including halted: cancelling cannot add exposure. A working ledger row moves
-/// to `cancelled`; a terminal row and an unknown id keep their 200 answer so a
-/// repeated cancel stays a no-op, not an error.
+/// `DELETE /orders/{id}` is never risk-checked and is allowed in every state, including halted:
+/// cancelling cannot add exposure. A working ledger row moves to `cancelled`; a terminal row and
+/// an unknown id keep their 200 answer so a repeated cancel stays a no-op, not an error.
 pub(crate) async fn delete_order(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
     if state.orders.cancel(id.as_str()) == Some(true) {
-        state
-            .exec
-            .cancel(&state.orders, id.as_str(), UnixNanos::new(0));
+        state.exec.cancel(&state.orders, id.as_str());
     }
     success(serde_json::json!({"status": "cancelled"}))
 }
 
-/// `POST /positions/close`: for each instrument with a non-zero ledger position,
-/// a market order on the opposite side for the full net quantity, which can only
-/// reduce the position (so it passes the reduce-only state). Each order takes the
-/// `POST /orders` path: held in the approval queue when one is enabled, else risk
-/// checked and recorded; a refusal (for example a halted engine) is returned as is.
-/// A flat ledger generates nothing. The body is not read, so there is no filter.
+/// `POST /positions/close`: for each instrument with a non-zero ledger position, a market order
+/// on the opposite side for the full net quantity, which can only reduce the position (so it
+/// passes the reduce-only state). Each order takes the `POST /orders` path: held in the approval
+/// queue when one is enabled, else risk checked and recorded; a refusal (for example a halted
+/// engine) is returned as is. A flat ledger generates nothing. The body is not read, so there is
+/// no filter.
 pub(crate) async fn post_close_positions(State(state): State<Arc<AppState>>) -> Response {
     for (instrument_id, net) in state.orders.positions() {
-        let side = if net > 0.0 { "sell" } else { "buy" };
+        let side = if net > Decimal::ZERO { "sell" } else { "buy" };
         let key = format!(
             "close-{}.{}-{}",
-            instrument_id.symbol(),
-            instrument_id.exchange(),
+            instrument_id.symbol,
+            instrument_id.exchange,
             state.orders.list().len()
         );
         let req = OrdersRequest {
@@ -723,8 +879,7 @@ pub(crate) async fn post_close_positions(State(state): State<Arc<AppState>>) -> 
             if let Err(detail) = queue.enqueue(key.clone(), req) {
                 return failure(StatusCode::TOO_MANY_REQUESTS, detail);
             }
-        } else if let Err(response) = gate_and_record(&state, &req, key.clone(), false).await
-        {
+        } else if let Err(response) = gate_and_record(&state, &req, key.clone(), false).await {
             return response;
         }
     }
@@ -745,9 +900,9 @@ pub(crate) async fn get_approval_queue(State(state): State<Arc<AppState>>) -> Re
 pub(crate) async fn post_approve_order(State(state): State<Arc<AppState>>) -> Response {
     if let Some(queue) = &state.approval_queue {
         if let Some(req) = queue.approve_oldest() {
-            // Re-process the approved order through the risk stage BYPASSING the queue.
-            // The queued row keeps the caller's idempotency key (ADR 0019 decision 3),
-            // so approval records under the same key the client first sent.
+            // Re-process the approved order through the risk stage BYPASSING the queue. The
+            // queued row keeps the caller's idempotency key (ADR 0019 decision 3), so approval
+            // records under the same key the client first sent.
             let order_id = req
                 .client_order_id
                 .as_deref()
@@ -784,8 +939,8 @@ async fn post_orders_direct(
     }
 }
 
-/// Runs the risk stage for `req` and, when approved, records the order in the ledger.
-/// With `record_refusal` a refusal is also recorded as a `Rejected` row (see [`refuse`]).
+/// Runs the risk stage for `req` and, when approved, records the order in the ledger. With
+/// `record_refusal` a refusal is also recorded as a `Rejected` row (see [`refuse`]).
 async fn gate_and_record(
     state: &AppState,
     req: &OrdersRequest,
@@ -794,37 +949,21 @@ async fn gate_and_record(
 ) -> Result<Order, Response> {
     let (instrument_id, side, quantity, price) =
         parse_order(req).map_err(|detail| failure(StatusCode::UNPROCESSABLE_ENTITY, detail))?;
-    let instrument = known_instrument(state, &instrument_id)
-        .await
-        .map_err(|detail| failure(StatusCode::INTERNAL_SERVER_ERROR, detail))?;
-    let reference_price = match last_price(state, &instrument_id).await {
-        Some(px) => Some(px),
-        None => price,
-    };
-    let profile = Arc::new(NullMarketProfile::default());
-    let mut stage = RiskStage::new(
-        state.risk_limits.clone(),
-        state.account_currency,
-        Arc::new(ProfileRulesSource::new(profile, instrument)),
-    )
-    .map_err(|e| {
-        failure(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            ErrorDetail::new(ErrorCode::InternalError, e.to_string()),
-        )
-    })?;
-    let request = risk_request(
-        state,
-        order_id.clone(),
-        &instrument_id,
-        side,
-        quantity,
-        price,
-        reference_price,
-    )
-    .await;
-    match stage.check(&request) {
-        RiskDecision::Approved => {
+    match known_instrument(state, &instrument_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return Err(failure(
+                StatusCode::NOT_FOUND,
+                ErrorDetail::new(
+                    ErrorCode::NotFound,
+                    format!("unknown instrument {instrument_id}"),
+                ),
+            ));
+        }
+        Err(detail) => return Err(failure(StatusCode::INTERNAL_SERVER_ERROR, detail)),
+    }
+    match check_risk(state, &instrument_id, side, quantity, price).await {
+        Ok(()) => {
             let order = Order::new(
                 order_id,
                 instrument_id,
@@ -833,15 +972,14 @@ async fn gate_and_record(
                 quantity,
                 price,
                 TimeInForce::Day,
-                UnixNanos::new(0),
-                UnixNanos::new(0),
+                Utc::now(),
             )
             .with_status(OrderStatus::Submitted);
             state.orders.record(order.clone());
             state.exec.submit(&state.orders, order.clone());
-            Ok(state.orders.get(order.order_id().as_str()).unwrap_or(order))
+            Ok(state.orders.get(order.order_id()).unwrap_or(order))
         }
-        RiskDecision::Refused(refusal) => {
+        Err(refusal) => {
             let record = record_refusal.then(|| {
                 Order::new(
                     order_id,
@@ -851,8 +989,7 @@ async fn gate_and_record(
                     quantity,
                     price,
                     TimeInForce::Day,
-                    UnixNanos::new(0),
-                    UnixNanos::new(0),
+                    Utc::now(),
                 )
             });
             Err(refuse(state, record, &refusal))

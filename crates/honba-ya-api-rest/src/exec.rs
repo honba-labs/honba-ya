@@ -1,196 +1,183 @@
-//! The execution gateway behind the order routes (ADR 0016, E3-S7).
+//! The embedded execution simulator behind the order routes (ADR 0016, E3-S7).
 //!
-//! A risk-approved order is recorded in the [`OrderLedger`] as `Submitted` and handed to an
-//! [`ExecutionVenue`]. The default venue is the embedded [`NextOpenSim`], which fills market
-//! orders at the open of the instrument's first bar in a later session, so a fill needs the
-//! market to advance: the composition root (or a test) pushes bars with
-//! [`AppState::advance_market`]. Whatever the venue, each [`ExecutionEvent`] it drains updates
-//! the matching ledger row (`Filled`, `PartiallyFilled`, `Rejected`, `Cancelled`) through one
-//! mapping, and terminal rows never change. Event time is the venue's own; nothing here reads
-//! the wall clock, and the simulator is seeded, so a replay books the same fills.
+//! A risk-approved order is recorded in the [`OrderLedger`] as `Submitted` and handed to
+//! [`ExecGateway`]'s [`NextOpenSim`]. It fills market orders at the open of the instrument's
+//! first bar in a later session, so a fill needs the market to advance: the composition root
+//! (or a test) pushes bars with [`AppState::advance_market`](crate::AppState::advance_market).
+//! Event time is the bar's own `timestamp`; nothing here reads the wall clock.
 //!
-//! Why a crate-local trait and not `honba_ports::ExecutionGateway`: the ports trait is async,
-//! takes `&mut self` and only reports fills (`next_fill`), so it cannot carry the rejections and
-//! cancels the ledger needs, and the sync handlers here hold a std mutex across the call. The
-//! sync `honba_engine::ExecutionEngine` already speaks `ExecutionEvent` and `NextOpenSim`
-//! implements it, so [`ExecutionVenue`] only extends it with the market hook. A venue backed
-//! by the async port is bridged by [`GatewayVenue`](crate::GatewayVenue): a task owns the gateway,
-//! the sync calls only enqueue commands, and its answers come back as events (ADR 0030).
+//! Scope: market orders only. A limit order is refused (`unsupported_order_type`) and its
+//! ledger row becomes `Rejected`. The simulator is long-only (it tracks its own simulated
+//! holding per instrument, independent of the ledger's signed position), so a sell beyond what
+//! it has simulated as bought is `Rejected` (`no_position`). No real broker gateway is wired
+//! into `honba serve` (E3-S7).
 //!
-//! Scope: the default simulator handles market orders only. A limit order is refused by it
-//! (`unsupported_order_type`) and its ledger row becomes `Rejected`; the row's
-//! `reject_reason` is `order_rejected` with the simulator's text as the message. The simulator is long-only, so a sell with no
-//! simulated position is `Rejected` (`no_position`). No real broker gateway is wired into `honba serve` (E3-S7).
+//! # Rebuilt on this migration, not a rename
+//!
+//! This used to wrap `honba_sim::NextOpenSim` behind a crate-local `ExecutionVenue` trait
+//! extending `honba_engine::ExecutionEngine`, dispatching `honba_entities::ExecutionEvent`
+//! (`Fill`/`Rejected`/`Cancelled` variants carrying their own instrument/side/quantity) into the
+//! ledger. `honba_engine`, `honba_sim` and `honba_entities` are gone from the workspace with no
+//! successor (`honba-ya-backtest::sim` only absorbed part of `honba-ya-sim` — it has no
+//! `NextOpenSim`-equivalent bar-driven market-order simulator), and `honba_core::ExecutionEvent`
+//! is a different, much leaner cross-subsystem audit event (`Submitted`/`RiskRefused`/
+//! `Order(OrderEvent)`) with no `Fill`/`Rejected`/`Cancelled` variants carrying their own
+//! instrument/side/quantity. There was also a second, dead implementor of the old
+//! `ExecutionVenue` trait (`GatewayVenue`, bridging to an async execution-gateway port) that
+//! nothing in this crate ever constructed — see the removed `gateway_venue.rs`'s history for
+//! that gap, which this migration pass did not attempt to restore since it was unreachable.
+//!
+//! So this file is now a small, self-contained simulator built directly on `honba_core` types
+//! (`Bar`, `Price`, `Quantity`) and this crate's own ledger row (`crate::orders::Order`), with
+//! no generic venue trait at all (there is only ever one simulator; a generic trait added
+//! complexity for a second implementor that was never reachable).
 
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
 
-use honba_engine::{ExecutionEngine, Result as EngineResult};
-use honba_entities::{Currency, ExecutionEvent, Money};
 use honba_api::{ErrorCode, ErrorDetail};
-use honba_core::{Bar, OrderStatus};
-use honba_sim::NextOpenSim;
-
-// NOTE: `Order` and `RejectReason` here are the old honba_messages shapes (a rich,
-// stateful order-ledger `Order` with `.order_id()`/`.with_status()`/etc., and a
-// `RejectReason::new(code, message)` free-form rejection). Neither has a current
-// equivalent: honba_core::OrderRequest is a flat DTO with no such API, and
-// honba_core::order::RejectReason is a closed 3-variant enum
-// (ExchangeRejected/Expired/InsufficientMargin) with no `::new(ErrorCode, String)`
-// constructor. This file (and the missing `honba_engine`/`honba_sim` crates it
-// depends on) needs a dedicated redesign beyond this honba_messages migration;
-// left as `Order`/`RejectReason` so the single remaining blocker is visibly the
-// missing engine/sim crates, not a silently-wrong type substitution.
+use honba_core::rust_decimal::Decimal;
+use honba_core::{Bar, InstrumentId, OrderSide};
 
 use crate::OrderLedger;
+use crate::orders::{Order, OrderStatus, OrderType, RejectReason};
 
-/// Starting cash of the default simulator, in minor units (10 billion INR in paise).
-const DEFAULT_CASH_MINOR: i64 = 1_000_000_000_000;
-
-/// A venue the order routes can submit to and cancel on: an [`ExecutionEngine`] that may also
-/// react to market bars.
-///
-/// `on_bar` defaults to a no-op, for a venue driven by its own feed; such a venue's events are
-/// drained on every [`AppState::advance_market`](crate::AppState::advance_market) call (with or without bars).
-pub trait ExecutionVenue: ExecutionEngine + 'static {
-    /// Feeds one market bar (ascending event time). An out-of-order bar is an error.
-    fn on_bar(&mut self, _bar: &Bar) -> EngineResult<()> {
-        Ok(())
-    }
+/// One order the simulator is holding, keyed by its ledger order id.
+struct Working {
+    instrument_id: InstrumentId,
+    side: OrderSide,
+    quantity: Decimal,
 }
 
-impl ExecutionVenue for NextOpenSim {
-    fn on_bar(&mut self, bar: &Bar) -> EngineResult<()> {
-        NextOpenSim::on_bar(self, bar)
-    }
+/// A simple bar-driven market-order simulator: a market order fills in full at the open of the
+/// next bar seen for its instrument. Long-only: tracks its own simulated holding per instrument
+/// (independent of the ledger's own signed position), and refuses a sell beyond it.
+#[derive(Default)]
+pub struct NextOpenSim {
+    working: HashMap<String, Working>,
+    holdings: HashMap<InstrumentId, Decimal>,
 }
 
-/// Shared handle on the execution venue.
-#[derive(Clone)]
-pub(crate) struct ExecGateway {
-    sim: Arc<Mutex<Box<dyn ExecutionVenue>>>,
-}
-
-impl ExecGateway {
-    pub(crate) fn new(venue: impl ExecutionVenue) -> Self {
-        Self {
-            sim: Arc::new(Mutex::new(Box::new(venue))),
-        }
+impl NextOpenSim {
+    /// A simulator with nothing working and no simulated holdings.
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub(crate) fn default_sim() -> Self {
-        let sim = NextOpenSim::new(Money::new(DEFAULT_CASH_MINOR, Currency::Inr))
-            .expect("non-negative cash");
-        Self::new(sim)
-    }
-
-    /// Hands `order` to the simulator and applies any immediate event (a rejection).
-    pub(crate) fn submit(&self, ledger: &OrderLedger, order: Order) {
-        let mut sim = self
-            .sim
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Err(e) = sim.submit(order.clone()) {
-            tracing::warn!(order = %order.order_id(), error = %e, "venue refused submit");
+    /// Accepts `order` as working, or immediately rejects it onto `ledger` (a non-market order,
+    /// or a sell beyond the simulated holding).
+    fn submit(&mut self, ledger: &OrderLedger, order: &Order) {
+        if order.order_type() != OrderType::Market {
             ledger.reject(
-                order.order_id().as_str(),
-                RejectReason::new(ErrorCode::Conflict, e.to_string()),
+                order.order_id(),
+                RejectReason::new(
+                    ErrorCode::NotImplemented,
+                    "unsupported_order_type: only market orders are simulated",
+                ),
             );
             return;
         }
-        apply(sim.as_mut(), ledger);
-    }
-
-    /// Feeds `bars` (ascending event time) to the simulator and applies its events.
-    pub(crate) fn advance(&self, ledger: &OrderLedger, bars: &[Bar]) -> Result<(), ErrorDetail> {
-        let mut sim = self
-            .sim
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut result = Ok(());
-        for bar in bars {
-            if let Err(e) = sim.on_bar(bar) {
-                result = Err(ErrorDetail::new(ErrorCode::InternalError, e.to_string()));
-                break;
-            }
-        }
-        apply(sim.as_mut(), ledger);
-        result
-    }
-
-    /// Withdraws a working order from the venue (the ledger row is cancelled by the caller; any
-    /// event the venue reports meanwhile goes through the ledger's terminal-row rule).
-    pub(crate) fn cancel(
-        &self,
-        ledger: &OrderLedger,
-        order_id: &str,
-        ts: chrono::DateTime<chrono::Utc>,
-    ) {
-        let mut sim = self
-            .sim
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let _ = sim.cancel(order_id, ts);
-        apply(sim.as_mut(), ledger);
-    }
-}
-
-/// The ledger's [`RejectReason`] for a venue's free-form rejection `reason`.
-///
-/// A reason that is an `ErrorCode` wire string (the pre-gate refusals) keeps that code with a
-/// stock description. `<code>: <text>` (the [`GatewayVenue`](crate::GatewayVenue), which carries
-/// the broker's own words) keeps the code and puts the text in the message. Anything else (a
-/// simulator text such as `no_position`) is an `order_rejected` carrying the text as the message.
-fn reject_reason(reason: &str) -> RejectReason {
-    let code_of =
-        |s: &str| serde_json::from_value::<ErrorCode>(serde_json::Value::String(s.to_owned())).ok();
-    if let Some(code) = code_of(reason) {
-        return RejectReason::new(code, format!("venue refused the order ({code})"));
-    }
-    if let Some((head, text)) = reason.split_once(": ") {
-        if let Some(code) = code_of(head) {
-            return RejectReason::new(code, text);
-        }
-    }
-    RejectReason::new(ErrorCode::Conflict, reason)
-}
-
-/// Drains the venue's events into ledger status changes.
-fn apply(sim: &mut dyn ExecutionVenue, ledger: &OrderLedger) {
-    let events = sim.drain_events().unwrap_or_default();
-    for event in events {
-        match event {
-            ExecutionEvent::Fill {
-                trade,
-                cum_qty,
-                complete,
-                ..
-            } => {
-                let status = if complete {
-                    OrderStatus::Filled
-                } else {
-                    OrderStatus::PartiallyFilled
-                };
-                ledger.apply_fill(
-                    trade.order_id().as_str(),
-                    trade.quantity(),
-                    trade.price(),
-                    cum_qty,
-                    trade.ts_event(),
-                    status,
+        if order.side() == OrderSide::Sell {
+            let held = self
+                .holdings
+                .get(order.instrument_id())
+                .copied()
+                .unwrap_or(Decimal::ZERO);
+            if held < order.quantity() {
+                ledger.reject(
+                    order.order_id(),
+                    RejectReason::new(
+                        ErrorCode::Conflict,
+                        "no_position: the simulator is long-only",
+                    ),
                 );
+                return;
             }
-            ExecutionEvent::Rejected {
-                order_id, reason, ..
-            } => {
-                tracing::info!(order = %order_id, %reason, "venue rejected order");
-                // The remainder of a partial fill is also reported as a rejection; the
-                // filled part stays exposure, so that row keeps `PartiallyFilled`.
-                ledger.reject(order_id.as_str(), reject_reason(&reason));
-            }
-            ExecutionEvent::Cancelled { order_id, .. } => {
-                ledger.set_status(order_id.as_str(), OrderStatus::Cancelled);
-            }
-            _ => {}
         }
+        self.working.insert(
+            order.order_id().to_owned(),
+            Working {
+                instrument_id: order.instrument_id().clone(),
+                side: order.side(),
+                quantity: order.quantity(),
+            },
+        );
+    }
+
+    /// Fills every working order on `bar.instrument` in full, at `bar.open`.
+    fn on_bar(&mut self, ledger: &OrderLedger, bar: &Bar) {
+        let matching: Vec<String> = self
+            .working
+            .iter()
+            .filter(|(_, w)| w.instrument_id == bar.instrument)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for order_id in matching {
+            let Some(w) = self.working.remove(&order_id) else {
+                continue;
+            };
+            let signed = match w.side {
+                OrderSide::Buy => w.quantity,
+                OrderSide::Sell => -w.quantity,
+            };
+            let entry = self.holdings.entry(w.instrument_id).or_insert(Decimal::ZERO);
+            *entry += signed;
+            ledger.apply_fill(
+                &order_id,
+                w.quantity,
+                bar.open.0,
+                w.quantity,
+                bar.timestamp,
+                OrderStatus::Filled,
+            );
+        }
+    }
+
+    /// Drops `order_id` from the working set, if present.
+    fn cancel(&mut self, order_id: &str) {
+        self.working.remove(order_id);
+    }
+}
+
+/// Shared handle on the embedded simulator.
+#[derive(Clone)]
+pub(crate) struct ExecGateway {
+    sim: Arc<Mutex<NextOpenSim>>,
+}
+
+impl ExecGateway {
+    /// Wraps `sim` behind a shared, lockable handle.
+    pub(crate) fn new(sim: NextOpenSim) -> Self {
+        Self {
+            sim: Arc::new(Mutex::new(sim)),
+        }
+    }
+
+    /// A fresh simulator with nothing working and no simulated holdings.
+    pub(crate) fn default_sim() -> Self {
+        Self::new(NextOpenSim::new())
+    }
+
+    /// Hands `order` to the simulator; a rejection (unsupported type, or `no_position`) is
+    /// applied to `ledger` immediately.
+    pub(crate) fn submit(&self, ledger: &OrderLedger, order: Order) {
+        let mut sim = self.sim.lock().unwrap_or_else(PoisonError::into_inner);
+        sim.submit(ledger, &order);
+    }
+
+    /// Feeds `bars` (ascending event time) to the simulator and applies any resulting fills.
+    pub(crate) fn advance(&self, ledger: &OrderLedger, bars: &[Bar]) -> Result<(), ErrorDetail> {
+        let mut sim = self.sim.lock().unwrap_or_else(PoisonError::into_inner);
+        for bar in bars {
+            sim.on_bar(ledger, bar);
+        }
+        Ok(())
+    }
+
+    /// Withdraws a working order from the simulator (the ledger row's own cancellation is the
+    /// caller's job; see `orders::delete_order`).
+    pub(crate) fn cancel(&self, _ledger: &OrderLedger, order_id: &str) {
+        let mut sim = self.sim.lock().unwrap_or_else(PoisonError::into_inner);
+        sim.cancel(order_id);
     }
 }
