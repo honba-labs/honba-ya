@@ -1,78 +1,62 @@
-//! A venue gateway injected with `AppState::with_execution_gateway` receives the submit and
-//! cancel calls of every order route, and the events it emits move ledger rows through the
-//! same status mapping as the simulator (E3-S7). Terminal rows never change.
+//! The REST order routes against the real embedded `NextOpenSim` (ADR 0016, E3-S7).
+//!
+//! # Rebuilt on this migration, not a rename
+//!
+//! This used to inject a crate-local `ExecutionVenue` trait object via
+//! `AppState::with_execution_gateway` — a `Fake` test double recording `submit`/`cancel` calls,
+//! and an `L2Venue` wrapping `honba_sim::L2Sim` — so the order-route plumbing could be tested
+//! independently of whatever venue was behind it, including synthetic partial fills and
+//! depth-level matching. `exec.rs`'s module doc explains why none of that survives: there is no
+//! generic venue trait any more (only one concrete simulator, `NextOpenSim`, built directly on
+//! `honba_core` types with no injectable seam), and `honba_sim` is gone from the workspace with
+//! no L2 successor.
+//!
+//! `tests/orders_exec.rs` already covers the straightforward submit/fill/reject paths through
+//! the real simulator, so this file keeps only what that one doesn't: that a cancel actually
+//! withdraws the order from the simulator's own working set (not just flips the ledger's status
+//! label), and that `/positions/close` reaches the simulator with a second, real order.
+//!
+//! Dropped outright, with no replacement, because `NextOpenSim` has nothing equivalent to
+//! exercise:
+//! - `gateway_events_update_ledger_status`,
+//!   `partial_fills_update_filled_qty_and_the_average_incrementally`, and
+//!   `a_rejected_remainder_after_a_partial_fill_keeps_the_fill_and_records_why` drove the `Fake`
+//!   venue with hand-built `ExecutionEvent`s (arbitrary partial fills, arbitrary rejection
+//!   strings). `NextOpenSim` only ever fills a market order in full, at the next bar's open, and
+//!   only ever rejects with its own two fixed reasons (`unsupported_order_type`, `no_position`);
+//!   there is no way to make it report a partial fill or an arbitrary rejection, so nothing
+//!   equivalent can be exercised.
+//! - `venue_rejections_carry_the_code_when_the_reason_is_one_else_order_rejected` tested the old
+//!   async gateway's string-reason-to-`ErrorCode` fallback mapping. `NextOpenSim` sets its own
+//!   `ErrorCode` directly when it rejects (see `exec.rs::submit`); there is no string-to-code
+//!   mapping step left anywhere on this path.
+//! - `l2sim_partial_fills_report_cumulative_qty_and_the_weighted_average` tested
+//!   `honba_sim::L2Sim`'s depth-level partial fills directly. `honba_sim` is gone with no
+//!   successor.
 
-use std::sync::{Arc, Mutex};
-
-use axum::Router;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use honba_api_rest::{AppState, ExecutionVenue, api_router_with};
-use honba_engine::{ExecutionEngine, Result};
-use honba_entities::{Currency, ExecutionEvent, Instrument, InstrumentKind, Trade};
+use honba_api_rest::{AppState, api_router_with};
+use honba_core::{Currency, InstrumentKind};
+use honba_feed::wire::{Instrument, UnixNanos};
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
-use honba_messages::{Order, OrderId, OrderSide, UnixNanos};
+use honba_testing::fixtures::{any_instrument, flat_bar};
 use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
-#[derive(Default)]
-struct Shared {
-    calls: Vec<String>,
-    pending: Vec<ExecutionEvent>,
-}
-
-struct Fake(Arc<Mutex<Shared>>);
-
-impl ExecutionEngine for Fake {
-    fn submit(&mut self, order: Order) -> Result<()> {
-        self.0
-            .lock()
-            .unwrap()
-            .calls
-            .push(format!("submit:{}", order.order_id()));
-        Ok(())
-    }
-    fn cancel(&mut self, order_id: &str, _now: UnixNanos) -> Result<()> {
-        self.0
-            .lock()
-            .unwrap()
-            .calls
-            .push(format!("cancel:{order_id}"));
-        Ok(())
-    }
-    fn native_events(&self) -> bool {
-        true
-    }
-    fn drain_events(&mut self) -> Result<Vec<ExecutionEvent>> {
-        Ok(std::mem::take(&mut self.0.lock().unwrap().pending))
-    }
-    fn drain_fills(&mut self) -> Result<Vec<Trade>> {
-        Ok(Vec::new())
-    }
-}
-
-impl ExecutionVenue for Fake {}
-
-fn iid() -> honba_messages::InstrumentId {
-    honba_messages::InstrumentId::new("X", honba_messages::Exchange::new("NSE"))
-}
-
-fn state() -> (AppState, Arc<Mutex<Shared>>) {
-    let id = iid();
+fn state() -> AppState {
+    let id = any_instrument();
     let spec = honba_api::parse_timeframe("1m").unwrap();
     let mut builder = ColumnarSliceBuilder::new(id.clone(), spec);
     builder
-        .push(UnixNanos::new(1), 100.0, 100.0, 100.0, 100.0, 1.0)
+        .push(UnixNanos::from_u64(1), 100.0, 100.0, 100.0, 100.0, 1.0)
         .unwrap();
     let dataset = Dataset::from_slices(vec![builder.finish().unwrap()]).unwrap();
     let instrument = Instrument::new(id, InstrumentKind::Equity, Currency::Inr, 25.0, 0.05);
-    let shared = Arc::new(Mutex::new(Shared::default()));
-    let st = AppState::from_reader(DatasetReader::new(dataset, vec![instrument]))
-        .with_execution_gateway(Fake(shared.clone()));
-    (st, shared)
+    AppState::from_reader(DatasetReader::new(dataset, vec![instrument]))
 }
 
-async fn call(app: Router, method: Method, uri: &str, body: Option<Value>) -> StatusCode {
+async fn call(st: &AppState, method: Method, uri: &str, body: Option<Value>) -> StatusCode {
     let mut builder = Request::builder().method(method).uri(uri);
     let body = match body {
         Some(value) => {
@@ -81,7 +65,8 @@ async fn call(app: Router, method: Method, uri: &str, body: Option<Value>) -> St
         }
         None => Body::empty(),
     };
-    app.oneshot(builder.body(body).unwrap())
+    api_router_with(st.clone())
+        .oneshot(builder.body(body).unwrap())
         .await
         .unwrap()
         .status()
@@ -94,364 +79,61 @@ fn order(side: &str, qty: f64, id: &str) -> Value {
     })
 }
 
-fn status_of(state: &AppState, id: &str) -> String {
-    serde_json::to_value(state.orders.get(id).unwrap()).unwrap()["status"]
+fn status_of(st: &AppState, id: &str) -> String {
+    serde_json::to_value(st.orders.get(id).unwrap()).unwrap()["status"]
         .as_str()
         .unwrap()
         .to_owned()
 }
 
-fn calls(shared: &Arc<Mutex<Shared>>) -> Vec<String> {
-    shared.lock().unwrap().calls.clone()
-}
-
-fn fill_event(id: &str, qty: f64, cum: f64, complete: bool) -> ExecutionEvent {
-    let t = UnixNanos::from_u64(5);
-    ExecutionEvent::Fill {
-        trade: Trade::new(
-            OrderId::new(id),
-            iid(),
-            OrderSide::Buy,
-            qty,
-            100.0,
-            Currency::Inr,
-            t,
-            t,
-        ),
-        cum_qty: cum,
-        complete,
-        venue_order_id: None,
-    }
-}
-
 #[tokio::test]
-async fn post_orders_submits_to_the_injected_gateway() {
-    let (st, shared) = state();
-    let s = call(
-        api_router_with(st.clone()),
-        Method::POST,
-        "/orders",
-        Some(order("buy", 25.0, "o1")),
-    )
-    .await;
-    assert_eq!(s, StatusCode::OK);
-    assert_eq!(calls(&shared), vec!["submit:o1"]);
-    assert_eq!(status_of(&st, "o1"), "submitted");
-}
-
-#[tokio::test]
-async fn approval_approve_submits_to_the_injected_gateway() {
-    let (st, shared) = state();
-    let st = st.with_approval_queue(10);
-    call(
-        api_router_with(st.clone()),
-        Method::POST,
-        "/orders",
-        Some(order("buy", 25.0, "q1")),
-    )
-    .await;
-    assert!(calls(&shared).is_empty());
-    call(
-        api_router_with(st.clone()),
-        Method::POST,
-        "/approval/approve",
-        None,
-    )
-    .await;
-    assert_eq!(calls(&shared), vec!["submit:q1"]);
-}
-
-#[tokio::test]
-async fn delete_order_cancels_on_the_injected_gateway() {
-    let (st, shared) = state();
-    call(
-        api_router_with(st.clone()),
-        Method::POST,
-        "/orders",
-        Some(order("buy", 25.0, "o1")),
-    )
-    .await;
-    call(
-        api_router_with(st.clone()),
-        Method::DELETE,
-        "/orders/o1",
-        None,
-    )
-    .await;
-    assert_eq!(calls(&shared), vec!["submit:o1", "cancel:o1"]);
-    assert_eq!(status_of(&st, "o1"), "cancelled");
-}
-
-#[tokio::test]
-async fn close_positions_submits_the_closing_order() {
-    let (st, shared) = state();
-    call(
-        api_router_with(st.clone()),
-        Method::POST,
-        "/orders",
-        Some(order("buy", 25.0, "o1")),
-    )
-    .await;
-    shared
-        .lock()
-        .unwrap()
-        .pending
-        .push(fill_event("o1", 25.0, 25.0, true));
-    st.advance_market(&[]).unwrap();
-    assert_eq!(status_of(&st, "o1"), "filled");
-    call(
-        api_router_with(st.clone()),
-        Method::POST,
-        "/positions/close",
-        None,
-    )
-    .await;
-    let c = calls(&shared);
-    assert_eq!(c.len(), 2, "{c:?}");
-    assert!(c[1].starts_with("submit:"));
-}
-
-#[tokio::test]
-async fn gateway_events_update_ledger_status() {
-    let (st, shared) = state();
-    for id in ["f", "p", "r", "c"] {
-        call(
-            api_router_with(st.clone()),
-            Method::POST,
-            "/orders",
-            Some(order("buy", 25.0, id)),
-        )
-        .await;
-    }
-    let t = UnixNanos::from_u64(5);
-    {
-        let mut s = shared.lock().unwrap();
-        s.pending.push(fill_event("f", 25.0, 25.0, true));
-        s.pending.push(fill_event("p", 10.0, 10.0, false));
-        s.pending.push(ExecutionEvent::Rejected {
-            order_id: OrderId::new("r"),
-            instrument_id: iid(),
-            side: OrderSide::Buy,
-            quantity: 25.0,
-            reason: "venue said no".into(),
-            venue_order_id: None,
-            ts: t,
-        });
-        s.pending.push(ExecutionEvent::Cancelled {
-            order_id: OrderId::new("c"),
-            instrument_id: iid(),
-            side: OrderSide::Buy,
-            quantity: 25.0,
-            venue_order_id: None,
-            ts: t,
-        });
-        // A late event for a terminal row must not change it.
-        s.pending.push(fill_event("r", 25.0, 25.0, true));
-    }
-    st.advance_market(&[]).unwrap();
-    assert_eq!(status_of(&st, "f"), "filled");
-    assert_eq!(status_of(&st, "p"), "partially_filled");
-    assert_eq!(status_of(&st, "r"), "rejected");
-    assert_eq!(status_of(&st, "c"), "cancelled");
-}
-
-fn priced_fill(id: &str, qty: f64, px: f64, cum: f64, complete: bool) -> ExecutionEvent {
-    let t = UnixNanos::from_u64(5);
-    ExecutionEvent::Fill {
-        trade: Trade::new(
-            OrderId::new(id),
-            iid(),
-            OrderSide::Buy,
-            qty,
-            px,
-            Currency::Inr,
-            t,
-            t,
-        ),
-        cum_qty: cum,
-        complete,
-        venue_order_id: None,
-    }
-}
-
-fn row(st: &AppState, id: &str) -> Value {
-    serde_json::to_value(st.orders.get(id).unwrap()).unwrap()
-}
-
-#[tokio::test]
-async fn partial_fills_update_filled_qty_and_the_average_incrementally() {
-    let (st, shared) = state();
-    call(
-        api_router_with(st.clone()),
-        Method::POST,
-        "/orders",
-        Some(order("buy", 50.0, "p")),
-    )
-    .await;
-    shared
-        .lock()
-        .unwrap()
-        .pending
-        .push(priced_fill("p", 20.0, 100.0, 20.0, false));
-    st.advance_market(&[]).unwrap();
-    let r = row(&st, "p");
-    assert_eq!(r["status"], "partially_filled");
-    assert_eq!(r["filled_qty"], 20.0);
-    assert_eq!(r["avg_fill_price"], 100.0);
-
-    shared
-        .lock()
-        .unwrap()
-        .pending
-        .push(priced_fill("p", 30.0, 103.0, 50.0, true));
-    st.advance_market(&[]).unwrap();
-    let r = row(&st, "p");
-    assert_eq!(r["status"], "filled");
-    assert_eq!(r["filled_qty"], 50.0);
-    let avg = r["avg_fill_price"].as_f64().unwrap();
-    assert!(
-        (avg - (20.0 * 100.0 + 30.0 * 103.0) / 50.0).abs() < 1e-9,
-        "{avg}"
-    );
-
-    // A late fill on a terminal row changes nothing.
-    shared
-        .lock()
-        .unwrap()
-        .pending
-        .push(priced_fill("p", 5.0, 500.0, 55.0, true));
-    st.advance_market(&[]).unwrap();
-    assert_eq!(row(&st, "p")["filled_qty"], 50.0);
-}
-
-#[tokio::test]
-async fn venue_rejections_carry_the_code_when_the_reason_is_one_else_order_rejected() {
-    let (st, shared) = state();
-    for id in ["r1", "r2"] {
-        call(
-            api_router_with(st.clone()),
-            Method::POST,
-            "/orders",
-            Some(order("buy", 25.0, id)),
-        )
-        .await;
-    }
-    let t = UnixNanos::from_u64(5);
-    for (id, reason) in [
-        ("r1", "order_execution_unavailable"),
-        ("r2", "venue said no"),
-    ] {
-        shared
-            .lock()
-            .unwrap()
-            .pending
-            .push(ExecutionEvent::Rejected {
-                order_id: OrderId::new(id),
-                instrument_id: iid(),
-                side: OrderSide::Buy,
-                quantity: 25.0,
-                reason: reason.into(),
-                venue_order_id: None,
-                ts: t,
-            });
-    }
-    st.advance_market(&[]).unwrap();
+async fn delete_order_withdraws_it_from_the_simulators_working_set() {
+    let st = state();
     assert_eq!(
-        row(&st, "r1")["reject_reason"]["code"],
-        "order_execution_unavailable"
+        call(&st, Method::POST, "/orders", Some(order("buy", 25.0, "o1"))).await,
+        StatusCode::OK
     );
-    let r2 = row(&st, "r2");
-    assert_eq!(r2["reject_reason"]["code"], "order_rejected");
-    assert_eq!(r2["reject_reason"]["message"], "venue said no");
+    assert_eq!(status_of(&st, "o1"), "submitted");
+
+    assert_eq!(call(&st, Method::DELETE, "/orders/o1", None).await, StatusCode::OK);
+    assert_eq!(status_of(&st, "o1"), "cancelled");
+
+    // If the cancel only flipped the ledger's label and left the order working in the
+    // simulator, this bar would fill it. It must not: the row stays cancelled (terminal, so
+    // `apply_fill` is a no-op) and the ledger's position stays flat.
+    st.advance_market(&[flat_bar("X", 101.0, 1_000)]).unwrap();
+    assert_eq!(status_of(&st, "o1"), "cancelled");
+    assert!(st.orders.positions().is_empty());
 }
 
 #[tokio::test]
-async fn a_rejected_remainder_after_a_partial_fill_keeps_the_fill_and_records_why() {
-    let (st, shared) = state();
-    call(
-        api_router_with(st.clone()),
-        Method::POST,
-        "/orders",
-        Some(order("buy", 50.0, "q")),
-    )
-    .await;
-    shared.lock().unwrap().pending.extend([
-        priced_fill("q", 20.0, 100.0, 20.0, false),
-        ExecutionEvent::Rejected {
-            order_id: OrderId::new("q"),
-            instrument_id: iid(),
-            side: OrderSide::Buy,
-            quantity: 30.0,
-            reason: "insufficient_funds".into(),
-            venue_order_id: None,
-            ts: UnixNanos::from_u64(6),
-        },
-    ]);
-    st.advance_market(&[]).unwrap();
-    let r = row(&st, "q");
-    assert_eq!(r["status"], "partially_filled");
-    assert_eq!(r["filled_qty"], 20.0);
-    assert_eq!(r["reject_reason"]["code"], "order_rejected");
-    assert_eq!(r["reject_reason"]["message"], "insufficient_funds");
-}
+async fn close_positions_reaches_the_simulator_with_a_second_real_order() {
+    let st = state();
+    call(&st, Method::POST, "/orders", Some(order("buy", 25.0, "o1"))).await;
+    st.advance_market(&[flat_bar("X", 101.0, 1_000)]).unwrap();
+    assert_eq!(status_of(&st, "o1"), "filled");
 
-/// `L2Sim` behind the ledger: its top-of-book partial fills book incrementally.
-struct L2Venue(Arc<Mutex<honba_sim::L2Sim>>);
+    assert_eq!(
+        call(&st, Method::POST, "/positions/close", None).await,
+        StatusCode::OK
+    );
 
-impl ExecutionEngine for L2Venue {
-    fn submit(&mut self, order: Order) -> Result<()> {
-        self.0.lock().unwrap().submit(order)
-    }
-    fn cancel(&mut self, order_id: &str, now: UnixNanos) -> Result<()> {
-        self.0.lock().unwrap().cancel(order_id, now)
-    }
-    fn native_events(&self) -> bool {
-        true
-    }
-    fn drain_events(&mut self) -> Result<Vec<ExecutionEvent>> {
-        self.0.lock().unwrap().drain_events()
-    }
-    fn drain_fills(&mut self) -> Result<Vec<Trade>> {
-        Ok(Vec::new())
-    }
-}
+    // The close order is submitted to the simulator at once (not merely queued): one more row,
+    // already working.
+    let rows = st.orders.list();
+    assert_eq!(rows.len(), 2, "the closing order is recorded alongside o1");
+    let closing_submitted = rows
+        .iter()
+        .any(|o| serde_json::to_value(o).unwrap()["status"] == "submitted");
+    assert!(closing_submitted, "the closing order reached the simulator");
 
-impl ExecutionVenue for L2Venue {}
-
-#[tokio::test]
-async fn l2sim_partial_fills_report_cumulative_qty_and_the_weighted_average() {
-    use honba_messages::QuoteTick;
-    let sim = Arc::new(Mutex::new(
-        honba_sim::L2Sim::new(honba_entities::Money::new(1_000_000_000_000, Currency::Inr))
-            .unwrap(),
-    ));
-    let quote = |ask: f64, asz: f64, ts: u64| {
-        let t = UnixNanos::from_u64(ts);
-        sim.lock()
-            .unwrap()
-            .on_quote(&QuoteTick::new(iid(), ask - 2.0, ask, 100.0, asz, t, t))
-            .unwrap();
-    };
-    let (st, _) = state();
-    let st = st.with_execution_gateway(L2Venue(sim.clone()));
-    quote(101.0, 25.0, 1);
-    call(
-        api_router_with(st.clone()),
-        Method::POST,
-        "/orders",
-        Some(order("buy", 50.0, "l2")),
-    )
-    .await;
-    st.advance_market(&[]).unwrap();
-    let r = row(&st, "l2");
-    assert_eq!(r["status"], "partially_filled");
-    assert_eq!(r["filled_qty"], 25.0);
-    assert_eq!(r["avg_fill_price"], 101.0);
-
-    quote(103.0, 100.0, 3);
-    st.advance_market(&[]).unwrap();
-    let r = row(&st, "l2");
-    assert_eq!(r["status"], "filled");
-    assert_eq!(r["filled_qty"], 50.0);
-    assert_eq!(r["avg_fill_price"], 102.0);
+    // Once that order fills too, the ledger's position is flat again.
+    st.advance_market(&[flat_bar("X", 103.0, 2_000)]).unwrap();
+    assert!(st.orders.positions().is_empty());
+    assert!(
+        st.orders
+            .list()
+            .iter()
+            .all(|o| serde_json::to_value(o).unwrap()["status"] == "filled")
+    );
 }
