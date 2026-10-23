@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use honba_api::parse_timeframe;
-use honba_api::wire::BarSpecification;
+use honba_api::wire::{BarAggregation, BarSpecification, PriceType};
 use honba_core::{Exchange, InstrumentId};
 use honba_feed::wire::Bar;
 use honba_feed::{
@@ -24,6 +24,33 @@ use honba_feed::{
 };
 use honba_feed::ports::{BarReader, BarRequest, PortError, PortResult};
 use thiserror::Error;
+
+/// Converts the REST contract's bar specification (`honba_api::wire`, this crate's own
+/// catalog-timeframe vocabulary — see [`load_catalog`]/[`parse_timeframe`]) to
+/// `honba-me-feed`'s own `BarSpecification`, right at the boundary where this file calls
+/// into that crate's Parquet readers ([`ColumnarSliceBuilder::new`], [`ParquetBarSource`])
+/// and compares against [`BarRequest::spec`]. `parse_timeframe` only ever produces
+/// `PriceType::Last`, so the catalog never actually exercises the `Open`/`High`/`Low`
+/// fallback below; `honba-me-feed`'s bar engine has no price-type for them (only
+/// `Last`/`Bid`/`Ask`/`Mid`).
+fn to_feed_spec(spec: BarSpecification) -> honba_feed::wire::BarSpecification {
+    let aggregation = match spec.aggregation() {
+        BarAggregation::Second => honba_feed::wire::BarAggregation::Second,
+        BarAggregation::Minute => honba_feed::wire::BarAggregation::Minute,
+        BarAggregation::Hour => honba_feed::wire::BarAggregation::Hour,
+        BarAggregation::Day => honba_feed::wire::BarAggregation::Day,
+        BarAggregation::Week => honba_feed::wire::BarAggregation::Week,
+        BarAggregation::Month => honba_feed::wire::BarAggregation::Month,
+    };
+    let price_type = match spec.price_type() {
+        PriceType::Last => honba_feed::wire::PriceType::Last,
+        PriceType::Bid => honba_feed::wire::PriceType::Bid,
+        PriceType::Ask => honba_feed::wire::PriceType::Ask,
+        PriceType::Open | PriceType::High | PriceType::Low => honba_feed::wire::PriceType::Last,
+    };
+    let step = u32::try_from(spec.step()).unwrap_or(u32::MAX);
+    honba_feed::wire::BarSpecification::new(step, aggregation, price_type)
+}
 
 /// The directory under a data root that holds the bar catalog.
 pub const CATALOG_DIR: &str = "catalog";
@@ -72,7 +99,7 @@ impl CatalogBars {
 impl BarReader for CatalogBars {
     async fn read_bars(&self, request: &BarRequest) -> PortResult<Vec<Bar>> {
         let found = self.timeframes.iter().find(|(spec, _, dataset)| {
-            *spec == request.spec() && dataset.slice(request.instrument()).is_some()
+            to_feed_spec(*spec) == request.spec() && dataset.slice(request.instrument()).is_some()
         });
         match found {
             Some((_, reader, _)) => reader.read_bars(request).await,
@@ -139,10 +166,11 @@ fn read_symbol(
         .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "parquet"))
         .collect::<Vec<_>>();
     parts.sort();
-    let mut builder = ColumnarSliceBuilder::new(id.clone(), spec);
+    let feed_spec = to_feed_spec(spec);
+    let mut builder = ColumnarSliceBuilder::new(id.clone(), feed_spec);
     let mut last = None;
     for path in parts {
-        let part = ParquetBarSource::with_spec(&path, id.clone(), spec)
+        let part = ParquetBarSource::with_spec(&path, id.clone(), feed_spec)
             .columnar()
             .map_err(|source| CatalogLoadError::Parquet {
                 path: path.clone(),
