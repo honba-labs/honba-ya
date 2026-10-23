@@ -33,7 +33,7 @@ use thiserror::Error;
 /// `PriceType::Last`, so the catalog never actually exercises the `Open`/`High`/`Low`
 /// fallback below; `honba-me-feed`'s bar engine has no price-type for them (only
 /// `Last`/`Bid`/`Ask`/`Mid`).
-fn to_feed_spec(spec: BarSpecification) -> honba_feed::wire::BarSpecification {
+pub(crate) fn to_feed_spec(spec: BarSpecification) -> honba_feed::wire::BarSpecification {
     let aggregation = match spec.aggregation() {
         BarAggregation::Second => honba_feed::wire::BarAggregation::Second,
         BarAggregation::Minute => honba_feed::wire::BarAggregation::Minute,

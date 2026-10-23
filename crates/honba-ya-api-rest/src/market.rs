@@ -19,10 +19,73 @@ use honba_api::{
     ErrorDetail, InstrumentsQuery, InstrumentsResponse, QuotesQuery, QuotesResponse,
     ResponseEnvelope, instrument_json, parse_instrument_id,
 };
+use honba_core::rust_decimal::Decimal;
 use honba_feed::ports::{BarRequest, PortError};
+use honba_feed::wire::UnixNanos;
 use serde::de::DeserializeOwned;
 
 use crate::AppState;
+
+/// Converts `honba-feed`'s own instrument-kind vocabulary (really just
+/// `honba_core::InstrumentKind`, reused as-is by that crate's `Instrument`) to the richer,
+/// REST-contract `honba_api::wire::InstrumentKind`. Every `honba_core` variant has a direct
+/// match; the wire enum's extra variants (`Etf`, `Bond`, `Ipo`, `Fx`, `MutualFund`, `Other`)
+/// have no `honba_core` source today and so are never produced here.
+fn to_api_kind(kind: honba_core::InstrumentKind) -> honba_api::wire::InstrumentKind {
+    match kind {
+        honba_core::InstrumentKind::Equity => honba_api::wire::InstrumentKind::Equity,
+        honba_core::InstrumentKind::Future => honba_api::wire::InstrumentKind::Future,
+        honba_core::InstrumentKind::Option => honba_api::wire::InstrumentKind::Option,
+        honba_core::InstrumentKind::Index => honba_api::wire::InstrumentKind::Index,
+    }
+}
+
+/// Converts a `honba-feed` reference-data record (this crate's instrument master port still
+/// answers in that shape; see `state.rs`'s module doc) to the `honba_api::wire::Instrument`
+/// read model `GET /instruments` actually serializes. `lot_size`/`tick_size` are `f64` on the
+/// feed side (its Parquet catalog predates `Decimal`) and `Decimal` on the wire, so they are
+/// converted at this one JSON-response boundary, not threaded through as `f64`.
+fn to_api_instrument(instrument: &honba_feed::wire::Instrument) -> honba_api::wire::Instrument {
+    honba_api::wire::Instrument::new(
+        instrument.id().clone(),
+        to_api_kind(instrument.kind()),
+        instrument.currency(),
+        Decimal::from_f64_retain(instrument.lot_size()).unwrap_or_default(),
+        Decimal::from_f64_retain(instrument.tick_size()).unwrap_or_default(),
+    )
+}
+
+/// Converts a `honba-feed` quote (`f64`-valued, dual `UnixNanos` timestamps) to the
+/// `honba_api::wire::QuoteTick` `GET /quotes` serializes (`Decimal`-valued,
+/// `chrono::DateTime<Utc>`), at the JSON-response boundary.
+fn to_api_quote(quote: honba_feed::wire::QuoteTick) -> honba_api::wire::QuoteTick {
+    honba_api::wire::QuoteTick::new(
+        quote.instrument_id().clone(),
+        Decimal::from_f64_retain(quote.bid_price()).unwrap_or_default(),
+        Decimal::from_f64_retain(quote.ask_price()).unwrap_or_default(),
+        Decimal::from_f64_retain(quote.bid_size()).unwrap_or_default(),
+        Decimal::from_f64_retain(quote.ask_size()).unwrap_or_default(),
+        quote.ts_event().to_datetime(),
+        quote.ts_init().to_datetime(),
+    )
+}
+
+/// Converts a `honba-feed` bar (`f64`-valued, dual `UnixNanos` timestamps) to the canonical
+/// `honba_core::Bar` that `BarsResponse` serializes directly (ADR: the REST bars contract
+/// reuses the domain `Bar`, not a separate wire copy), at the JSON-response boundary.
+fn to_core_bar(bar: honba_feed::wire::Bar) -> honba_core::Bar {
+    honba_core::Bar {
+        instrument: bar.bar_type().instrument_id().clone(),
+        open: honba_core::Price::new(Decimal::from_f64_retain(bar.open()).unwrap_or_default()),
+        high: honba_core::Price::new(Decimal::from_f64_retain(bar.high()).unwrap_or_default()),
+        low: honba_core::Price::new(Decimal::from_f64_retain(bar.low()).unwrap_or_default()),
+        close: honba_core::Price::new(Decimal::from_f64_retain(bar.close()).unwrap_or_default()),
+        volume: honba_core::Quantity::new(
+            Decimal::from_f64_retain(bar.volume()).unwrap_or_default(),
+        ),
+        timestamp: bar.ts_event().to_datetime(),
+    }
+}
 
 /// Query-string extractor whose rejections are the standard error envelope
 /// (`validation_invalid_request`, status 422) rather than axum's plain text.
@@ -161,7 +224,7 @@ pub(crate) async fn get_instruments(
             let instruments = all
                 .iter()
                 .filter(|instrument| query.matches(instrument.id()))
-                .map(instrument_json)
+                .map(|instrument| instrument_json(&to_api_instrument(instrument)))
                 .collect();
             success(InstrumentsResponse { instruments })
         }
@@ -179,7 +242,7 @@ pub(crate) async fn get_instrument_by_id(
         Err(detail) => return unprocessable(detail),
     };
     match state.instruments.get_instrument(&id).await {
-        Ok(Some(instrument)) => success(instrument_json(&instrument)),
+        Ok(Some(instrument)) => success(instrument_json(&to_api_instrument(&instrument))),
         Ok(None) => instrument_not_found(&id),
         Err(error) => port_failure(error),
     }
@@ -204,13 +267,20 @@ pub(crate) async fn get_bars(
         Ok(None) => return instrument_not_found(&id),
         Err(error) => return port_failure(error),
     }
-    let request = match BarRequest::new(id, resolved.spec, resolved.from, resolved.to) {
+    let request = match BarRequest::new(
+        id,
+        crate::catalog::to_feed_spec(resolved.spec),
+        resolved.from.map(UnixNanos::from_datetime),
+        resolved.to.map(UnixNanos::from_datetime),
+    ) {
         Ok(request) => request,
         Err(error) => return port_failure(error),
     };
     match state.bars.read_bars(&request).await {
         Ok(bars) => match check_row_cap(bars.len(), MAX_BAR_ROWS) {
-            Ok(()) => success(BarsResponse { bars }),
+            Ok(()) => success(BarsResponse {
+                bars: bars.into_iter().map(to_core_bar).collect(),
+            }),
             Err(detail) => unprocessable(detail),
         },
         Err(error) => port_failure(error),
@@ -240,7 +310,7 @@ pub(crate) async fn get_quotes(
     for symbol in &resolved.symbols {
         let before = wanted.len();
         wanted.extend(known.iter().map(|instrument| instrument.id()).filter(|id| {
-            id.symbol() == symbol && resolved.venue.as_ref().map_or(true, |v| id.exchange() == v)
+            id.symbol == *symbol && resolved.venue.as_ref().map_or(true, |v| id.exchange == *v)
         }));
         if wanted.len() == before {
             return failure(
@@ -256,8 +326,12 @@ pub(crate) async fn get_quotes(
     wanted.dedup();
     let mut quotes = Vec::with_capacity(wanted.len());
     for id in wanted {
-        match state.quotes.read_quote(id, resolved.as_of).await {
-            Ok(Some(quote)) => quotes.push(quote),
+        match state
+            .quotes
+            .read_quote(id, resolved.as_of.map(UnixNanos::from_datetime))
+            .await
+        {
+            Ok(Some(quote)) => quotes.push(to_api_quote(quote)),
             Ok(None) => {
                 return failure(
                     StatusCode::NOT_FOUND,
@@ -297,7 +371,10 @@ pub(crate) async fn get_depth(
             let side = |levels: Vec<(f64, f64)>| {
                 levels
                     .into_iter()
-                    .map(|(price, qty)| DepthLevel { price, qty })
+                    .map(|(price, qty)| DepthLevel {
+                        price: Decimal::from_f64_retain(price).unwrap_or_default(),
+                        qty: Decimal::from_f64_retain(qty).unwrap_or_default(),
+                    })
                     .collect()
             };
             success(DepthResponse {
