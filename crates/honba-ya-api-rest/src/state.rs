@@ -83,6 +83,9 @@ pub struct AppState {
     /// [`AppState::start_bar_ingest`] (or [`AppState::attach_bar_ingest`]) and again after
     /// [`AppState::stop_bar_ingest`]. Shared by every clone of the state.
     pub(crate) bar_ingest: Arc<Mutex<Option<tokio::sync::mpsc::Sender<honba_core::Bar>>>>,
+    /// Broadcast channel for live market ticks from MarketDataActor.
+    /// Zero-polling WebSocket gateway subscribers clone this receiver directly.
+    pub market_data_broadcast_tx: Option<tokio::sync::broadcast::Sender<honba_core::Tick>>,
 }
 
 impl AppState {
@@ -117,7 +120,19 @@ impl AppState {
             ticks: None,
             execution: honba_config::ExecutionConfig::default(),
             bar_ingest: Arc::default(),
+            market_data_broadcast_tx: None,
         }
+    }
+
+    /// Attach the live market data broadcast channel from MarketDataActor / Supervisor.
+    pub fn with_market_data_broadcast(mut self, tx: tokio::sync::broadcast::Sender<honba_core::Tick>) -> Self {
+        self.market_data_broadcast_tx = Some(tx);
+        self
+    }
+
+    /// Subscribe to the live market data broadcast stream if attached.
+    pub fn subscribe_market_data(&self) -> Option<tokio::sync::broadcast::Receiver<honba_core::Tick>> {
+        self.market_data_broadcast_tx.as_ref().map(|tx| tx.subscribe())
     }
 
     /// The writable live-quote store `quotes` reads, if this state has one.

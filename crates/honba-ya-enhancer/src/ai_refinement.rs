@@ -1,11 +1,11 @@
 //! Closed-Loop AI Strategy Refinement Integration.
 
-use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
-use honba_core::Tick;
 use honba_actors::Strategy;
-use honba_nou::prompt_replayer::ReplayDecision;
+use honba_core::Tick;
+use rust_decimal::Decimal;
 
 /// Diagnostic report from strategy backtest, fed into the AI refinement loop.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,48 +51,38 @@ pub fn refine_strategy_with_ai(diagnostic: &StrategyDiagnostic) -> Vec<String> {
 
     // Analyze diagnostics and generate targeted prompt mutations
     if diagnostic.sharpe < 1.0 {
-        mutations.push(
-            "Reduce position sizes by 50% and extend holding period".to_string(),
-        );
+        mutations.push("Reduce position sizes by 50% and extend holding period".to_string());
     }
 
     if diagnostic.max_drawdown_pct > 10.0 {
-        mutations.push(
-            "Implement stricter risk limits: max drawdown 5% per trade".to_string(),
-        );
+        mutations.push("Implement stricter risk limits: max drawdown 5% per trade".to_string());
     }
 
-    if diagnostic.winning_trades as f64 / diagnostic.total_trades.max(1) as f64 < 0.4 {
-        mutations.push(
-            "Revise entry signal: add filter for trending market regime".to_string(),
-        );
+    if (diagnostic.winning_trades as f64) / (diagnostic.total_trades.max(1) as f64) < 0.4 {
+        mutations.push("Revise entry signal: add filter for trending market regime".to_string());
     }
 
     if diagnostic.pbo.unwrap_or(0.0) > 0.5 {
-        mutations.push(
-            "Increase out-of-sample validation period; reduce overfitting risk".to_string(),
-        );
+        mutations
+            .push("Increase out-of-sample validation period; reduce overfitting risk".to_string());
     }
 
     if diagnostic.dsr.unwrap_or(3.0) < 2.0 {
         mutations.push(
-            "Apply DSR adjustment; reduce Sharpe-based optimism in parameter tuning"
-                .to_string(),
+            "Apply DSR adjustment; reduce Sharpe-based optimism in parameter tuning".to_string(),
         );
     }
 
     if diagnostic.parameter_sensitivity.is_empty() {
         mutations.push(
-            "Conduct parameter sensitivity analysis; identify most influential params"
-                .to_string(),
+            "Conduct parameter sensitivity analysis; identify most influential params".to_string(),
         );
     }
 
     // Always include at least one mutation if diagnostics indicate improvement needed
     if mutations.is_empty() {
         mutations.push(
-            "Fine-tune entry/exit thresholds by 0.5% for incremental improvement"
-                .to_string(),
+            "Fine-tune entry/exit thresholds by 0.5% for incremental improvement".to_string(),
         );
     }
 
@@ -140,11 +130,16 @@ pub fn run_closed_loop_refinement(
 }
 
 fn evaluate_strategy_diagnostic(strategy: &dyn Strategy, data: &[Tick]) -> StrategyDiagnostic {
+    let _ = strategy;
     let total_trades = data.len();
     let winning_trades = data
         .iter()
-        .filter(|&t| t.price.0 > 0.0) // placeholder: winning trade condition
+        .filter(|t| match t {
+            Tick::Ltp { price, .. } => price.0 > Decimal::ZERO,
+            _ => true,
+        })
         .count();
+    let losing_trades = total_trades.saturating_sub(winning_trades);
 
     let total_fees: f64 = 0.0; // placeholder: compute from actual fills
     let profit_factor: f64 = 1.0; // placeholder: gross / net
@@ -156,10 +151,7 @@ fn evaluate_strategy_diagnostic(strategy: &dyn Strategy, data: &[Tick]) -> Strat
     let pbo: Option<f64> = None; // placeholder: PBO computation
 
     let parameter_sensitivity = BTreeMap::new();
-    let observed_regimes = vec![
-        "trending".to_string(),
-        "range-bound".to_string(),
-    ];
+    let observed_regimes = vec!["trending".to_string(), "range-bound".to_string()];
     let suggested_prompt_mutations = Vec::new();
 
     StrategyDiagnostic {
@@ -169,6 +161,7 @@ fn evaluate_strategy_diagnostic(strategy: &dyn Strategy, data: &[Tick]) -> Strat
         max_drawdown_pct,
         total_trades,
         winning_trades,
+        losing_trades,
         total_fees,
         profit_factor,
         wfe,

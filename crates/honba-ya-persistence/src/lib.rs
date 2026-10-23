@@ -14,6 +14,7 @@ pub mod messages;
 pub mod migrations;
 pub mod orders;
 pub mod positions;
+pub mod traders;
 
 pub use audit::{AuditError, AuditLedgerRecord, SqliteAuditLedger};
 pub use decisions::{sha256_hex, DecisionStore, DecisionStoreError, PersistedDecision};
@@ -22,6 +23,14 @@ pub use messages::RiskBreachEvent;
 pub use migrations::{migrate, rollback_last, MigrationError};
 pub use orders::{OrderStore, OrderStoreError, PersistedOrder};
 pub use positions::{PersistedPosition, PersistedPositionLot, PositionStore, PositionStoreError};
+pub use traders::{PersistedTrader, TraderStore, TraderStoreError};
+
+/// Explicit repository type aliases matching the system architecture.
+pub type OrderRepository = OrderStore;
+pub type FillRepository = FillStore;
+pub type PositionRepository = PositionStore;
+pub type DecisionRepository = DecisionStore;
+pub type TraderRepository = TraderStore;
 
 use sqlx::postgres::PgPoolOptions;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};

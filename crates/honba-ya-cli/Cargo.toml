@@ -1,28 +1,30 @@
 [package]
 name = "honba-ya-cli"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Command-line interface for the Honba platform (docs/archive/plan.md E0-S7)"
 
 [[bin]]
 name = "honba"
 path = "src/main.rs"
-doc = false
 
 [dependencies]
-# CLI + error handling
-clap   = { version = "4", features = ["derive"] }
-anyhow = "1"
+clap                  = { workspace = true, features = ["derive", "env"] }
+tracing               = { workspace = true }
+tracing-subscriber    = { workspace = true, features = ["env-filter"] }
+serde                 = { workspace = true, features = ["derive"] }
+serde_json            = { workspace = true }
+toml                  = { workspace = true }
+anyhow                = { workspace = true }
 
-# Config parsing (backtest.rs)
-serde       = { version = "1", features = ["derive"] }
-serde_json  = "1"
-toml        = "0.8"
-
-# Internal honba-ya crates
-honba-ya-api-rest.workspace = true
-honba-ya-config.workspace = true
-honba-ya-testing.workspace = true
+# Workspace crates
+honba-config.workspace = true
+honba-ya-actors.workspace = true
 honba-ya-backtest.workspace = true
+honba-ya-api-rest.workspace = true
 
 # Cross-workspace crates
 honba-api.workspace = true
@@ -32,7 +34,7 @@ honba-portfolio.workspace = true
 honba-me-market.workspace = true
 honba-me-feed.workspace = true
 honba-nou-analytics.workspace = true
-honba-nou-strategy.workspace = true
+honba-strategy.workspace = true
 honba-tamashii-codegen.workspace = true
 
 tokio                 = { version = "1", features = ["rt-multi-thread", "net", "signal"] }

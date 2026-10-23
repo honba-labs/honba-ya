@@ -198,3 +198,125 @@ async fn test_risk_actor_blocks_out_of_band_orders() {
     risk_tx.send(RiskMsg::Shutdown).await.unwrap();
     let _ = tokio::join!(risk_handle, exec_handle);
 }
+
+#[tokio::test]
+async fn test_market_data_backpressure_policies() {
+    let inst = InstrumentId::new(Exchange::Nse, "INFY");
+    let (md_tx, md_rx) = mpsc::channel(64);
+    let (strat_tx, mut strat_rx) = mpsc::channel(64);
+
+    let (actor, mut tick_rx) = MarketDataActor::new(md_rx, vec![strat_tx], 64);
+    let actor = actor
+        .with_max_buffer_size(2)
+        .with_backpressure_policy(BackpressurePolicy::DropNewest)
+        .with_coalesce_interval_ms(20);
+
+    let actor_handle = tokio::spawn(async move { actor.run().await });
+
+    // 1. Subscribe
+    md_tx.send(MarketDataMsg::Subscribe(inst.clone())).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(10)).await;
+
+    // 2. Send 4 ticks quickly: first 2 fill buffer, 3rd and 4th dropped by DropNewest
+    for p in ["1500.00", "1505.00", "1510.00", "1520.00"] {
+        let tick = Tick::Ltp {
+            instrument: inst.clone(),
+            price: Price::from_rupees(p).unwrap(),
+            volume: Quantity::from_u64(10),
+            exchange_ts: Utc::now(),
+            receive_ts: Utc::now(),
+        };
+        md_tx.send(MarketDataMsg::IngestTick(tick)).await.unwrap();
+    }
+
+    // Wait for coalesce timer to flush buffer
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // We should receive coalesced tick from broadcast
+    let broadcasted = tick_rx.recv().await.unwrap();
+    assert_eq!(broadcasted.instrument(), &inst);
+
+    // Shutdown actor
+    md_tx.send(MarketDataMsg::Shutdown).await.unwrap();
+    let status = actor_handle.await.unwrap();
+    assert_eq!(status, ActorStatus::Stopped);
+}
+
+#[tokio::test]
+async fn test_supervisor_restart_strategies() {
+    let inst = InstrumentId::new(Exchange::Nse, "SBIN");
+    let strategy = SimpleBreakoutStrategy {
+        symbol: inst.clone(),
+        threshold: Price::from_rupees("500.00").unwrap(),
+        placed: false,
+    };
+    let risk_engine = RiskEngine::default();
+    let broker = Arc::new(MockBrokerExecutor::new(true));
+
+    let mut supervisor = Supervisor::spawn_with_strategy(
+        strategy,
+        risk_engine,
+        broker,
+        32,
+        RestartStrategy::OneForOne,
+    );
+
+    assert_eq!(supervisor.restart_strategy(), &RestartStrategy::OneForOne);
+
+    // Test OneForOne restart of market data
+    let dummy_handle = tokio::spawn(async { ActorStatus::Running });
+    supervisor.restart_actor_handle("market_data", dummy_handle);
+    let (md_r, strat_r, risk_r, exec_r) = supervisor.restart_counts();
+    assert_eq!(md_r, 1);
+    assert_eq!(strat_r, 0);
+
+    // Switch strategy to AllForOne
+    supervisor.set_restart_strategy(RestartStrategy::AllForOne);
+    assert_eq!(supervisor.restart_strategy(), &RestartStrategy::AllForOne);
+
+    let dummy_handle2 = tokio::spawn(async { ActorStatus::Running });
+    supervisor.restart_actor_handle("execution", dummy_handle2);
+    let (_, _, _, exec_r2) = supervisor.restart_counts();
+    assert_eq!(exec_r2, 1);
+
+    // Graceful stop
+    let _ = supervisor.shutdown_gracefully(Duration::from_secs(1)).await;
+}
+
+#[tokio::test]
+async fn test_execution_actor_clean_shutdown_drain_loop() {
+    let broker = Arc::new(MockBrokerExecutor::new(true));
+    let (exec_tx, exec_rx) = mpsc::channel(16);
+    let exec_actor = ExecutionActor::new(broker, exec_rx, None, None);
+
+    let handle = tokio::spawn(async move { exec_actor.run().await });
+
+    let inst = InstrumentId::new(Exchange::Nse, "TATAMOTORS");
+    let req = OrderRequest::new(
+        inst,
+        OrderSide::Buy,
+        OrderType::Limit(Price::from_rupees("950.00").unwrap()),
+        Quantity::from_u64(10),
+        "algo-drain-test",
+    );
+
+    let (reply_tx, reply_rx) = oneshot::channel();
+
+    // Send order and immediately send shutdown so order is drained in-flight
+    exec_tx
+        .send(ExecutionMsg::ExecuteOrder {
+            request: req,
+            reply_to: reply_tx,
+        })
+        .await
+        .unwrap();
+
+    exec_tx.send(ExecutionMsg::Shutdown).await.unwrap();
+
+    // Verify reply was processed and received during the drain loop
+    let ack = reply_rx.await.unwrap().expect("ack received during drain");
+    assert_eq!(ack.status, OrderStatus::New);
+
+    let final_status = handle.await.unwrap();
+    assert_eq!(final_status, ActorStatus::Stopped);
+}

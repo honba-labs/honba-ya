@@ -1,5 +1,5 @@
 [package]
-name = "honba-strategies"
+name = "honba-ya-enhancer"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

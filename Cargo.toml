@@ -8,7 +8,8 @@ members = [
   "crates/honba-ya-config",
   "crates/honba-ya-persistence",
   "crates/honba-ya-testing",
-  "crates/honba-strategies",
+  "crates/honba-ya-enhancer",
+  "crates/honba-ya-strategy",
   "crates/honba-ya-api-rest",
 ]
 
@@ -59,6 +60,8 @@ honba-ya-api-rest     = { path = "crates/honba-ya-api-rest" }
 honba-ya-backtest     = { path = "crates/honba-ya-backtest" }
 honba-ya-cli          = { path = "crates/honba-ya-cli" }
 honba-ya-config       = { path = "crates/honba-ya-config" }
+honba-ya-enhancer     = { path = "crates/honba-ya-enhancer" }
+honba-ya-strategy     = { path = "crates/honba-ya-strategy" }
 honba-ya-persistence  = { path = "crates/honba-ya-persistence" }
 honba-ya-testing      = { path = "crates/honba-ya-testing" }
 
@@ -68,18 +71,10 @@ honba-api             = { package = "honba-ya-api", path = "crates/honba-ya-api"
 honba-api-rest        = { package = "honba-ya-api-rest", path = "crates/honba-ya-api-rest" }
 honba-cli             = { package = "honba-ya-cli", path = "crates/honba-ya-cli" }
 honba-config          = { package = "honba-ya-config", path = "crates/honba-ya-config" }
+honba-enhancer        = { package = "honba-ya-enhancer", path = "crates/honba-ya-enhancer" }
+honba-strategy        = { package = "honba-ya-strategy", path = "crates/honba-ya-strategy" }
+honba-nou-strategy    = { package = "honba-ya-strategy", path = "crates/honba-ya-strategy" }
 honba-testing         = { package = "honba-ya-testing", path = "crates/honba-ya-testing" }
-
-# Cross-repo dependencies (commented out - crates don't exist in current workspace)
-# honba-kokoro-types     = { path = "../honba-kokoro/crates/honba-kokoro-types" }
-# honba-kokoro-messages  = { path = "../honba-kokoro/crates/honba-kokoro-messages" }
-# honba-kokoro-entities  = { path = "../honba-kokoro/crates/honba-kokoro-entities" }
-# honba-kokoro-ports     = { path = "../honba-kokoro/crates/honba-kokoro-ports" }
-# honba-kokoro-risk      = { path = "../honba-kokoro/crates/honba-kokoro-risk" }
-# honba-messages         = { package = "honba-kokoro-messages", path = "../honba-kokoro/crates/honba-kokoro-messages" }
-# honba-entities         = { package = "honba-kokoro-entities", path = "../honba-kokoro/crates/honba-kokoro-entities" }
-# honba-ports            = { package = "honba-kokoro-ports", path = "../honba-kokoro/crates/honba-kokoro-ports" }
-# honba-risk             = { package = "honba-kokoro-risk", path = "../honba-kokoro/crates/honba-kokoro-risk" }
 
 honba-me-core          = { path = "../honba-me/crates/honba-me-core" }
 honba-me-market        = { path = "../honba-me/crates/honba-me-market" }
@@ -90,9 +85,7 @@ honba-feed             = { package = "honba-me-feed", path = "../honba-me/crates
 honba-nou-agent        = { path = "../honba-nou/crates/honba-nou-agent" }
 honba-nou-llm          = { path = "../honba-nou/crates/honba-nou-llm" }
 honba-nou-analytics    = { path = "../honba-nou/crates/honba-nou-analytics" }
-honba-nou-strategy     = { path = "../honba-nou/crates/honba-nou-strategy" }
 honba-analytics        = { package = "honba-nou-analytics", path = "../honba-nou/crates/honba-nou-analytics" }
-honba-strategy         = { package = "honba-nou-strategy", path = "../honba-nou/crates/honba-nou-strategy" }
 
 honba-te-core          = { path = "../honba-te/crates/honba-te-core" }
 honba-te-router        = { path = "../honba-te/crates/honba-te-router" }
@@ -101,4 +94,3 @@ honba-indicators = { package = "honba-me-indicators", path = "../honba-me/crates
 honba-portfolio  = { package = "honba-kokoro-portfolio", path = "../honba-kokoro/crates/honba-kokoro-portfolio" }
 honba-tamashii-codegen = { path = "../honba-tamashii/crates/honba-tamashii-codegen" }
 honba-codegen          = { package = "honba-tamashii-codegen", path = "../honba-tamashii/crates/honba-tamashii-codegen" }
-honba-strategies = { path = "crates/honba-strategies" }

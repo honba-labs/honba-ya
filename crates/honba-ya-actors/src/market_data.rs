@@ -9,6 +9,18 @@ use tracing::{debug, info, warn};
 use crate::messages::{ActorStatus, MarketDataMsg, StrategyMsg};
 use crate::portfolio::SymbolMapper;
 
+/// Backpressure policy for market data ingestion when buffers are full.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BackpressurePolicy {
+    /// Coalesce recent ticks keeping only the latest tick per instrument (default).
+    #[default]
+    CoalesceLatest,
+    /// Drop incoming ticks if buffer reaches maximum capacity.
+    DropNewest,
+    /// Evict oldest ticks when buffer reaches maximum capacity.
+    DropOldest,
+}
+
 /// Market data ingestion actor.
 pub struct MarketDataActor {
     rx: mpsc::Receiver<MarketDataMsg>,
@@ -23,6 +35,8 @@ pub struct MarketDataActor {
     max_buffer_size: usize,
     /// Tick coalescing timer interval in milliseconds.
     coalesce_interval: u64,
+    /// Backpressure policy when buffer capacity is reached.
+    backpressure_policy: BackpressurePolicy,
 }
 
 impl MarketDataActor {
@@ -44,9 +58,28 @@ impl MarketDataActor {
                 tick_buffer: Vec::new(),
                 max_buffer_size: 100,
                 coalesce_interval: 50, // coalesce every 50ms
+                backpressure_policy: BackpressurePolicy::CoalesceLatest,
             },
             broadcast_rx,
         )
+    }
+
+    /// Set backpressure policy.
+    pub fn with_backpressure_policy(mut self, policy: BackpressurePolicy) -> Self {
+        self.backpressure_policy = policy;
+        self
+    }
+
+    /// Set maximum buffer size before backpressure kicks in.
+    pub fn with_max_buffer_size(mut self, max_size: usize) -> Self {
+        self.max_buffer_size = max_size;
+        self
+    }
+
+    /// Set coalesce interval in milliseconds.
+    pub fn with_coalesce_interval_ms(mut self, ms: u64) -> Self {
+        self.coalesce_interval = ms;
+        self
     }
 
     /// Access the symbol mapper for registering tokens.
@@ -82,12 +115,14 @@ impl MarketDataActor {
                             self.handle_bar(bar).await;
                         }
                         Some(MarketDataMsg::Shutdown) => {
-                            info!("MarketDataActor received shutdown");
+                            info!("MarketDataActor received shutdown; flushing remaining buffer");
+                            self.flush_buffer().await;
                             self.status = ActorStatus::Stopped;
                             break;
                         }
                         None => {
                             info!("MarketDataActor channel closed");
+                            self.flush_buffer().await;
                             self.status = ActorStatus::Stopped;
                             break;
                         }
@@ -114,17 +149,35 @@ impl MarketDataActor {
             return;
         }
 
-        // Buffer for coalescing (clone to avoid move)
-        self.tick_buffer.push(tick.clone());
+        // Apply backpressure policy if buffer reached capacity
         if self.tick_buffer.len() >= self.max_buffer_size {
-            self.flush_buffer().await;
+            match self.backpressure_policy {
+                BackpressurePolicy::CoalesceLatest => {
+                    self.flush_buffer().await;
+                    self.tick_buffer.push(tick);
+                }
+                BackpressurePolicy::DropNewest => {
+                    warn!(instrument = %instrument_id, "MarketDataActor buffer full, dropping newest tick due to backpressure");
+                }
+                BackpressurePolicy::DropOldest => {
+                    warn!(instrument = %instrument_id, "MarketDataActor buffer full, evicting oldest tick due to backpressure");
+                    if !self.tick_buffer.is_empty() {
+                        self.tick_buffer.remove(0);
+                    }
+                    self.tick_buffer.push(tick);
+                }
+            }
+        } else {
+            self.tick_buffer.push(tick);
         }
     }
 
     async fn handle_bar(&mut self, bar: honba_core::Bar) {
-        // Forward bar to strategies
+        // Forward bar to strategies using backpressure try_send
         for sender in &self.strategy_senders {
-            let _ = sender.try_send(StrategyMsg::OnBar(bar.clone()));
+            if let Err(e) = sender.try_send(StrategyMsg::OnBar(bar.clone())) {
+                warn!("Strategy channel busy or closed when forwarding bar: {e}");
+            }
         }
     }
 

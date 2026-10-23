@@ -1,6 +1,6 @@
 use chrono::Utc;
 use honba_core::{
-    Exchange, FillReport, InstrumentId, OrderAck, OrderRequest, OrderSide, OrderStatus, OrderType,
+    Exchange, FillReport, Money, InstrumentId, OrderAck, OrderRequest, OrderSide, OrderStatus, OrderType,
     Price, Quantity,
 };
 use honba_persistence::SqliteAuditLedger;
@@ -92,6 +92,8 @@ async fn test_sqlite_sebi_audit_ledger_lifecycle() {
         timestamp: Utc::now(),
         correlation_id: Some(correlation_id),
         client_id: Some(client_id.to_string()),
+        fee: Money::zero_inr(),
+        fee_breakdown: None,
     };
     let fill_record_id = ledger.record_fill(&fill).await.unwrap();
     assert!(fill_record_id > cancel_id);

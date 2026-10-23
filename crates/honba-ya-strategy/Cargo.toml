@@ -1,0 +1,31 @@
+[package]
+name = "honba-ya-strategy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Strategy trait, runner state machine, and manifest contracts for Honba"
+
+[lib]
+name = "honba_strategy"
+
+[dependencies]
+honba-core.workspace = true
+honba-mon.workspace = true
+honba-indicators.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+rust_decimal.workspace = true
+toml.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
+thiserror.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+chrono.workspace = true
+serde_json.workspace = true
+honba-ya-testing.workspace = true
+honba-me-feed.workspace = true
+honba-me-market.workspace = true

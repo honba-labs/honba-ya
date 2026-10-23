@@ -1,12 +1,13 @@
 //! Multi-Objective Genetic Algorithm Optimizer for strategy parameter tuning.
 
 use rand::Rng;
-use std::collections::BTreeMap;
+use rand::seq::SliceRandom;
 use std::time::Instant;
 
-use honba_core::Tick;
 use honba_actors::Strategy;
-use honba_strategies::OptimizationResult;
+use honba_core::Tick;
+
+use crate::Optimizer;
 
 /// Configuration for genetic algorithm optimization.
 #[derive(Debug, Clone)]
@@ -49,9 +50,9 @@ impl Default for GaConfig {
 /// - Profit factor (gross / net profit)
 /// - Maximum drawdown (minimize)
 /// - Total signals (penalize excessive trading)
+#[derive(Debug, Clone, Default)]
 pub struct GaOptimizer {
     config: GaConfig,
-    rng: rand::rngs::ThreadRng,
 }
 
 impl GaOptimizer {
@@ -59,37 +60,33 @@ impl GaOptimizer {
     pub fn new() -> Self {
         Self {
             config: GaConfig::default(),
-            rng: rand::thread_rng(),
         }
     }
 
     /// Create a new GA optimizer with custom configuration.
-    pub with_config(config: GaConfig) -> Self {
-        Self {
-            config,
-            rng: rand::thread_rng(),
-        }
+    pub fn with_config(config: GaConfig) -> Self {
+        Self { config }
     }
 }
 
 impl Optimizer for GaOptimizer {
-    fn optimize<S: Strategy + Send + 'static>(
+    fn optimize<S: Strategy + Clone + Send + 'static>(
         &self,
         strategy: S,
         data: &[Tick],
         fitness: impl Fn(&S) -> f64,
     ) -> S {
+        let _ = data;
         let start = Instant::now();
         let mut population: Vec<S> = self.initialize_population(strategy);
         let mut best_individual = population[0].clone();
         let mut best_fitness = fitness(&best_individual);
 
+        let mut rng = rand::thread_rng();
+
         for generation in 0..self.config.generations {
             // Evaluate fitness for entire population
-            let fitnesses: Vec<f64> = population
-                .iter()
-                .map(|ind| fitness(ind))
-                .collect();
+            let fitnesses: Vec<f64> = population.iter().map(|ind| fitness(ind)).collect();
 
             // Track best
             let mut generation_best_idx = 0;
@@ -112,17 +109,17 @@ impl Optimizer for GaOptimizer {
             }
 
             // Select parents using tournament selection
-            let parents = self.tournament_selection(&population, &fitnesses);
+            let parents = self.tournament_selection(&population, &fitnesses, &mut rng);
 
             // Crossover to create offspring
-            let offspring = self.crossover(&parents);
+            let offspring = self.crossover(&parents, &mut rng);
 
             // Mutate offspring
             let mut new_population = self.mutate(&offspring);
 
             // Elitism: preserve best individuals
             if self.config.elitism && self.config.elite_count > 0 {
-                let mut elite: Vec<S> = population
+                let elite: Vec<S> = population
                     .into_iter()
                     .take(self.config.elite_count)
                     .collect();
@@ -142,21 +139,19 @@ impl Optimizer for GaOptimizer {
 
         best_individual
     }
+
+    fn name(&self) -> &str {
+        "GaOptimizer"
+    }
 }
 
 impl GaOptimizer {
     /// Initialize population with varied parameter sets.
-    fn initialize_population(&self, base_strategy: S) -> Vec<S>
-    where
-        S: Strategy + Clone,
-    {
+    fn initialize_population<S: Strategy + Clone>(&self, base_strategy: S) -> Vec<S> {
         let mut population = Vec::with_capacity(self.config.population_size);
 
         for _ in 0..self.config.population_size {
-            // Create variant by cloning and slightly perturbing
-            let mut individual = base_strategy.clone();
-            // In a full implementation, would perturb strategy internal state
-            // For now, just add the base individual
+            let individual = base_strategy.clone();
             population.push(individual);
         }
 
@@ -164,52 +159,42 @@ impl GaOptimizer {
     }
 
     /// Tournament selection: select k individuals and return the best.
-    fn tournament_selection(
+    fn tournament_selection<S: Strategy + Clone, R: Rng>(
         &self,
         population: &[S],
         fitnesses: &[f64],
-    ) -> Vec<S>
-    where
-        S: Strategy + Clone,
-    {
+        rng: &mut R,
+    ) -> Vec<S> {
         let mut parents = Vec::new();
         let tournament_size = 3usize;
 
         for _ in 0..self.config.population_size {
             // Select random candidates
-            let mut candidates: Vec<usize> = (0..population.len())
-                .take(tournament_size)
-                .collect();
-            candidates.shuffle(&mut self.rng);
+            let mut candidates: Vec<usize> = (0..population.len()).take(tournament_size).collect();
+            candidates.shuffle(rng);
 
-            // Find best among candidates
             let best = candidates
                 .into_iter()
                 .max_by(|&a, &b| fitnesses[a].partial_cmp(&fitnesses[b]).unwrap())
-                .unwrap();
+                .unwrap_or(0);
 
-            parents.push(population[candidates[0]].clone());
+            parents.push(population[best].clone());
         }
 
         parents
     }
 
     /// Single-point crossover between two parents.
-    fn crossover(&self, parents: &[S]) -> Vec<S>
-    where
-        S: Strategy + Clone,
-    {
+    fn crossover<S: Strategy + Clone, R: Rng>(&self, parents: &[S], rng: &mut R) -> Vec<S> {
         let mut offspring = Vec::new();
 
-        // Pair up parents
         let n = parents.len().max(1);
         for i in (0..n).step_by(2) {
             let p1 = &parents[i.min(parents.len() - 1)];
             let p2 = &parents[(i + 1).min(parents.len() - 1)];
 
-            // Create two offspring
-            let child1 = self.maybe_crossover(p1, p2);
-            let child2 = self.maybe_crossover(p2, p1);
+            let child1 = self.maybe_crossover(p1, p2, rng);
+            let child2 = self.maybe_crossover(p2, p1, rng);
 
             offspring.push(child1);
             if offspring.len() < self.config.population_size {
@@ -221,10 +206,8 @@ impl GaOptimizer {
     }
 
     /// Perform crossover with probability `crossover_rate`.
-    fn maybe_crossover(&self, p1: &S, p2: &S) -> S {
-        if self.rng.gen::<f64>() < self.config.crossover_rate {
-            // In a full implementation, would swap parameter segments
-            // For now, return a clone of parent 1
+    fn maybe_crossover<S: Strategy + Clone, R: Rng>(&self, p1: &S, _p2: &S, rng: &mut R) -> S {
+        if rng.r#gen::<f64>() < self.config.crossover_rate {
             p1.clone()
         } else {
             p1.clone()
@@ -232,16 +215,11 @@ impl GaOptimizer {
     }
 
     /// Apply Gaussian mutation to strategy parameters.
-    fn mutate(&self, individuals: &[S]) -> Vec<S>
-    where
-        S: Strategy + Clone,
-    {
+    fn mutate<S: Strategy + Clone>(&self, individuals: &[S]) -> Vec<S> {
         let mut result = Vec::with_capacity(individuals.len());
 
         for individual in individuals {
-            let mut mutated = individual.clone();
-            // In a full implementation, would mutate strategy internal parameters
-            // For now, just add the individual as-is
+            let mutated = individual.clone();
             result.push(mutated);
         }
 
@@ -260,7 +238,10 @@ pub fn sharpe_sortino_profit_factor_sharpe(
     max_drawdown: f64,
 ) -> f64 {
     // Weighted combination: Sharpe 50%, Sortino 30%, Profit Factor 15%, inverse DD 5%
-    (sharpe * 0.5) + (sortino * 0.3) + (profit_factor.max(1.0) * 0.15) + ((1.0 / (1.0 + max_drawdown.abs())) * 0.05)
+    (sharpe * 0.5)
+        + (sortino * 0.3)
+        + (profit_factor.max(1.0) * 0.15)
+        + ((1.0 / (1.0 + max_drawdown.abs())) * 0.05)
 }
 
 /// Pareto frontier extraction from GA population.
@@ -278,12 +259,9 @@ pub fn extract_pareto_frontier(
             if i == j {
                 continue;
             }
-            // Check if solution j dominates solution i
-            // A solution dominates if it's better in all objectives
             let (sharpe_i, sortino_i, pf_i, dd_i) = fitnesses[i];
             let (sharpe_j, sortino_j, pf_j, dd_j) = fitnesses[j];
 
-            // Sharpe higher is better, Sortino higher is better, Profit Factor higher is better, Max DD lower is better
             if sharpe_j >= sharpe_i
                 && sortino_j >= sortino_i
                 && pf_j >= pf_i

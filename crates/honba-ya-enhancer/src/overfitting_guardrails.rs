@@ -1,10 +1,5 @@
 //! Overfitting Guardrails: DSR and PBO computation.
 
-use rand::Rng;
-use std::collections::BTreeMap;
-use statrs::statistics::Statistics;
-use statrs::Distribution;
-
 /// Deflated Sharpe Ratio (DSR) per López de Prado.
 ///
 /// Adjusts the Sharpe ratio for the number of training trials, return
@@ -28,11 +23,7 @@ impl DSRCalculator {
     }
 
     /// Compute DSR given Sharpe ratio, number of trials, and return moments.
-    pub fn compute(
-        &self,
-        sharpe: f64,
-        returns: &[f64],
-    ) -> f64 {
+    pub fn compute(&self, sharpe: f64, returns: &[f64]) -> f64 {
         if returns.len() < 30 {
             // Need minimum sample size
             return sharpe;
@@ -40,11 +31,8 @@ impl DSRCalculator {
 
         // Compute return moments
         let mean = returns.iter().sum::<f64>() / returns.len() as f64;
-        let variance = returns
-            .iter()
-            .map(|&r| (r - mean).powi(2))
-            .sum::<f64>()
-            / (returns.len() - 1) as f64;
+        let variance =
+            returns.iter().map(|&r| (r - mean).powi(2)).sum::<f64>() / (returns.len() - 1) as f64;
         let std_dev = variance.sqrt();
 
         // Skewness and kurtosis
@@ -54,7 +42,9 @@ impl DSRCalculator {
             .map(|&r| ((r - mean) / std_dev).powi(3))
             .sum::<f64>()
             / n
-            * n / (n - 1.0) / (n - 2.0);
+            * n
+            / (n - 1.0)
+            / (n - 2.0);
 
         let kurtosis: f64 = returns
             .iter()
@@ -64,7 +54,9 @@ impl DSRCalculator {
             })
             .sum::<f64>()
             / n
-            * n * (n + 1) / ((n - 1.0) * (n - 2.0) * (n - 3.0));
+            * n
+            * (n + 1.0)
+            / ((n - 1.0) * (n - 2.0) * (n - 3.0));
 
         // DSR formula from López de Prado
         // DSR = Sharpe / (1 + 2.5 * sqrt(2 / n) * (1 + gamma_1^2)^(1/4) * (1 + kappa^2)^(1/4))
@@ -74,8 +66,11 @@ impl DSRCalculator {
         let kappa = kurtosis - 3.0; // excess kurtosis
 
         let numerator = sharpe;
-        let denominator =
-            1.0 + 2.5f64 * (2.0 / n).sqrt() * (1.0 + gamma1.powi(2)).powf(0.25) * (1.0 + kappa.powi(2)).powf(0.25);
+        let denominator = 1.0
+            + 2.5f64
+                * (2.0 / n).sqrt()
+                * (1.0 + gamma1.powi(2)).powf(0.25)
+                * (1.0 + kappa.powi(2)).powf(0.25);
 
         let dsr = numerator / denominator.max(1e-10);
         dsr
@@ -105,11 +100,7 @@ impl PBOCalculator {
 
     /// Compute PBO given in-sample and out-of-sample fitness values
     /// from multiple CSCV runs.
-    pub fn compute(
-        &self,
-        is_fitness: &[f64],
-        oos_fitness: &[f64],
-    ) -> f64 {
+    pub fn compute(&self, is_fitness: &[f64], oos_fitness: &[f64]) -> f64 {
         if is_fitness.len() != self.n_folds || oos_fitness.len() != self.n_folds {
             eprintln!(
                 "PBO: mismatch - expected {} folds, got IS: {}, OOS: {}",
@@ -128,10 +119,7 @@ impl PBOCalculator {
             .collect();
 
         // Count how many folds show OOS < IS (overfitting signal)
-        let overfitting_count = diffs
-            .iter()
-            .filter(|&d| d < 0.0)
-            .count();
+        let overfitting_count = diffs.iter().filter(|&d| *d < 0.0).count();
 
         // PBO = proportion of folds with overfitting signal
         let pbo = overfitting_count as f64 / self.n_folds as f64;
@@ -157,12 +145,7 @@ pub struct OverfittingAssessment {
 
 impl OverfittingAssessment {
     /// Assess overfitting given strategy performance data.
-    pub fn assess(
-        sharpe: f64,
-        returns: &[f64],
-        is_fitness: &[f64],
-        oos_fitness: &[f64],
-    ) -> Self {
+    pub fn assess(sharpe: f64, returns: &[f64], is_fitness: &[f64], oos_fitness: &[f64]) -> Self {
         let dsr_calc = DSRCalculator::new(100);
         let dsr = dsr_calc.compute(sharpe, returns);
 
@@ -171,11 +154,9 @@ impl OverfittingAssessment {
 
         let passes_guards = dsr >= 3.0 && pbo < 0.5;
         let recommendation = if passes_guards {
-            "Strategy passes overfitting guards. Consider live deployment."
-                .to_string()
+            "Strategy passes overfitting guards. Consider live deployment.".to_string()
         } else if dsr < 1.5 {
-            "Low DSR suggests overfitting. Consider parameter reduction or more data."
-                .to_string()
+            "Low DSR suggests overfitting. Consider parameter reduction or more data.".to_string()
         } else {
             "High PBO suggests overfitting. Re-train with more data or different regime."
                 .to_string()

@@ -239,23 +239,55 @@ impl Supervisor {
         }
     }
 
-    /// Request a restart of a failed actor respecting the configured restart strategy.
-    pub async fn restart_actor(&mut self, actor: &mut dyn FnMut() -> JoinHandle<ActorStatus>) {
-        // Reset the failed actor's handle and restart it
-        // The restart strategy determines how other actors are affected
+    /// Get configured restart strategy.
+    pub fn restart_strategy(&self) -> &RestartStrategy {
+        &self.restart_strategy
+    }
+
+    /// Set restart strategy dynamically.
+    pub fn set_restart_strategy(&mut self, strategy: RestartStrategy) {
+        self.restart_strategy = strategy;
+    }
+
+    /// Restart a specific actor handle and update supervision state.
+    pub fn restart_actor_handle(&mut self, actor_name: &str, new_handle: JoinHandle<ActorStatus>) {
+        self.increment_restarts(actor_name);
         match self.restart_strategy {
             RestartStrategy::OneForOne => {
-                // Only restart the failed actor
-                let handle = actor().await;
-                // The handle is dropped and a new actor would be spawned by the caller
+                match actor_name {
+                    "market_data" => self.md_handle = new_handle,
+                    "strategy" => self.strat_handle = new_handle,
+                    "risk" => self.risk_handle = new_handle,
+                    "execution" => self.exec_handle = new_handle,
+                    _ => {}
+                }
+                info!("Supervisor: restarted {} under OneForOne strategy", actor_name);
+            }
+            RestartStrategy::AllForOne => {
+                match actor_name {
+                    "market_data" => self.md_handle = new_handle,
+                    "strategy" => self.strat_handle = new_handle,
+                    "risk" => self.risk_handle = new_handle,
+                    "execution" => self.exec_handle = new_handle,
+                    _ => {}
+                }
+                info!("Supervisor: AllForOne restart triggered by {}", actor_name);
+            }
+        }
+    }
+
+    /// Request a restart of a failed actor respecting the configured restart strategy.
+    pub async fn restart_actor(&mut self, actor: &mut dyn FnMut() -> JoinHandle<ActorStatus>) {
+        let handle = actor();
+        match self.restart_strategy {
+            RestartStrategy::OneForOne => {
                 info!("Supervisor: restarted actor under OneForOne strategy");
             }
             RestartStrategy::AllForOne => {
-                // Restart all actors when one fails
-                let _ = actor().await;
                 info!("Supervisor: restarted all actors under AllForOne strategy");
             }
         }
+        let _ = handle;
     }
 
     /// Get per-actor restart counts for monitoring.

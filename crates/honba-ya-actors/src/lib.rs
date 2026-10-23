@@ -22,7 +22,7 @@ pub mod supervisor;
 pub mod tracing_spans;
 
 pub use execution::ExecutionActor;
-pub use market_data::MarketDataActor;
+pub use market_data::{BackpressurePolicy, MarketDataActor};
 pub use messages::{ActorStatus, ExecutionMsg, MarketDataMsg, PortfolioMsg, RiskMsg, StrategyMsg};
 pub use metrics::MetricsCollector;
 pub use portfolio::PortfolioActor;

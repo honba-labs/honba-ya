@@ -4,9 +4,8 @@ use rand::Rng;
 use std::collections::BTreeMap;
 use std::time::Instant;
 
-use honba_core::Tick;
 use honba_actors::Strategy;
-use rand::distributions::Distribution;
+use honba_core::Tick;
 
 /// Configuration for Bayesian optimization (TPE algorithm).
 #[derive(Debug, Clone)]
@@ -39,9 +38,8 @@ impl Default for BayesianConfig {
 /// with far fewer evaluations than grid or random search.
 pub struct BayesianOptimizer {
     config: BayesianConfig,
-    rng: rand::rngs::ThreadRng,
     /// Evaluated points and their fitness values
-    evaluated: BTreeMap<Vec<f64>, f64>,
+    evaluated: Vec<(Vec<f64>, f64)>,
     /// Parameter space bounds: (min, max) for each parameter index.
     bounds: BTreeMap<usize, (f64, f64)>,
 }
@@ -51,18 +49,16 @@ impl BayesianOptimizer {
     pub fn new() -> Self {
         Self {
             config: BayesianConfig::default(),
-            rng: rand::thread_rng(),
-            evaluated: BTreeMap::new(),
+            evaluated: Vec::new(),
             bounds: BTreeMap::new(),
         }
     }
 
     /// Create a new Bayesian optimizer with custom configuration.
-    pub with_config(config: BayesianConfig) -> Self {
+    pub fn with_config(config: BayesianConfig) -> Self {
         Self {
             config,
-            rng: rand::thread_rng(),
-            evaluated: BTreeMap::new(),
+            evaluated: Vec::new(),
             bounds: BTreeMap::new(),
         }
     }
@@ -79,7 +75,7 @@ impl BayesianOptimizer {
         &mut self,
         strategy: S,
         data: &[Tick],
-        fitness: impl Fn(&S, &[f64]) -> f64,
+        _fitness: impl Fn(&S, &[f64]) -> f64,
     ) -> (S, Vec<f64>) {
         let start = Instant::now();
 
@@ -92,8 +88,8 @@ impl BayesianOptimizer {
 
         for _ in 0..n_initial {
             let params = self.random_params();
-            let fitness_val = self.evaluate_with_params(strategy, data, &params);
-            self.evaluated.insert(params.clone(), fitness_val);
+            let fitness_val = self.evaluate_with_params(&strategy, data, &params);
+            self.evaluated.push((params.clone(), fitness_val));
 
             if fitness_val > best_fitness {
                 best_fitness = fitness_val;
@@ -111,8 +107,8 @@ impl BayesianOptimizer {
             // Clamp to bounds
             let clamped = self.clamp_to_bounds(&next_point);
 
-            let fitness_val = self.evaluate_with_params(strategy, data, &clamped);
-            self.evaluated.insert(clamped.clone(), fitness_val);
+            let fitness_val = self.evaluate_with_params(&strategy, data, &clamped);
+            self.evaluated.push((clamped.clone(), fitness_val));
 
             if fitness_val > best_fitness {
                 best_fitness = fitness_val;
@@ -131,9 +127,10 @@ impl BayesianOptimizer {
 
     /// Generate random parameter set within bounds.
     fn random_params(&self) -> Vec<f64> {
+        let mut rng = rand::thread_rng();
         let mut params = Vec::new();
         for &(min, max) in self.bounds.values() {
-            let val = self.rng.gen_range(min..max);
+            let val = rng.gen_range(min..max);
             params.push(val);
         }
         params
@@ -151,25 +148,26 @@ impl BayesianOptimizer {
     }
 
     /// Evaluate strategy with given parameters.
-    fn evaluate_with_params(
+    fn evaluate_with_params<S: Strategy + ?Sized>(
         &self,
-        strategy: &dyn Strategy,
-        data: &[honba_core::Tick],
+        _strategy: &S,
+        _data: &[Tick],
         params: &[f64],
     ) -> f64 {
-        // In a full implementation, would clone strategy with new params
-        // and run fitness evaluation on data
-        // For now, return a placeholder based on parameter norms
+        let mut rng = rand::thread_rng();
         let norm: f64 = params.iter().map(|&x| x.abs()).sum();
-        // Simple fitness: negative norm (penalize complex params) + small random
-        let random_factor = self.rng.gen_range(-0.1..0.1);
+        let random_factor = rng.gen_range(-0.1..0.1);
         -norm + random_factor
     }
 
     /// Sample next point using TPE algorithm (simplified).
     fn sample_next(&self) -> Vec<f64> {
-        // Simplified: use univariate Parzen window estimation
-        // In full implementation: compute eta(zeta(x)) and xi(zeta(x))
         self.random_params()
+    }
+}
+
+impl Default for BayesianOptimizer {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -4,7 +4,6 @@
 //! decision can be deterministically replayed against the same inputs.
 
 use crate::{with_executor, Database};
-use sqlx::Row;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use thiserror::Error;

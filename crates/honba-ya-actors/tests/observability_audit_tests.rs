@@ -9,7 +9,7 @@ use honba_actors::{
     span_broker_submitted, span_cancelled, span_filled, span_order_generated, span_risk_evaluated,
 };
 use honba_core::{
-    Exchange, FillReport, InstrumentId, OrderAck, OrderRequest, OrderSide, OrderStatus, OrderType,
+    Exchange, FillReport, Money, InstrumentId, OrderAck, OrderRequest, OrderSide, OrderStatus, OrderType,
     Price, PriceBand, Quantity, Tick,
 };
 use honba_mon::{OtrConfig, RiskEngine, RiskLimits};
@@ -110,6 +110,8 @@ async fn test_observability_tracing_and_prometheus_export() {
         timestamp: Utc::now(),
         correlation_id: Some(correlation_id),
         client_id: Some(client_id.to_string()),
+        fee: Money::zero_inr(),
+        fee_breakdown: None,
     };
 
     let s_fill = span_filled(&fill);
@@ -277,6 +279,8 @@ async fn test_actor_runtime_with_observability_and_audit() {
         timestamp: Utc::now(),
         correlation_id: Some(Uuid::new_v4()),
         client_id: Some("default".to_string()),
+        fee: Money::zero_inr(),
+        fee_breakdown: None,
     };
     supervisor
         .risk_sender()

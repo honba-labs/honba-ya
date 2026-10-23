@@ -78,7 +78,27 @@ impl ExecutionActor {
         self.status = ActorStatus::Running;
 
         while let Some(msg) = self.rx.recv().await {
-            match msg {
+            if matches!(msg, ExecutionMsg::Shutdown) {
+                info!("ExecutionActor received shutdown signal; entering draining state");
+                self.status = ActorStatus::Draining;
+                while let Ok(in_flight) = self.rx.try_recv() {
+                    if matches!(in_flight, ExecutionMsg::Shutdown) {
+                        continue;
+                    }
+                    self.process_msg(in_flight).await;
+                }
+                break;
+            }
+            self.process_msg(msg).await;
+        }
+
+        self.status = ActorStatus::Stopped;
+        info!("ExecutionActor stopped cleanly after drain");
+        self.status
+    }
+
+    async fn process_msg(&mut self, msg: ExecutionMsg) {
+        match msg {
                 ExecutionMsg::ExecuteOrder { request, reply_to } => {
                     // 0. OMS: Check idempotency and register order
                     if let Some(ref mut oms) = self.oms {
@@ -88,7 +108,7 @@ impl ExecutionActor {
                             let _ = reply_to.send(Err(crate::messages::BrokerError::InvalidRequest(
                                 format!("Idempotency check failed: {}", e)
                             )));
-                            continue;
+                            return;
                         }
                         // Register the order in the OMS
                         oms.register_order(
@@ -245,16 +265,7 @@ impl ExecutionActor {
                     }
                 }
 
-                ExecutionMsg::Shutdown => {
-                    info!("ExecutionActor received shutdown signal");
-                    self.status = ActorStatus::Draining;
-                    break;
-                }
+                ExecutionMsg::Shutdown => {}
             }
-        }
-
-        self.status = ActorStatus::Stopped;
-        info!("ExecutionActor stopped");
-        self.status
     }
 }

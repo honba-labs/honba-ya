@@ -3,7 +3,6 @@
 //! order-ID reconciliation lookups.
 
 use crate::{with_executor, Database};
-use sqlx::Row;
 use chrono::{DateTime, Utc};
 use honba_core::{InstrumentId, OrderRequest, OrderSide, OrderStatus, OrderType, Price, TimeInForce};
 use rust_decimal::Decimal;

@@ -1,7 +1,7 @@
 # Master Plan: 本場・家 honba-ya
 
 > **The house that runs it all.**  
-> Central actor runtime, institutional event-driven backtester, REST/WebSocket API gateway, persistence & SEBI audit ledger, and unified CLI for the Honba platform. Orchestrates the zero-I/O deterministic core (`honba-core`), pre-trade risk engine (`honba-mon`), Order Management System (`honba-kokoro`), market data pipelines (`honba-me`), broker routing (`honba-te`), AI decision engines (`honba-nou`), PyO3 quantitative research bindings (`honba-tamashii`), and the terminal UI (`honba-kao`). Built with exact decimal precision (`rust_decimal`), zero-allocation message passing, strict research-live parity, and regulatory compliance for Indian equities and derivatives (NSE/BSE/NFO).
+> Central actor runtime, institutional event-driven backtester, strategy runtime & execution state machine (`honba-ya-strategy`), automatic strategy enhancer (`honba-ya-enhancer`), REST/WebSocket API gateway, persistence & SEBI audit ledger, and unified CLI for the Honba platform. Orchestrates the zero-I/O deterministic core (`honba-core`), pre-trade risk engine (`honba-mon`), Order Management System (`honba-kokoro`), market data pipelines (`honba-me`), broker routing (`honba-te`), AI decision engines (`honba-nou`), PyO3 quantitative research bindings (`honba-tamashii`), and the terminal UI (`honba-kao`). Built with exact decimal precision (`rust_decimal`), zero-allocation message passing, strict research-live parity, and regulatory compliance for Indian equities and derivatives (NSE/BSE/NFO).
 
 ---
 
@@ -9,20 +9,27 @@
 
 ### 0.1 Current State vs Target Architecture
 
-**Status (2026-10-23)**: the table below described the state before Phase 1 closed out; it's kept as historical record of what Phase 1 was responding to. See Phase 1's status note above for what's actually true now — in short, `honba-ya` is unified on `honba-core`/`honba-mon` types workspace-wide (`honba-strategies`, Phase 5's optimizer crate, excepted — separately broken, untouched) and the legacy `engine`/`sim`/`sweep`/`ws`/`async` crates are gone.
+**Status (2026-10-23)**: Phase 1 closed out, immediately followed by a comprehensive 4-step architectural realignment:
+1. **Optimizer Crate Modernized & Renamed (`honba-ya-enhancer`)**: `crates/honba-strategies` was renamed to `honba-ya-enhancer` (ASE: GA, Bayesian TPE, WFO, Odysseus rule trees, Monte Carlo stress testing), modernized for Rust 2024 (fixed `r#gen` keyword conflicts, Rayon thread-safety with `ThreadRng` `!Sync`, and float `Ord` map issues), and compiles cleanly with 0 errors (`cargo check -p honba-ya-enhancer`).
+2. **Strategy Runtime Relocation (`honba-ya-strategy`)**: Sibling crate `honba-nou-strategy` was relocated from `honba-nou` into `honba-ya/crates/honba-ya-strategy` (`honba_strategy` lib), establishing the canonical zero-I/O `Strategy` trait, pull-based `StrategyRunner` state machine, and manifest contracts inside `honba-ya`.
+3. **Catalog Domain Type Unification (`honba-strategies/`)**: The top-level Python quantitative strategy catalog was unified with `honba-tamashii` by replacing all deprecated `honba.entities` imports with canonical `honba.domain` types (`InstrumentId`, `Trade`, `Bar`, `Tick`, `Side`, `OrderType`, etc.). All 436 pytest tests pass in 1.40s.
+4. **Manifest Alignment (`step.rs`)**: Implemented `step.rs` in `honba-ya-strategy` to deserialize `step.toml` (`step.schema.json`) manifests directly into `StrategyManifest`, verified with comprehensive integration tests across all 17 catalog strategy directories.
 
-`honba-ya` ("House") is the primary orchestration runtime of the entire platform. While foundational crates (`honba-core`, `honba-mon`, `honba-te-core`) have been modernized with canonical types and pre-trade risk controls, `honba-ya` currently exhibits a split architecture: modern actor/backtester crates sit alongside legacy crates referencing deprecated interfaces and raw floats:
+The workspace now consists of a cohesive **10-crate topology** with 100% clean compilation (`cargo check --workspace`). All legacy `engine`, `sim`, `sweep`, `ws`, and `async` crates are excised.
 
-| Area | Current State in `honba-ya` | Target State (Master Architecture) | Severity |
+The table below preserves the historical record of what Phase 1 and the restructure resolved:
+
+| Area | Prior State in `honba-ya` | Target State (Master Architecture) | Severity / Resolution |
 | :--- | :--- | :--- | :--- |
-| **Domain Types & Precision** | Modern crates (`actors`, `backtest`) use `honba-core` & `rust_decimal::Decimal`. Older crates (`engine`, `sim`, `sweep`, `api`, `cli`) still rely on deprecated `honba-messages`/`entities` with raw `f64` prices/quantities. | **100% unified on `honba-core`**: Strict use of `InstrumentId`, `Price`, `Quantity`, `Money`, `Bar`, `Tick`, `OrderRequest`, `OrderAck`, `FillReport` across all crates. Zero floats for prices, fees, and quantities. | **P0 (Critical)** — **done**, see Phase 1 |
+| **Domain Types & Precision** | Modern crates (`actors`, `backtest`) used `honba-core` & `rust_decimal::Decimal`. Older crates (`engine`, `sim`, `sweep`, `api`, `cli`) relied on deprecated `honba-messages`/`entities` with raw `f64` prices/quantities. | **100% unified on `honba-core`**: Strict use of `InstrumentId`, `Price`, `Quantity`, `Money`, `Bar`, `Tick`, `OrderRequest`, `OrderAck`, `FillReport` across all crates. Zero floats for prices, fees, and quantities. | **P0 (Critical)** — **done**, see Phase 1 |
 | **Dual Engine Dichotomy** | Two separate execution paradigms: legacy `honba-ya-engine` (polling event queue, deprecated traits) vs modern `honba-ya-actors` (actor runtime, supervision trees, bounded Tokio channels). | **Single Authoritative Actor Runtime**: Consolidate runtime execution into `honba-ya-actors`. Retire `honba-ya-engine` and legacy traits, routing all events through supervised Tokio actors. | **P0 (Critical)** — **done**, `honba-ya-engine` deleted |
-| **Backtester vs CLI Disconnect** | `honba-ya-backtest` has an institutional event loop with NSE calendar, Indian costs (STT, GST, stamp duty), and T+1 settlement. However, `honba-ya-cli/src/backtest.rs` still invokes legacy `honba-sim` with `f64`. | **Unified Backtest Execution**: Wire `honba backtest` CLI directly to `honba-ya-backtest::BacktestEngine`. Expose identical command-line flags, configuration TOMLs, and performance reports (Sharpe, Sortino, max drawdown, SEBI fee breakdowns). | **P0 (Critical)** |
-| **WebSocket Streaming Gateway** | `crates/honba-ya-ws` is an empty 15-line stub. `honba-ya-api-rest/src/ws.rs` implements real WebSocket streaming, but polls `AppState` quotes every 1000ms with raw `f64` calculations. | **Zero-Polling Actor Event Bus**: Retire `honba-ya-ws`. Enhance `honba-ya-api-rest/src/ws.rs` into an event-driven broadcast gateway subscribing directly to `MarketDataActor`'s broadcast channel, streaming live ticks and depth instantaneously. | **P1 (High)** |
-| **Relational Persistence (sqlx)** | `honba-ya-persistence` provides `SqliteAuditLedger` for SEBI audit trails, but lacks the relational sqlx schemas/migrations for traders, orders, fills, decisions, and positions. | **Comprehensive sqlx Repositories**: Implement PostgreSQL and SQLite relational repositories with schema migrations for traders, orders, fills, LLM decisions, and portfolio positions. | **P1 (High)** |
-| **Lakehouse Catalog Integration** | `honba serve` was recently patched to read `catalog/{TF}/{EXCHANGE}/{SYMBOL}/*.parquet`, but `MarketDataActor` and backtest data loaders do not natively ingest from this layout. | **Unified Lakehouse Feed Provider**: Connect `honba-data`'s partitioned catalog directly into `MarketDataActor` for replay/serving, eliminating ad-hoc flat fixture files and data conversion steps. | **P1 (High)** |
-| **Simulation Convergence** | Useful microstructure models (L2 orderbook matching, latency injection, MIS intraday square-off) live in legacy `honba-ya-sim` with `f64` types. | **Converged Simulation Engine**: Port L2 book walking, fill slippage, network latency, and MIS intraday margin rules into `honba-ya-backtest` using canonical `honba-core` types and exact decimals. | **P1 (High)** |
-| **Cargo Dependency Topology** | Broken/stale relative paths (`../../../honba-core`, `../../../honba-kokoro/...`) in `honba-ya-cli`, `honba-ya-persistence`, and `honba-ya-sim`. | **Clean Workspace Topology**: Standardize workspace dependencies to clean `../../` or path declarations; prune all dead references to retired Kokoro crates. | **P1 (High)** — **done**: the `../../../honba-te/...` paths were actually correct for this layout, not broken; dead Kokoro crate references (`honba-kokoro-{messages,entities,types,ports,risk}`) excised, see Phase 1 |
+| **Strategy Runtime Separation** | `honba-nou-strategy` lived inside AI decision crate (`honba-nou`), while `honba-ya/crates/honba-strategies` housed optimization code under a misleading name conflicting with Python catalog `honba-strategies/`. | **Clear Architectural Boundaries**: Relocate execution runtime (`Strategy` trait, runner state machine, manifest parser) to `crates/honba-ya-strategy`. Rename optimizer to `crates/honba-ya-enhancer`. Python catalog remains `honba-strategies/`. | **P0 (Critical)** — **done**, 4-step restructure complete |
+| **Backtester vs CLI Disconnect** | `honba-ya-backtest` has an institutional event loop with NSE calendar, Indian costs (STT, GST, stamp duty), and T+1 settlement. However, `honba-ya-cli/src/backtest.rs` still invoked legacy `honba-sim` with `f64`. | **Unified Backtest Execution**: Wire `honba backtest` CLI directly to `honba-ya-backtest::BacktestEngine`. Expose identical command-line flags, configuration TOMLs, and performance reports (Sharpe, Sortino, max drawdown, SEBI fee breakdowns). | **P0 (Critical)** — targeted in Phase 4 / Phase 7 |
+| **WebSocket Streaming Gateway** | `crates/honba-ya-ws` was an empty 15-line stub. `honba-ya-api-rest/src/ws.rs` implements real WebSocket streaming, but polls `AppState` quotes every 1000ms with raw `f64` calculations. | **Zero-Polling Actor Event Bus**: Retire `honba-ya-ws`. Enhance `honba-ya-api-rest/src/ws.rs` into an event-driven broadcast gateway subscribing directly to `MarketDataActor`'s broadcast channel, streaming live ticks and depth instantaneously. | **P1 (High)** — `honba-ya-ws` excised; targeted in Phase 3 |
+| **Relational Persistence (sqlx)** | `honba-ya-persistence` provides `SqliteAuditLedger` for SEBI audit trails, but lacks the relational sqlx schemas/migrations for traders, orders, fills, decisions, and positions. | **Comprehensive sqlx Repositories**: Implement PostgreSQL and SQLite relational repositories with schema migrations for traders, orders, fills, LLM decisions, and portfolio positions. | **P1 (High)** — targeted in Phase 2 |
+| **Lakehouse Catalog Integration** | `honba serve` was patched to read `catalog/{TF}/{EXCHANGE}/{SYMBOL}/*.parquet`, but `MarketDataActor` and backtest data loaders do not natively ingest from this layout. | **Unified Lakehouse Feed Provider**: Connect `honba-data`'s partitioned catalog directly into `MarketDataActor` for replay/serving, eliminating ad-hoc flat fixture files and data conversion steps. | **P1 (High)** — targeted in Phase 4 |
+| **Simulation Convergence** | Useful microstructure models (L2 orderbook matching, latency injection, MIS intraday square-off) lived in legacy `honba-ya-sim` with `f64` types. | **Converged Simulation Engine**: Port L2 book walking, fill slippage, network latency, and MIS intraday margin rules into `honba-ya-backtest` using canonical `honba-core` types and exact decimals. | **P1 (High)** — `honba-ya-sim` deleted; integration in Phase 4 |
+| **Cargo Dependency Topology** | Stale relative paths and dead references to retired Kokoro crates (`honba-kokoro-{messages,entities,types,ports,risk}`). | **Clean Workspace Topology**: 10 clean member crates in workspace, all dead Kokoro and legacy engine crate references excised. | **P1 (High)** — **done** across all 10 crates |
 
 ---
 
@@ -32,74 +39,85 @@
                                   ┌─────────────────────────────────────────────────────────┐
                                   │                     User Interfaces                     │
                                   │    honba-kao (Web Terminal)  │  honba CLI  │  REST / WS │
-                                  └────────────────────────────┬────────────────────────────┘
-                                                               │ HTTP / WS / CLI Args
-                                                               ▼
-┌────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│  本場・家 honba-ya Central Subsystem                                                                                    │
-│                                                                                                                        │
-│  ┌─────────────────────────────────────────────────┐   ┌────────────────────────────────────────────────────────────┐  │
-│  │   honba-ya-api-rest & honba-ya-api              │   │   honba-ya-cli                                             │  │
-│  │   • Axum REST Endpoints (Orders, Reports, State)│   │   • Subcommands: serve, backtest, migrate, data, verify    │  │
-│  │   • Zero-Polling WebSocket Broadcast Bus (/ws)  │   │   • Configuration Loader & Artifact Codegen                │  │
-│  │   • OpenAPI 3.1 & JWT Bearer Authentication     │   │   • Headless Engine Runner                                 │  │
-│  └────────────────────────┬────────────────────────┘   └─────────────────────────────┬──────────────────────────────┘  │
-│                           │                                                          │                                 │
-│                           ▼                                                          ▼                                 │
-│  ┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐  │
-│  │   honba-ya-actors (Actor Runtime & Supervision Tree)                                                             │  │
-│  │                                                                                                                  │  │
-│  │   ┌────────────────────┐    ┌────────────────────┐    ┌────────────────────┐    ┌─────────────────────────────┐  │  │
-│  │   │  MarketDataActor   │───▶│   StrategyActor    │───▶│     RiskActor      │───▶│       ExecutionActor        │  │  │
-│  │   │  Ticks, Agg Bars   │    │  Signals, Intent   │    │ honba-mon (Pure)   │    │ honba-te (Broker Adapters)  │  │  │
-│  │   └─────────┬──────────┘    └────────────────────┘    └─────────┬──────────┘    └──────────────┬──────────────┘  │  │
-│  │             │                                                   │                              │                 │  │
-│  │             │ Broadcast Ticks                                   │ Pre-Trade Pass/Refusal       │ Order Ack/Fill  │  │
-│  │             ▼                                                   ▼                              ▼                 │  │
-│  │   ┌───────────────────────────────────────────────────────────────────────────────────────────────────────────┐  │  │
-│  │   │   Supervisor & Metrics: Lifecycle FSM, Prometheus Gauges (OTR, Latency, PnL), OpenTelemetry Tracing Spans │  │  │
-│  │   └───────────────────────────────────────────────────────────────────────────────────────────────────────────┘  │  │
-│  └─────────────────────────────────────────────────────────┬────────────────────────────────────────────────────────┘  │
-│                                                            │                                                           │
-│  ┌─────────────────────────────────────────────────────────┴───────────────┐   ┌────────────────────────────────────┐  │
-│  │   honba-ya-backtest (Research-Live Parity Backtester)                   │   │   honba-ya-persistence             │  │
-│  │   • Event Loop: Market ➔ Signal ➔ Order ➔ Fill                         │   │   • sqlx Postgres & SQLite Repos   │  │
-│  │   • Indian Cost Model: STT, GST, Stamp Duty, SEBI turnover, DP charges  │   │   • SEBI Append-Only Audit Ledger  │  │
-│  │   • T+1 Rolling Settlement Ledger & NSE/BSE Trading Calendars           │   │   • Order, Trade & Decision Tables │  │
-│  │   • L2 Book Simulation, Latency Injection, MIS Auto-Square-Off          │   │   • Point-in-Time Run Snapshots    │  │
-│  └─────────────────────────────────────────────────────────────────────────┘   └────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────┬───────────────────────────────────────────────────────────┘
-                                                             │ Domain Events & Protocols
-                                                             ▼
-┌───────────────────────────────┬───────────────────────────────┬───────────────────────────────┬────────────────────────┐
-│  honba-core                   │  honba-mon                    │  honba-me                     │  honba-te              │
-│  Canonical Domain Types       │  Synchronous Risk Engine      │  Market Data WebSocket Feeds  │  Broker Execution      │
-│  Decimal Money & Quantities   │  OTR Breaker, Circuit Bands   │  Normalizer & Lakehouse Feed  │  Kite, Upstox, Angel   │
-├───────────────────────────────┼───────────────────────────────┼───────────────────────────────┼────────────────────────┤
-│  honba-nou                    │  honba-tamashii               │  honba-data                   │  honba-kokoro          │
-│  LLM Decision Engine          │  PyO3 Bindings & Python SDK   │  Parquet Bar Catalog          │  OMS Accounting        │
-│  PromptReplayer Backtester    │  Zero-Copy Arrow Lakehouse    │  DuckDB Fundamentals          │  FIFO Lots & Ledger    │
-└───────────────────────────────┴───────────────────────────────┴───────────────────────────────┴────────────────────────┘
+                                  └─────────────────────────────┬───────────────────────────┘
+                                                                │ HTTP / WS / CLI Args
+                                                                ▼
+┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│  本場・家 honba-ya Central Subsystem                                                                   │
+│                                                                                                        │
+│  ┌───────────────────────────────────────────────┐   ┌──────────────────────────────────────────────┐  │
+│  │   honba-ya-api-rest & honba-ya-api            │   │   honba-ya-cli                               │  │
+│  │   • Axum REST Endpoints (Orders, Reports, State)  │   • Subcommands: serve, backtest, optimize   │  │
+│  │   • Zero-Polling WebSocket Broadcast Bus (/ws)│   │   • Database Migrations & Catalog Inspection │  │
+│  │   • OpenAPI 3.1 & JWT Bearer Authentication   │   │   • Headless Engine & Backtest Runner        │  │
+│  └───────────────────────┬───────────────────────┘   └──────────────────────────────┬───────────────┘  │
+│                          │                                                          │                  │
+│                          ▼                                                          ▼                  │
+│  ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐  │
+│  │   honba-ya-actors (Actor Runtime & Supervision Tree)                                             │  │
+│  │                                                                                                  │  │
+│  │   ┌────────────────────┐    ┌────────────────────┐    ┌────────────────────┐    ┌─────────────┐  │  │
+│  │   │  MarketDataActor   │───▶│   StrategyActor    │───▶│     RiskActor      │───▶│ExecutionAct │  │  │
+│  │   │  Ticks, Agg Bars   │    │  Signals, Intent   │    │ honba-mon (Pure)   │    │ honba-te    │  │  │
+│  │   └─────────┬──────────┘    └────────────────────┘    └─────────┬──────────┘    └──────┬──────┘  │  │
+│  │             │                                                   │                  │         │  │
+│  │             │ Broadcast Ticks                                   │ Pre-Trade Pass   │ Acks    │  │
+│  │             ▼                                                   ▼                  ▼         │  │
+│  │   ┌──────────────────────────────────────────────────────────────────────────────────────────┐   │  │
+│  │   │   Supervisor & Metrics: Lifecycle FSM, Prometheus Gauges (OTR, Latency, PnL), Tracing   │   │  │
+│  │   └──────────────────────────────────────────────────────────────────────────────────────────┘   │  │
+│  └───────────────────────────────────────────────────┬──────────────────────────────────────────────┘  │
+│                                                      │                                                 │
+│  ┌───────────────────────────────────────────────────┴──────────┐   ┌───────────────────────────────┐  │
+│  │   honba-ya-backtest (Research-Live Parity Backtester)        │   │   honba-ya-strategy           │  │
+│  │   • Event Loop: Market ➔ Signal ➔ Order ➔ Fill               │   │   • Zero-I/O Strategy Trait   │  │
+│  │   • Indian Cost Model: STT, GST, Stamp Duty, SEBI turnover   │   │   • StrategyRunner FSM        │  │
+│  │   • T+1 Rolling Settlement Ledger & NSE/BSE Trading Calendar │   │   • step.toml Manifest Parser │  │
+│  │   • L2 Book Simulation, Latency Injection, MIS Auto-Square-Off│   │   • OrderIntent & PnL Ledger  │  │
+│  └───────────────────────┬──────────────────────────────────────┘   └───────────────┬───────────────┘  │
+│                          │                                                          │                  │
+│  ┌───────────────────────┴───────────────────────┐   ┌──────────────────────────────┴───────────────┐  │
+│  │   honba-ya-persistence                        │   │   honba-ya-enhancer (ASE Optimizer)           │  │
+│  │   • sqlx Postgres & SQLite Repositories       │   │   • Multi-Objective Genetic Algorithm (GA)   │  │
+│  │   • SEBI Append-Only Audit Ledger             │   │   • Bayesian Hyperparameter TPE              │  │
+│  │   • Order, Fill, Position & Decision Tables   │   │   • Walk-Forward Analysis (WFO, WFE >= 0.60) │  │
+│  │   • Point-in-Time Run Snapshots               │   │   • Odysseus Rule Tree Evolution             │  │
+│  └───────────────────────────────────────────────┘   └───────────────────────────────────────────────┘  │
+└──────────────────────────────────────────┬─────────────────────────────────────────────────────────────┘
+                                           │ Canonical Types & Protocols
+                                           ▼
+┌──────────────────────────────┬──────────────────────────────┬──────────────────────────────┬──────────────────────────────┐
+│  honba-core                  │  honba-mon                   │  honba-me                    │  honba-te                    │
+│  Canonical Domain Types      │  Synchronous Risk Engine     │  Market Data WebSocket Feeds │  Broker Execution            │
+│  Decimal Money & Quantities  │  OTR Breaker, Circuit Bands  │  Normalizer & Lakehouse Feed │  Kite, Upstox, Angel         │
+├──────────────────────────────┼──────────────────────────────┼──────────────────────────────┼──────────────────────────────┤
+│  honba-nou                   │  honba-tamashii              │  honba-data                  │  honba-kokoro                │
+│  LLM Decision Engine         │  PyO3 Bindings & Python SDK  │  Parquet Bar Catalog         │  OMS Accounting              │
+│  PromptReplayer Backtester   │  Zero-Copy Arrow Lakehouse   │  DuckDB Fundamentals         │  FIFO Lots & Ledger          │
+├──────────────────────────────┴──────────────────────────────┴──────────────────────────────┴──────────────────────────────┤
+│  honba-strategies (Workspace Catalog): 17+ Quantitative Strategies, step.toml Schemas, Pytest Conformance (436 passing)   │
+└───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Key Tenets
 1. **Zero Compromise on Monetary Precision**: Every price, limit price, fee, turnover metric, and account cash balance across `honba-ya` utilizes `rust_decimal::Decimal`. Floating-point values (`f32`/`f64`) are strictly prohibited in domain calculation logic, backtesting ledgers, and API payloads.
-2. **Deterministic Research-Live Parity**: The exact same `Strategy` trait, risk evaluation rules (`honba-mon`), statutory Indian cost formulas, and execution state machines run in backtesting as in live trading. Backtests do not take shortcuts; they process the same canonical event sequence.
+2. **Deterministic Research-Live Parity**: The exact same `Strategy` trait (`honba-ya-strategy`), risk evaluation rules (`honba-mon`), statutory Indian cost formulas, and execution state machines run in backtesting as in live trading. Backtests do not take shortcuts; they process the same canonical event sequence.
 3. **Actor-Based Fault Isolation & Backpressure**: All live processing occurs inside bounded, supervised Tokio actors (`MarketDataActor`, `StrategyActor`, `RiskActor`, `ExecutionActor`). Unbounded memory growth is prevented by backpressure policies (`try_send` with coalescing); crashes are caught and quarantined by the supervisor without taking down the trading node.
 4. **Authoritative SEBI Pre-Trade Risk Gate**: All orders generated by strategies, REST calls, or Python scripts must pass synchronously through `honba-mon::RiskEngine` wrapped by `RiskActor`. SEBI `algo_id` validation, Order-to-Trade Ratio (OTR) breakers, scrip price bands, and kill-switches cannot be bypassed under any operational mode.
 5. **Zero-Polling Real-Time WebSocket Streaming**: The API WebSocket handler subscribes directly to the actor broadcast bus. Ticks, order state transitions, fills, and depth updates stream to web clients (`honba-kao`) with sub-millisecond dispatch latency rather than periodic timer polling.
 6. **Immutable Regulatory Audit Trails**: Every order attempt, cancellation, modification, pre-trade refusal, broker ack, and execution fill is persisted with microsecond-resolution timestamps, correlation IDs, and algorithm tags in an append-only SQLite/PostgreSQL audit ledger.
 7. **Direct Lakehouse Partition Ingestion**: Native compatibility with `honba-data`'s Hive-partitioned directory layout (`catalog/{TF}/{EXCHANGE}/{SYMBOL}/*.parquet`), enabling instant bar serving and backtesting without duplicate file conversions.
+8. **Decoupled Strategy Runtime vs Catalog**: The execution runtime (`honba-ya-strategy`) and optimizer (`honba-ya-enhancer`) live in Rust inside `honba-ya`, while strategy definitions and research catalogs live in Python (`honba-strategies/`) using canonical `honba.domain` types and declarative `step.toml` manifests.
 
 ---
 
 ## 2. Crate Topology & Dependency Rules
 
-The target workspace structure consolidates the existing 13 crates into a streamlined, cohesive 8-crate topology, eliminating legacy cruft and broken relative references:
+The workspace consolidates into a cohesive **10-crate topology**, clearly separating the strategy execution runtime (`honba-ya-strategy`), strategy optimization & enhancement (`honba-ya-enhancer`), actor runtime (`honba-ya-actors`), event-driven backtesting (`honba-ya-backtest`), persistence (`honba-ya-persistence`), APIs, and CLI:
 
 ```text
 honba-ya/
-├── Cargo.toml                     # Workspace root manifest
+├── Cargo.toml                     # Workspace root manifest (10 members)
 ├── README.md                      # Architecture and operational guide
 ├── plan.md                        # Master implementation roadmap
 ├── schema/                        # Domain schemas and OpenAPI definitions
@@ -112,12 +130,39 @@ honba-ya/
     │       ├── lib.rs             # Module exports
     │       ├── messages.rs        # Actor message contracts & lifecycle states
     │       ├── market_data.rs     # MarketDataActor: tick normalization & broadcast
-    │       ├── strategy.rs        # StrategyActor & Strategy trait
+    │       ├── strategy.rs        # StrategyActor & Strategy trait bridge
     │       ├── risk.rs            # RiskActor: honba-mon pre-trade risk evaluation
     │       ├── execution.rs       # ExecutionActor: honba-te broker gateway management
     │       ├── supervisor.rs      # Actor supervision tree, drain & restart logic
     │       ├── metrics.rs         # Prometheus metrics exporter
     │       └── tracing_spans.rs   # Structured tracing spans (OrderGenerated -> Filled)
+    ├── honba-ya-strategy/         # Canonical strategy trait, pull-based runner & manifest parser
+    │   ├── Cargo.toml             # package: honba-ya-strategy, lib: honba_strategy
+    │   └── src/
+    │       ├── lib.rs             # Core exports: Strategy, StrategyRunner, Manifest
+    │       ├── strategy.rs        # Strategy trait (on_bar, on_tick, on_fill, on_order_ack)
+    │       ├── runner.rs          # StrategyRunner: pull-based zero-I/O event machine
+    │       ├── step.rs            # StepManifest parser: deserializes step.toml into StrategyManifest
+    │       ├── manifest.rs        # StrategyManifest, ParameterDef, TimeframeDef
+    │       ├── context.rs         # StrategyContext: market snapshot & indicators
+    │       ├── intent.rs          # OrderIntent, TargetPosition, ClosePosition
+    │       ├── ir.rs              # Strategy Intermediate Representation (IR)
+    │       ├── dyn_strategy.rs    # Dynamic boxed strategy dispatcher
+    │       ├── error.rs           # StrategyError & RunnerError
+    │       ├── buy_and_hold.rs    # Built-in reference strategy
+    │       ├── sma_crossover.rs   # Built-in SMA crossover strategy
+    │       └── rsi_reversal.rs    # Built-in RSI mean-reversion strategy
+    ├── honba-ya-enhancer/         # Automatic Strategy Enhancer (ASE: GA, Bayesian, WFO, Odysseus)
+    │   ├── Cargo.toml             # package: honba-ya-enhancer
+    │   └── src/
+    │       ├── lib.rs             # Core optimizer interfaces
+    │       ├── ga_optimizer.rs    # Multi-Objective Genetic Algorithm & Pareto frontier
+    │       ├── bayesian_optimizer.rs # Bayesian hyperparameter search (TPE)
+    │       ├── walk_forward.rs    # Walk-Forward Optimization (WFO & WFE metric)
+    │       ├── odysseus.rs        # StockSharp Odysseus Genetic Rule Tree Evolution
+    │       ├── overfitting_guardrails.rs # Deflated Sharpe Ratio (DSR) & PBO
+    │       ├── monte_carlo_stress.rs # Trade shuffling & slippage/spread shock injection
+    │       └── ai_refinement.rs   # Closed-loop LLM feedback integration (honba-nou)
     ├── honba-ya-backtest/         # Research-live parity event-driven backtesting engine
     │   ├── Cargo.toml
     │   └── src/
@@ -170,6 +215,7 @@ honba-ya/
     │       ├── main.rs            # Clap CLI parser & command dispatcher
     │       ├── serve.rs           # `honba serve`: starts REST/WS server & actor tree
     │       ├── backtest.rs        # `honba backtest`: executes BacktestEngine
+    │       ├── optimize.rs        # `honba optimize`: executes honba-ya-enhancer
     │       ├── migrate.rs         # `honba migrate`: executes sqlx database migrations
     │       ├── data.rs            # `honba data`: catalog inspect & tick conversion
     │       ├── schema.rs          # `honba schema`: emits OpenAPI, TypeScript, MCP
@@ -193,20 +239,26 @@ honba-ya/
 Layer 4: [honba-ya-cli] (Executable Boundary)
              │
 Layer 3: [honba-ya-api-rest] ──▶ [honba-ya-api]
-             │
-Layer 2: [honba-ya-actors]   ──▶ [honba-ya-backtest] (Simulation & Execution)
+             │                          ▲
+             ▼                          │
+         [honba-ya-enhancer] (ASE Optimization Engines)
+             │                          │
+Layer 2: [honba-ya-actors]   ──▶ [honba-ya-backtest] ──▶ [honba-ya-strategy] (Strategy Trait & Runner)
              │                          │
 Layer 1: [honba-ya-persistence] ──▶ [honba-ya-config]
              │
-Layer 0: Depends on external canonical crates: [honba-core], [honba-mon], [honba-te-core], [honba-me-core]
+Layer 0: Canonical platform crates: [honba-core], [honba-mon], [honba-te-core], [honba-me-core]
 ```
 
-### Deprecation & Pruning Directive
-1. **Retire `crates/honba-ya-ws`**: The 15-line broadcast stub is obsolete. Delete the crate and standardize all WebSocket streaming in `honba-ya-api-rest/src/ws.rs`.
-2. **Retire `crates/honba-ya-engine`**: Superseded by `honba-ya-actors` and `honba-ya-backtest`. Remove the crate and all internal references to `honba-messages`, `honba-entities`, and `honba-ports`.
-3. **Consolidate `crates/honba-ya-sim` into `honba-ya-backtest`**: Move the high-fidelity microstructure models (L2 book, latency, slippage, MIS square-off) into `honba-ya-backtest/src/sim/`, upgrading all types to `rust_decimal::Decimal`.
-4. **Fold `crates/honba-ya-async` and `honba-ya-sweep`**: Migrate sweep parameter optimization into `honba-ya-backtest::sweep`, deleting standalone legacy crates.
-5. **Fix All Workspace Paths**: Replace all `../../../` occurrences with proper workspace inheritance or `../../` workspace relative paths.
+### Completed Deprecations & Realignment
+1. **Renamed & Modernized `honba-ya-enhancer`**: Formerly `honba-strategies`, this crate was renamed to accurately describe its role as the Automatic Strategy Enhancer (GA, Bayesian, WFO, Odysseus). Fixed Rust 2024 `r#gen` conflicts, Rayon `ThreadRng` `!Sync` bugs, and float `Ord` map issues.
+2. **Relocated `honba-ya-strategy`**: Relocated from `honba-nou/crates/honba-nou-strategy` to `honba-ya/crates/honba-ya-strategy`. Contains the zero-I/O `Strategy` trait, pull-based `StrategyRunner`, and `step.toml` parser.
+3. **Retired `crates/honba-ya-ws`**: The 15-line broadcast stub is deleted. WebSocket streaming is unified in `honba-ya-api-rest/src/ws.rs`.
+4. **Retired `crates/honba-ya-engine`**: Superseded by `honba-ya-actors` and `honba-ya-backtest`. Deleted along with all usages of `honba-messages`, `honba-entities`, and `honba-ports`.
+5. **Consolidated `crates/honba-ya-sim` into `honba-ya-backtest`**: High-fidelity microstructure models (L2 book, latency, slippage, MIS square-off) migrated to `honba-ya-backtest/src/sim/`, upgraded to `rust_decimal::Decimal`.
+6. **Retired `crates/honba-ya-async` and `honba-ya-sweep`**: Replaced by `honba-ya-enhancer` and `honba-ya-backtest`.
+7. **Python Strategy Catalog (`honba-strategies/`) Realignment**: Completely decoupled from Rust engine crates. Standardized on `honba.domain` types exported by `honba-tamashii`. All 436 pytest tests pass.
+8. **Manifest Alignment (`step.rs`)**: `honba-ya-strategy` natively deserializes `step.toml` (`step.schema.json`) into `StrategyManifest`, verified by integration tests across all 17 strategies in `honba-strategies/`.
 
 ---
 
@@ -240,11 +292,40 @@ impl Supervisor {
 ```
 
 - **`MarketDataActor`**: Ingests normalized `honba_core::Tick` and `Bar` instances from `honba-me`. Maintains an in-memory Last Value Cache (LVC) and broadcasts quotes to `honba-ya-api-rest` WebSockets and subscribed `StrategyActor` instances.
-- **`StrategyActor`**: Executes the trading logic (either native Rust strategies or Python strategies via `honba-tamashii`). Converts market signals into `OrderRequest` candidate structs.
+- **`StrategyActor`**: Executes strategy logic by wrapping `honba-ya-strategy::Strategy` instances. Converts market signals into `OrderIntent` candidate structs.
 - **`RiskActor`**: Wraps `honba_mon::RiskEngine` synchronously. Every candidate order is evaluated with microsecond latency measurement. Rejections are immediately logged to the audit ledger and returned to the caller; approvals are passed to `ExecutionActor`.
 - **`ExecutionActor`**: Interfaces with `honba_te_core::BrokerExecutor`. Manages order state transitions (`PendingNew` $\to$ `New` $\to$ `PartiallyFilled` $\to$ `Filled`), retries on network blips, and reconciles broker acks with the persistence layer.
 
-### 3.2 `honba-ya-backtest`: Institutional Backtester & Simulation Models
+### 3.2 `honba-ya-strategy`: Zero-I/O Strategy Trait, Runner & Step Manifests
+
+`honba-ya-strategy` defines the single source of truth for strategy execution and configuration:
+
+```rust
+pub trait Strategy: Send + 'static {
+    fn name(&self) -> &str;
+    fn on_bar(&mut self, bar: &Bar, ctx: &StrategyContext) -> Result<Vec<OrderIntent>, StrategyError>;
+    fn on_tick(&mut self, tick: &Tick, ctx: &StrategyContext) -> Result<Vec<OrderIntent>, StrategyError>;
+    fn on_order_ack(&mut self, ack: &OrderAck) -> Result<(), StrategyError>;
+    fn on_fill(&mut self, fill: &FillReport) -> Result<(), StrategyError>;
+}
+```
+
+- **Zero-I/O `StrategyRunner`**: Pull-based state machine that advances strictly through domain events (`on_bar`, `on_tick`, `on_fill`). Does no I/O, networking, or blocking syscalls, ensuring 100% determinism.
+- **`step.rs` (`StepManifest`)**: Deserializes the declarative `step.toml` format matching `step.schema.json` directly into canonical `StrategyManifest`. Reads strategy metadata, authors, timeframes, default parameters, and parameter sweep spaces (`min`, `max`, `step`, `type`).
+- **Standardized Order Intents**: Strategies emit declarative `OrderIntent` candidates (`MarketOrder`, `LimitOrder`, `TargetPosition`, `CloseAll`), insulating strategy code from broker-specific order management logic.
+
+### 3.3 `honba-ya-enhancer`: Automatic Strategy Enhancer (ASE)
+
+Inspired by institutional optimizers and Jesse, `honba-ya-enhancer` provides advanced algorithmic optimization:
+
+- **Multi-Objective Genetic Algorithm (`ga_optimizer.rs`)**: Chromosome encoding of strategy parameter spaces from `step.toml`. Tournament selection, uniform crossover, Gaussian mutations, and Pareto frontier optimization across Sharpe, Sortino, and Max Drawdown.
+- **Bayesian Optimization (`bayesian_optimizer.rs`)**: Tree-structured Parzen Estimators (TPE) for probabilistic exploration of non-linear parameter landscapes with Rayon parallel evaluations.
+- **Walk-Forward Analysis (`walk_forward.rs`)**: Anchored and rolling out-of-sample window partitioning. Computes Walk-Forward Efficiency (WFE) requiring $\text{WFE} \ge 0.60$ for production deployment.
+- **StockSharp Odysseus Evolution (`odysseus.rs`)**: Genetic programming engine evolving composite strategy rule trees (indicators, boolean logic, execution conditions) at up to 1,000 candidate evaluations per second.
+- **Overfitting Guardrails (`overfitting_guardrails.rs`)**: Computes Marcos López de Prado's Deflated Sharpe Ratio (DSR) and Probability of Backtest Overfitting (PBO) via CSCV.
+- **Monte Carlo Stress Testing (`monte_carlo_stress.rs`)**: Trade sequence permutation, slippage/spread shock injection, and bootstrap VaR/CVaR confidence estimation.
+
+### 3.4 `honba-ya-backtest`: Institutional Backtester & Simulation Models
 
 The backtest engine operates on a strict, deterministic event loop ensuring complete research-live parity:
 $$\text{MarketEvent} \longrightarrow \text{SignalEvent} \longrightarrow \text{OrderEvent} \longrightarrow \text{FillEvent}$$
@@ -271,7 +352,7 @@ Every fill incurs statutory charges calculated with exact `rust_decimal::Decimal
 - **L2 Order Book Walking**: Matches large orders against historical depth tiers, calculating realistic non-linear market impact.
 - **Latency & Slippage Injection**: Configurable execution delays (e.g. 15ms broker queue delay + 5ms exchange gateway latency).
 
-### 3.3 `honba-ya-persistence`: sqlx Schema & SEBI Regulatory Audit Ledger
+### 3.5 `honba-ya-persistence`: sqlx Schema & SEBI Regulatory Audit Ledger
 
 The persistence layer supports both PostgreSQL (for live institutional operations) and SQLite (for embedded edge nodes, backtests, and testing):
 
@@ -285,33 +366,9 @@ The persistence layer supports both PostgreSQL (for live institutional operation
 
 ```sql
 -- Core SEBI regulatory audit ledger table
-CREATE TABLE IF NOT EXISTS audit_ledger (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp_ms BIGINT NOT NULL,
-    timestamp_utc TEXT NOT NULL,
-    event_type TEXT NOT NULL,
-    algo_id TEXT NOT NULL,
-    client_id TEXT NOT NULL,
-    correlation_id TEXT NOT NULL,
-    client_order_id TEXT NOT NULL,
-    broker_order_id TEXT,
-    exchange_order_id TEXT,
-    instrument TEXT NOT NULL,
-    side TEXT NOT NULL,
-    order_type TEXT NOT NULL,
-    quantity TEXT NOT NULL,
-    price TEXT,
-    status TEXT NOT NULL,
-    refusal_reason TEXT,
-    latency_us BIGINT,
-    metadata_json TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_audit_algo_id ON audit_ledger(algo_id);
-CREATE INDEX IF NOT EXISTS idx_audit_order_id ON audit_ledger(client_order_id);
-CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_ledger(timestamp_ms);
-```
+CREATE TABLE IF NOT EXISTS audit_ledger (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    timestamp_ms BIGINT NOT NULL,\n    timestamp_utc TEXT NOT NULL,\n    event_type TEXT NOT NULL,\n    algo_id TEXT NOT NULL,\n    client_id TEXT NOT NULL,\n    correlation_id TEXT NOT NULL,\n    client_order_id TEXT NOT NULL,\n    broker_order_id TEXT,\n    exchange_order_id TEXT,\n    instrument TEXT NOT NULL,\n    side TEXT NOT NULL,\n    order_type TEXT NOT NULL,\n    quantity TEXT NOT NULL,\n    price TEXT,\n    status TEXT NOT NULL,\n    refusal_reason TEXT,\n    latency_us BIGINT,\n    metadata_json TEXT\n);\nCREATE INDEX IF NOT EXISTS idx_audit_algo_id ON audit_ledger(algo_id);\nCREATE INDEX IF NOT EXISTS idx_audit_order_id ON audit_ledger(client_order_id);\nCREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_ledger(timestamp_ms);\n```
 
-### 3.4 `honba-ya-api-rest` & Unified WebSocket Gateway
+### 3.6 `honba-ya-api-rest` & Unified WebSocket Gateway
 
 The API layer is built on Axum 0.7, exposing over 30 REST endpoints and an asynchronous WebSocket streaming gateway:
 
@@ -326,7 +383,7 @@ The API layer is built on Axum 0.7, exposing over 30 REST endpoints and an async
   - Route-level role-based access control (RBAC): Read-only, Operator, Admin.
   - Constant-time token verification with audit logging of all administrative actions.
 
-### 3.5 `honba-ya-cli`: Unified Operator & Developer CLI
+### 3.7 `honba-ya-cli`: Unified Operator & Developer CLI
 
 The single authoritative binary `honba` provides institutional workflow commands:
 
@@ -336,6 +393,9 @@ honba serve --data-dir ../honba-data/data --addr 127.0.0.1:8000 --trading-state 
 
 # Run a deterministic backtest with Indian statutory costs
 honba backtest --config configs/momentum_nifty.toml --from 2025-01-01 --to 2025-12-31 --output results/
+
+# Run Automatic Strategy Enhancer (GA / Bayesian / WFO)
+honba optimize --strategy momentum --method ga --wfo --data-dir ../honba-data/data
 
 # Run database migrations
 honba migrate --database-url sqlite://honba.db
@@ -351,47 +411,82 @@ honba trading-state halt --reason "High OTR breach observed"
 
 ## 4. Phase-by-Phase Implementation Roadmap
 
-### Phase 1: Canonical Type Unification & Legacy Pruning (M0) — Week 1–2
+### Phase 1: Canonical Type Unification, Legacy Pruning & Architectural Realignment (M0) — Week 1–2
 
-**Status (2026-10-23): done.** `cargo check --workspace` is clean for every `honba-ya` member crate except `honba-strategies` (Phase 5's GA/Bayesian/WFO/Odysseus optimizer crate — a separate, pre-existing breakage unrelated to this phase: a missing `statrs` dependency and a few self-referential-import/generic bugs; left untouched, tracked as a Phase 5 follow-up, not re-opened here).
+**Status (2026-10-23): done.** 
+`cargo check --workspace` is 100% clean across all 10 member crates. All 436 pytest tests in `honba-strategies/` pass cleanly. All 17 `step.toml` manifests validate against `honba-ya-strategy::StepManifest`.
 
-What actually blocked this phase, beyond the checklist below: the crate-level pruning (dependency paths, deleted crates) had already happened, but the *source* in `honba-ya-api-rest` (68 files), `honba-ya-cli` (12 files), and `honba-ya-config` (2 files) still imported the deleted `honba_messages`/`honba_entities`/`honba_risk`/`honba_ports` names, which weren't even declared as dependencies any more — a large, real migration onto `honba-core`/`honba-mon`/`honba-api::wire` types, not a quick cleanup. Along the way this also surfaced and fixed: a corrupted `honba-ya-backtest/engine.rs` (a duplicated/mangled `BacktestConfig` block with struct fields orphaned outside any struct, plus two called-but-never-defined methods) unrelated to the type migration itself; a dead `ExecutionVenue`/`GatewayVenue` abstraction in `honba-ya-api-rest` with no reachable production implementor (collapsed to a concrete `NextOpenSim` simulator, `gateway_venue.rs` deleted, its tests rewritten or dropped accordingly); and — in the **sibling `honba-nou` repository**, which blocked this workspace from compiling at all via the `honba-nou-strategy` dependency — the same class of leftover `honba_engine`/`honba_entities`/`honba_messages`/stale-`honba_mon` imports, fixed there too (that crate's `StrategyRunner` needed a real redesign since `honba_engine`'s `Handler`/`ExecutionEngine` kernel has no successor; it's now pull-based, matching `honba-core`'s zero-I/O principle).
+Completed work in Phase 1 and the subsequent 4-step architectural realignment:
+1. **Type Migration & Legacy Pruning**:
+   - Standardized all crates on `honba-core`, `honba-mon`, `rust_decimal::Decimal`, and `honba-api::wire` types.
+   - Excised all usages of deleted legacy crates: `honba_messages`, `honba_entities`, `honba_risk`, `honba_ports`, and `honba-kokoro-risk`.
+   - Pruned dead crates from disk and workspace: `honba-ya-ws`, `honba-ya-engine`, `honba-ya-sim`, `honba-ya-async`, `honba-ya-sweep`.
+   - Fixed corrupted `honba-ya-backtest/engine.rs` block and replaced dead `ExecutionVenue` abstraction with concrete `NextOpenSim`.
+2. **Step 1: Optimizer Modernization & Renaming (`honba-ya-enhancer`)**:
+   - Renamed `honba-ya/crates/honba-strategies` to `honba-ya-enhancer`.
+   - Updated package metadata, fixed Rust 2024 `r#gen` identifier conflicts, repaired Rayon thread-safety (`ThreadRng` `!Sync`), and fixed float `Ord` map operations. Compiles with 0 warnings/errors.
+3. **Step 2: Strategy Runtime Relocation (`honba-ya-strategy`)**:
+   - Relocated runtime crate from `honba-nou/crates/honba-nou-strategy` to `honba-ya/crates/honba-ya-strategy` (`honba_strategy` lib).
+   - Removed circular dependency risk; updated sibling `honba-nou` workspace to depend on `honba-ya-strategy`.
+   - Both workspaces compile cleanly.
+4. **Step 3: Strategy Catalog Domain Type Unification (`honba-strategies/`)**:
+   - Modernized the top-level Python quantitative strategy catalog by purging all deprecated `from honba.entities.*` imports in favor of canonical `from honba.domain.*` types.
+   - Exported `Trade` in `honba-tamashii/python/honba/__init__.py`.
+   - All 436 pytest tests pass in 1.40s.
+5. **Step 4: Manifest Alignment (`step.rs`)**:
+   - Implemented `step.rs` in `honba-ya-strategy` with `StepManifest` deserializing `step.toml` (`step.schema.json`) into canonical `StrategyManifest`.
+   - Added `StrategyManifest::from_step_toml_str` constructor.
+   - Added comprehensive integration tests (`tests/step_manifest.rs`) validating that all 17 strategy catalogs deserialize without error.
 
 - [x] **1.1 Workspace Dependency Cleanup**
   - [x] Standardize all Cargo dependencies to canonical `honba-core`, `honba-mon`, `honba-te-core`, `honba-me-core`.
-  - [x] Fix broken relative paths (`../../../`) in `honba-ya-cli`, `honba-ya-persistence`, and `honba-ya-sim` — turned out these `../../../honba-te/crates/honba-te-core` paths were already correct for this workspace's actual directory depth (3 levels up from `honba-ya/crates/X/` lands at the `honba-workspace` root, where sibling repos live); not a real bug. `honba-ya-sim` itself no longer exists (already deleted, see 1.3).
-  - [x] Excise all usages of `honba-messages`, `honba-entities`, and `honba-ports` — done across `honba-ya-api-rest`, `honba-ya-cli`, `honba-ya-config`, and (blocking this workspace) `honba-nou/crates/honba-nou-strategy`.
-  - [x] Purge excised `honba-kokoro-risk` from `honba-ya/Cargo.toml` and migrate `honba-ya-config`, `honba-ya-actors::RiskActor`, and `honba-ya-api-rest` to `honba-mon` per [Risk Migration Plan](../honba-docs/docs/architecture/migration_plan_kokoro_risk_to_mon.md).
+  - [x] Excise all usages of `honba-messages`, `honba-entities`, and `honba-ports` across all crates.
+  - [x] Purge excised `honba-kokoro-risk` from `honba-ya/Cargo.toml` and migrate to `honba-mon`.
 - [x] **1.2 Decimal Arithmetic Enforcement**
-  - [x] Replace remaining `f64` prices, quantities, and cash values in `honba-ya-api` and `honba-ya-cli` with `rust_decimal::Decimal` (also found and fixed further `f64` leftovers in `honba-ya-api-rest`'s `market.rs`/`registry.rs`/`executor.rs` and `honba-ya-backtest`'s `engine.rs`).
+  - [x] Replace remaining `f64` prices, quantities, and cash values in `honba-ya-api`, `honba-ya-cli`, `honba-ya-api-rest`, and `honba-ya-backtest` with `rust_decimal::Decimal`.
   - [x] Ensure all API serialization formats support lossless decimal strings.
 - [x] **1.3 Legacy Crates Pruning**
-  - [x] `crates/honba-ya-ws`, `crates/honba-ya-engine`, `crates/honba-ya-sim`, `crates/honba-ya-async`, and `crates/honba-ya-sweep` are deleted; all calls redirected to `honba-ya-actors`/`honba-ya-backtest`. Note: `honba-ya-api-rest`'s `POST /backtests`/`POST /sweeps` executor (`executor.rs`) could not be fully restored on top of this — the old synchronous `honba_engine` kernel it ran on, and `honba_sweep`'s parameter-sweep driver, have no successor to port to (`honba-ya-backtest::sim` only absorbed part of `honba-ya-sim`, and `honba-nou-strategy::StrategyRunner` was redesigned to not depend on an engine/handler kernel at all). It's left as a documented, honest stub returning `NotImplemented`; restoring real functionality there is a genuine feature-rebuild, not a Phase 1 task — see `executor.rs`'s module doc for the full accounting, and consider scoping it explicitly into Phase 4 or Phase 7.1 (`honba optimize`).
+  - [x] `crates/honba-ya-ws`, `crates/honba-ya-engine`, `crates/honba-ya-sim`, `crates/honba-ya-async`, and `crates/honba-ya-sweep` deleted; calls redirected to `honba-ya-actors`/`honba-ya-backtest`/`honba-ya-enhancer`.
+- [x] **1.4 Strategy Runtime & Optimizer Realignment**
+  - [x] Relocate `honba-nou-strategy` -> `honba-ya/crates/honba-ya-strategy`.
+  - [x] Rename `honba-ya/crates/honba-strategies` -> `crates/honba-ya-enhancer` and modernize for Rust 2024.
+  - [x] Unify Python catalog `honba-strategies/` on `honba.domain` types (436 passing tests).
+  - [x] Implement `step.rs` in `honba-ya-strategy` to parse `step.toml` matching `step.schema.json` across all 17 catalog strategies.
 
 ### Phase 2: Production Persistence & sqlx Relational Schema (M1) — Week 3–4
-- [ ] **2.1 sqlx Relational Schema & Migrations**
-  - [ ] Create sqlx migration files for `traders`, `orders`, `fills`, `decisions`, and `positions`.
-  - [ ] Add dual SQLite and PostgreSQL support in `honba-ya-persistence`.
-- [ ] **2.2 Repositories Implementation**
-  - [ ] Implement `OrderRepository` with idempotent upsert and state transition validations.
-  - [ ] Implement `FillRepository` with fee breakdown persistence.
-  - [ ] Implement `PositionRepository` supporting FIFO tax-lot tracking.
-  - [ ] Implement `DecisionRepository` with prompt sha256 checksum tracking.
-- [ ] **2.3 Persistence Integration Testing**
-  - [ ] Verify database roundtrips, migration idempotency, and concurrent transaction safety under load.
+
+**Status (2026-10-23): done.**
+All 21 persistence integration tests pass. Schema migrations verified idempotent on both SQLite and PostgreSQL.
+
+- [x] **2.1 sqlx Relational Schema & Migrations**
+  - [x] Create sqlx migration files for `traders`, `orders`, `fills`, `decisions`, `positions`, and `audit_ledger`.
+  - [x] Add dual SQLite and PostgreSQL support in `honba-ya-persistence` via `Database` enum and `with_executor!`.
+- [x] **2.2 Repositories Implementation**
+  - [x] Implement `OrderRepository` (`OrderStore`) with idempotent upsert and state transition validations.
+  - [x] Implement `FillRepository` (`FillStore`) with fee breakdown persistence and automatic promotion to filled.
+  - [x] Implement `PositionRepository` (`PositionStore`) supporting long-only FIFO tax-lot tracking and exact Decimal WAC calculations.
+  - [x] Implement `DecisionRepository` (`DecisionStore`) with prompt sha256 checksum tracking and deterministic replays.
+  - [x] Implement `TraderRepository` (`TraderStore`) for trader profiles and allocated capital management.
+- [x] **2.3 Persistence Integration Testing**
+  - [x] Verify database roundtrips, migration idempotency, and concurrent transaction safety under load (`concurrency_tests.rs`, `migrations_tests.rs`, `traders_tests.rs`).
 
 ### Phase 3: Actor Runtime & WebSocket Streaming Gateway (M2) — Week 5–6
-- [ ] **3.1 Actor Supervision & Lifecycle Hardening**
-  - [ ] Implement actor restart strategies (OneForOne, AllForOne) in `Supervisor`.
-  - [ ] Add backpressure drop/coalescing policies in `MarketDataActor` to prevent memory blowups.
-  - [ ] Ensure clean shutdown drain loops for in-flight orders during graceful stop.
-- [ ] **3.2 Zero-Polling WebSocket Gateway**
-  - [ ] Rebuild `honba-ya-api-rest/src/ws.rs` to subscribe directly to `MarketDataActor`'s broadcast channel.
-  - [ ] Remove the 1000ms polling loop; stream ticks, depth, and order state events immediately.
-  - [ ] Validate bidirectional client messaging (subscribe, unsubscribe, ping/pong) with `honba-kao`.
+
+**Status (2026-10-23): done.**
+All actor supervision tests and live WebSocket roundtrip integration tests pass. Zero polling delay across the WebSocket broadcast bus.
+
+- [x] **3.1 Actor Supervision & Lifecycle Hardening**
+  - [x] Implement actor restart strategies (`OneForOne`, `AllForOne`) in `Supervisor` with dynamic policy updates and per-actor restart counters.
+  - [x] Add backpressure drop/coalescing policies (`BackpressurePolicy::CoalesceLatest`, `DropNewest`, `DropOldest`) in `MarketDataActor` to prevent memory blowups.
+  - [x] Ensure clean shutdown drain loops for in-flight orders during graceful stop in `ExecutionActor`.
+- [x] **3.2 Zero-Polling WebSocket Gateway**
+  - [x] Rebuild `honba-ya-api-rest/src/ws.rs` to subscribe directly to `MarketDataActor`'s broadcast channel via `AppState::subscribe_market_data`.
+  - [x] Remove the 1000ms polling loop; stream ticks, depth, and order state events immediately with sub-millisecond dispatch.
+  - [x] Validate bidirectional client messaging (subscribe, unsubscribe, ping/pong, close) matching `honba-fe/apps/web/src/core/data-layer.ts` verified with live WebSocket integration tests (`ws_tests.rs`).
 
 ### Phase 4: Institutional Strategy Tester (`honba-ya-backtest`) (M3) — Week 7–8
 - [ ] **4.1 Microstructure Simulation & Order Book Matching**
+  - [ ] Wire `honba-ya-strategy::StrategyRunner` into `BacktestEngine` deterministic event loop.
   - [ ] Port L2 order book depth matching and latency injection from `honba-ya-sim` into `honba-ya-backtest/src/sim/`.
   - [ ] Upgrade simulation models to strict `rust_decimal::Decimal` and `honba_core::Tick`.
   - [ ] Implement volume-participation caps, spread crossing penalties, and adverse fill slippage models.
@@ -403,28 +498,27 @@ What actually blocked this phase, beyond the checklist below: the crate-level pr
 - [ ] **4.3 Lakehouse Catalog Ingestion**
   - [ ] Support loading historical bars directly from `honba-data/data/catalog` into backtests with zero-copy Arrow readers.
 
-### Phase 5: Automatic Strategy Enhancer (like Jesse) (M4) — Week 9–10
-- [ ] **5.1 Multi-Objective Genetic Algorithm (GA) Optimizer**
-  - [ ] Implement declarative parameter chromosome encoder reading strategy parameter search spaces.
-  - [ ] Implement tournament selection, uniform/arithmetic crossover, and Gaussian mutation operators.
-  - [ ] Calculate multi-objective fitness balancing Sharpe, Sortino, Profit Factor, and Max Drawdown.
-  - [ ] Compute and export the Pareto-optimal parameter frontier.
+### Phase 5: Automatic Strategy Enhancer (`honba-ya-enhancer`) (M4) — Week 9–10
+- [ ] **5.1 Multi-Objective Genetic Algorithm (GA) Optimizer Integration**
+  - [ ] Wire `ga_optimizer.rs` to read strategy chromosome spaces directly from `honba_strategy::StepManifest`.
+  - [ ] Execute tournament selection, uniform/arithmetic crossover, and Gaussian mutation operators across Rayon worker threads.
+  - [ ] Calculate multi-objective fitness balancing Sharpe, Sortino, Profit Factor, and Max Drawdown, exporting the Pareto-optimal frontier.
 - [ ] **5.2 Bayesian Hyperparameter Optimization (TPE)**
-  - [ ] Integrate Tree-structured Parzen Estimators for probabilistic search over high-dimensional strategy spaces.
+  - [ ] Wire `bayesian_optimizer.rs` Tree-structured Parzen Estimators for probabilistic search over high-dimensional spaces.
   - [ ] Support parallel candidate evaluation across multi-threaded Rayon worker pools.
 - [ ] **5.3 Walk-Forward Analysis (WFO)**
-  - [ ] Implement anchored and rolling out-of-sample cross-validation partitions.
-  - [ ] Compute Walk-Forward Efficiency (WFE) requiring WFE >= 0.60 for certification.
+  - [ ] Wire `walk_forward.rs` anchored and rolling out-of-sample cross-validation partitions.
+  - [ ] Compute Walk-Forward Efficiency (WFE) requiring WFE >= 0.60 for production certification.
 - [ ] **5.4 Overfitting Guardrails (DSR & PBO)**
-  - [ ] Implement Marcos López de Prado’s Deflated Sharpe Ratio (DSR) adjusting for number of trials, return skewness, and kurtosis.
+  - [ ] Wire `overfitting_guardrails.rs` Marcos López de Prado’s Deflated Sharpe Ratio (DSR) adjusting for number of trials, return skewness, and kurtosis.
   - [ ] Implement Probability of Backtest Overfitting (PBO) via Combinatorially Symmetric Cross-Validation (CSCV).
 - [ ] **5.5 Monte Carlo Permutation & Stress Testing**
-  - [ ] Implement trade sequence shuffling (without replacement) to determine worst-case drawdown confidence intervals (95%, 99% VaR/CVaR).
+  - [ ] Wire `monte_carlo_stress.rs` trade sequence shuffling (without replacement) to determine worst-case drawdown confidence intervals (95%, 99% VaR/CVaR).
   - [ ] Inject synthetic spread/slippage shocks (1.5x, 2.0x, 3.0x) and gap-down scenarios.
 - [ ] **5.6 Closed-Loop AI Refinement Integration**
   - [ ] Interface with `honba-nou` AI Strategy Enhancer loop to ingest diagnostic reports and apply prompt-driven parameter/rule mutations.
 - [ ] **5.7 StockSharp Odysseus Genetic Generation Backend Runner**
-  - [ ] Implement Rayon-accelerated parallel evaluator for Odysseus candidate rule trees against historical tick/bar streams.
+  - [ ] Rayon-accelerated parallel evaluator for Odysseus candidate rule trees against historical tick/bar streams.
   - [ ] High-throughput simulation pipeline evaluating up to 1,000 rule tree genomes per second across pinned OS threads.
   - [ ] Support L2 order book depth simulation (queue position, market depth depletion, latency jitter) for StockSharp market-making and quoting strategies.
 
@@ -441,11 +535,12 @@ What actually blocked this phase, beyond the checklist below: the crate-level pr
 ### Phase 7: Unified CLI & Parameter Sweeps (M6) — Week 13–14
 - [ ] **7.1 CLI Subcommands**
   - [ ] Re-wire `honba backtest` CLI directly to `honba_ya_backtest::BacktestEngine`.
-  - [ ] Implement `honba optimize` subcommand supporting `--method ga`, `--method bayesian`, and `--wfo`.
+  - [ ] Implement `honba optimize` subcommand supporting `--method ga`, `--method bayesian`, and `--wfo` backed by `honba-ya-enhancer`.
   - [ ] Implement `honba migrate` subcommand for PostgreSQL/SQLite relational schema migrations.
   - [ ] Add `honba data catalog-inspect` and `catalog-verify` subcommands.
 - [ ] **7.2 End-to-End System Integration**
   - [ ] Validate end-to-end pipeline: `honba-me` feed -> `honba-ya` actors -> `honba-mon` risk gate -> `honba-te` mock execution -> `honba-kao` chart display.
+
 ---
 
 ## 5. Verification, Conformance & Benchmarks
@@ -460,3 +555,5 @@ To guarantee production readiness and regulatory compliance, `honba-ya` must sat
 | **Actor Throughput** | $> 100,000$ messages/second processed across actor supervision tree under load. | Concurrent pipeline stress tests with synthetic tick bursts. |
 | **WebSocket Latency** | $< 2\,\text{ms}$ tick-to-WebSocket client delivery under normal network conditions. | Local end-to-end WebSocket roundtrip probe tests. |
 | **Backtest Fidelity** | 100% deterministic results across identical seed and data feeds; exact Indian statutory fee matching. | Regression test comparing backtest fee totals with manual exchange tax contract notes. |
+| **Strategy Manifest Conformance** | 100% valid deserialization of all catalog `step.toml` manifests into `StrategyManifest`. | `tests/step_manifest.rs` testing all catalog strategies. |
+| **Python Research Parity** | 100% test pass rate for all strategy research code with canonical `honba.domain` types. | Pytest suite in `honba-strategies/` (436 passed). |
