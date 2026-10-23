@@ -10,7 +10,7 @@ name = "honba_backtest"
 [dependencies]
 honba-core.workspace = true
 honba-mon.workspace = true
-honba-ya-actors.workspace = true
+honba-ya-strategy.workspace = true
 honba-nou-agent.workspace = true
 anyhow.workspace = true
 chrono.workspace = true

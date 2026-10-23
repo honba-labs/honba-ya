@@ -1,9 +1,7 @@
-use async_trait::async_trait;
 use chrono::{NaiveDate, NaiveTime, TimeZone, Utc};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-use honba_actors::Strategy;
 use honba_backtest::*;
 // `honba_core::*` also exports a (different, live-trading) `MarketEvent`;
 // this explicit import resolves the glob ambiguity in favor of the
@@ -12,6 +10,7 @@ use honba_backtest::MarketEvent;
 use honba_core::*;
 use honba_mon::{OtrConfig, RiskEngine, RiskLimits};
 use honba_nou_agent::{LlmRecord, PromptReplayer};
+use honba_strategy::{OrderIntent, Strategy, StrategyContext};
 
 struct MockNseStrategy {
     symbol: InstrumentId,
@@ -21,44 +20,39 @@ struct MockNseStrategy {
     sold: bool,
 }
 
-#[async_trait]
 impl Strategy for MockNseStrategy {
     fn name(&self) -> &str {
-        "MockNseStrategy"
-    }
-
-    fn algo_id(&self) -> &str {
         "algo-nse-equity"
     }
 
-    async fn on_tick(&mut self, tick: &Tick) -> Vec<OrderRequest> {
-        if let Some(price) = tick.last_price() {
+    fn on_trade(
+        &mut self,
+        ctx: &mut dyn StrategyContext,
+        trade: &Tick,
+    ) -> honba_strategy::Result<()> {
+        if let Some(price) = trade.last_price() {
             if !self.bought && price <= self.buy_threshold {
                 self.bought = true;
-                return vec![OrderRequest::new(
+                ctx.submit(OrderIntent::limit_buy(
                     self.symbol.clone(),
-                    OrderSide::Buy,
-                    OrderType::Limit(price),
                     Quantity::from_u64(100),
-                    self.algo_id(),
-                )];
+                    price,
+                ));
             } else if self.bought && !self.sold && price >= self.sell_threshold {
                 self.sold = true;
-                return vec![OrderRequest::new(
+                ctx.submit(OrderIntent::limit_sell(
                     self.symbol.clone(),
-                    OrderSide::Sell,
-                    OrderType::Limit(price),
                     Quantity::from_u64(100),
-                    self.algo_id(),
-                )];
+                    price,
+                ));
             }
         }
-        Vec::new()
+        Ok(())
     }
 }
 
-#[tokio::test]
-async fn test_historical_day_backtest_with_indian_cost_and_settlement() {
+#[test]
+fn test_historical_day_backtest_with_indian_cost_and_settlement() {
     let inst = InstrumentId::new(Exchange::Nse, "INFY");
     let buy_price = Price::from_rupees("1500.00").unwrap();
     let sell_price = Price::from_rupees("1550.00").unwrap();
@@ -129,7 +123,7 @@ async fn test_historical_day_backtest_with_indian_cost_and_settlement() {
         }),
     ];
 
-    let result = engine.run_events(events).await;
+    let result = engine.run_events(events);
 
     // Validation
     assert_eq!(result.total_signals, 2);
@@ -161,6 +155,8 @@ async fn test_historical_day_backtest_with_indian_cost_and_settlement() {
     let total_cost = result.total_fees.total();
     assert_eq!(result.net_pnl, dec!(5000.00) - total_cost);
     assert!(result.final_equity > dec!(504_000.00));
+
+    assert_eq!(result.fills.len(), result.total_trades);
 }
 
 struct PromptReplayStrategy {
@@ -168,23 +164,31 @@ struct PromptReplayStrategy {
     algo_id: String,
 }
 
-#[async_trait]
 impl Strategy for PromptReplayStrategy {
     fn name(&self) -> &str {
-        "PromptReplayStrategy"
-    }
-
-    fn algo_id(&self) -> &str {
         &self.algo_id
     }
 
-    async fn on_tick(&mut self, _tick: &Tick) -> Vec<OrderRequest> {
-        self.replayer.next_orders()
+    fn on_trade(
+        &mut self,
+        ctx: &mut dyn StrategyContext,
+        _trade: &Tick,
+    ) -> honba_strategy::Result<()> {
+        for order in self.replayer.next_orders() {
+            ctx.submit(OrderIntent {
+                instrument_id: order.instrument,
+                side: order.side,
+                quantity: order.quantity,
+                order_type: order.order_type,
+                time_in_force: order.tif,
+            });
+        }
+        Ok(())
     }
 }
 
-#[tokio::test]
-async fn test_deterministic_llm_prompt_replay_backtest() {
+#[test]
+fn test_deterministic_llm_prompt_replay_backtest() {
     let inst = InstrumentId::new(Exchange::Nse, "RELIANCE");
     let algo_id = "SEBI_AI_REPLAY_01";
 
@@ -267,7 +271,7 @@ async fn test_deterministic_llm_prompt_replay_backtest() {
         }),
     ];
 
-    let result = engine.run_events(events).await;
+    let result = engine.run_events(events);
 
     // Verify deterministic replay execution
     assert_eq!(result.total_signals, 2);
