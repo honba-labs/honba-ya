@@ -36,7 +36,7 @@ fn a_valid_manifest_prints_its_ir_as_json() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
     let ir: Value = serde_json::from_slice(&out.stdout).expect("stdout is JSON");
-    assert_eq!(ir["schema_version"], honba_messages::SCHEMA_VERSION);
+    assert_eq!(ir["schema_version"], honba_core::SCHEMA_VERSION);
     assert_eq!(ir["warmup_bars"], 20);
     assert_eq!(ir["manifest"]["name"], "sma_crossover");
     assert_eq!(

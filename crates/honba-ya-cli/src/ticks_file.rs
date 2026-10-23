@@ -12,8 +12,9 @@
 //! Ticks may come in any order (the reader sorts, stable for ties). Every error names its line.
 
 use anyhow::{Context, Result, bail};
+use honba_core::{Exchange, InstrumentId};
 use honba_feed::InMemoryTickReader;
-use honba_messages::{AggressorSide, Exchange, InstrumentId, QuoteTick, TradeTick, UnixNanos};
+use honba_feed::wire::{AggressorSide, QuoteTick, TradeTick, UnixNanos};
 use serde::Deserialize;
 use std::path::Path;
 
@@ -51,9 +52,12 @@ enum Line {
     },
 }
 
-fn instrument(symbol: String, exchange: String) -> serde_json::Value {
-    serde_json::to_value(InstrumentId::new(symbol, Exchange::new(exchange)))
-        .expect("an instrument id serializes")
+fn instrument(symbol: String, exchange: String) -> Result<serde_json::Value> {
+    let exchange: Exchange = exchange
+        .parse()
+        .map_err(|_| anyhow::anyhow!("unknown exchange {exchange:?}; expected NSE, BSE or MCX"))?;
+    Ok(serde_json::to_value(InstrumentId::new(exchange, symbol))
+        .expect("an instrument id serializes"))
 }
 
 fn nanos(n: u64) -> serde_json::Value {
@@ -92,10 +96,16 @@ pub(crate) fn parse(text: &str) -> Result<InMemoryTickReader> {
                 bid_size,
                 ask_size,
             } => {
-                // Through the wire type, so its invariants (finite, sizes >= 0, not crossed)
-                // are checked once, in honba-messages, and `QuoteTick::new` never panics.
+                // `honba_feed::wire::QuoteTick`'s custom `Deserialize` only refuses a
+                // crossed quote (bid > ask); unlike the deleted `honba_messages` wire
+                // type, it does not refuse a negative size, so that invariant is
+                // checked here instead, before the wire type ever sees the value.
+                if !bid_size.is_finite() || bid_size < 0.0 || !ask_size.is_finite() || ask_size < 0.0
+                {
+                    bail!("line {n}: invalid quote: sizes must be finite and >= 0");
+                }
                 let tick: QuoteTick = serde_json::from_value(serde_json::json!({
-                    "instrument_id": instrument(symbol, exchange),
+                    "instrument_id": instrument(symbol, exchange).with_context(|| format!("line {n}"))?,
                     "bid_price": bid_price,
                     "ask_price": ask_price,
                     "bid_size": bid_size,
@@ -116,8 +126,13 @@ pub(crate) fn parse(text: &str) -> Result<InMemoryTickReader> {
                 aggressor,
                 trade_id,
             } => {
+                // Same note as the quote arm above: `TradeTick` doesn't refuse a
+                // negative size either, so it's checked here.
+                if !size.is_finite() || size < 0.0 {
+                    bail!("line {n}: invalid trade: size must be finite and >= 0");
+                }
                 let tick: TradeTick = serde_json::from_value(serde_json::json!({
-                    "instrument_id": instrument(symbol, exchange),
+                    "instrument_id": instrument(symbol, exchange).with_context(|| format!("line {n}"))?,
                     "price": price,
                     "size": size,
                     "aggressor_side": aggressor,

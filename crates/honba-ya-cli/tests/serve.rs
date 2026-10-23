@@ -398,11 +398,9 @@ fn operator_journal_records_a_trading_state_change() {
 }
 
 fn bar_body(ts: u64, close: f64) -> String {
-    use honba_messages::{
-        Bar, BarAggregation, BarSpecification, BarType, Exchange, InstrumentId, PriceType,
-        UnixNanos,
-    };
-    let id = InstrumentId::new("TCS", Exchange::new("NSE"));
+    use honba_core::{Exchange, InstrumentId};
+    use honba_feed::wire::{Bar, BarAggregation, BarSpecification, BarType, PriceType, UnixNanos};
+    let id = InstrumentId::new(Exchange::Nse, "TCS");
     let bar_type = BarType::new(
         id,
         BarSpecification::new(1, BarAggregation::Minute, PriceType::Last),

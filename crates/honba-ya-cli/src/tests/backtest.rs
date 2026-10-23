@@ -1,24 +1,31 @@
 //! Unit tests for the pure helpers in `crate::backtest`.
 
-use honba_entities::{Currency, Trade};
-use honba_messages::{Exchange, InstrumentId, OrderId, OrderSide, UnixNanos};
+use honba_core::chrono::{DateTime, Utc};
+use honba_core::rust_decimal::prelude::*;
+use honba_core::uuid::Uuid;
+use honba_core::{Exchange, FillReport, InstrumentId, OrderSide, Price, Quantity};
 
 use crate::backtest::{BacktestConfig, equity_curve, pair_fills};
 
 fn any_instrument() -> InstrumentId {
-    InstrumentId::new("X", Exchange::new("NSE"))
+    InstrumentId::new(Exchange::Nse, "X")
 }
 
-fn fill(side: OrderSide, price: f64, ts: u64) -> Trade {
-    Trade::new(
-        OrderId::new(format!("O-{ts}")),
+fn ts(n: u64) -> DateTime<Utc> {
+    DateTime::from_timestamp(0, n as u32).expect("fixture timestamp in range")
+}
+
+fn fill(side: OrderSide, price: f64, n: u64) -> FillReport {
+    FillReport::new(
+        format!("F-{n}"),
+        format!("O-{n}"),
+        Uuid::new_v4(),
         any_instrument(),
         side,
-        1.0,
-        price,
-        Currency::Inr,
-        UnixNanos::from_u64(ts),
-        UnixNanos::from_u64(ts),
+        Price::new(Decimal::from_f64_retain(price).expect("fixture price is finite")),
+        Quantity::from_u64(1),
+        "test-algo",
+        ts(n),
     )
 }
 
@@ -31,7 +38,10 @@ fn pair_fills_pairs_consecutive_entry_exit_fills() {
         fill(OrderSide::Buy, 104.0, 4),
     ];
     let trips = pair_fills(&fills);
-    let pnl: Vec<f64> = trips.iter().map(|t| t.net_pnl).collect();
+    let pnl: Vec<f64> = trips
+        .iter()
+        .map(|t| t.net_pnl.to_f64().unwrap())
+        .collect();
     assert_eq!(pnl, [5.0, 6.0]);
 }
 

@@ -1,6 +1,7 @@
 use crate::serve::{load_risk_limits, non_loopback_warning, parse_trading_state};
-use honba_messages::TradingState;
-use honba_risk::{OrderRateLimit, RiskLimits};
+use honba_core::TradingState;
+use honba_core::rust_decimal::Decimal;
+use honba_mon::{OrderRateLimit, RiskLimits};
 
 #[test]
 fn loopback_addresses_do_not_warn() {
@@ -23,9 +24,14 @@ fn trading_state_parses_the_wire_spellings_and_refuses_others() {
     assert_eq!(parse_trading_state("active").unwrap(), TradingState::Active);
     assert_eq!(
         parse_trading_state("reducing").unwrap(),
-        TradingState::Reducing
+        TradingState::Paused { resume_at: None }
     );
-    assert_eq!(parse_trading_state("halted").unwrap(), TradingState::Halted);
+    assert_eq!(
+        parse_trading_state("halted").unwrap(),
+        TradingState::Halted {
+            reason: "operator halt via `--trading-state halted`".to_string(),
+        }
+    );
     let err = parse_trading_state("paused").unwrap_err();
     assert!(err.contains("paused"), "{err}");
 }
@@ -41,22 +47,24 @@ fn risk_file(name: &str, text: &str) -> std::path::PathBuf {
 
 #[test]
 fn risk_config_parses_the_backtest_risk_shape() {
+    // `honba_mon::RiskLimits`'s `Decimal` fields (ADR 0018 decision 8, matching
+    // `honba-ya-config`'s own `[risk]` TOML tests) deserialize from a quoted
+    // string, not a bare float.
     let path = risk_file(
         "full.toml",
-        "[risk]\nmax_notional = 500000.0\nmax_participation = 0.1\nstale_after_ms = 5000\n\
-         price_collar_bps = 200\n\n[risk.order_rate]\nmax_orders = 30\nwindow_ms = 1000\n",
+        "[risk]\nmax_notional_per_order = \"500000.0\"\nprice_collar_bps = 200\n\n\
+         [risk.order_rate_limit]\nmax_orders = 30\nwindow_ms = 1000\n",
     );
     assert_eq!(
         load_risk_limits(&path).unwrap(),
         RiskLimits {
-            max_notional: Some(500000.0),
-            order_rate: Some(OrderRateLimit {
+            max_notional_per_order: Some(Decimal::from(500_000)),
+            order_rate_limit: Some(OrderRateLimit {
                 max_orders: 30,
                 window_ms: 1000
             }),
-            max_participation: Some(0.1),
-            stale_after_ms: Some(5000),
             price_collar_bps: Some(200),
+            ..RiskLimits::default()
         }
     );
 }
@@ -69,6 +77,13 @@ fn risk_config_without_a_risk_table_means_no_limits() {
 
 #[test]
 fn risk_config_errors_name_the_field_and_the_file() {
+    // `honba_mon::RiskLimits` has no `#[serde(deny_unknown_fields)]` (unlike
+    // the deleted `honba_risk::RiskLimits`), so an unknown field inside
+    // `[risk]` (a typo, say) is silently ignored rather than refused; there
+    // is accordingly no "unknown field" case here any more. `is_valid()`
+    // also no longer names which field failed, so `load_risk_limits`'s
+    // error is one generic hint listing every limit — it's still expected
+    // to mention each field's name and the offending file.
     let cases = [
         (
             "zero-collar.toml",
@@ -77,10 +92,9 @@ fn risk_config_errors_name_the_field_and_the_file() {
         ),
         (
             "neg-notional.toml",
-            "[risk]\nmax_notional = -1.0\n",
-            "max_notional",
+            "[risk]\nmax_notional_per_order = \"-1.0\"\n",
+            "max_notional_per_order",
         ),
-        ("typo.toml", "[risk]\nmax_notinal = 1.0\n", "max_notinal"),
         ("syntax.toml", "[risk\n", "syntax.toml"),
     ];
     for (name, text, needle) in cases {

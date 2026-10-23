@@ -1,5 +1,6 @@
-use honba_messages::{AggressorSide, Exchange, InstrumentId, UnixNanos};
-use honba_ports::{TickReader, TickRequest};
+use honba_core::{Exchange, InstrumentId};
+use honba_feed::ports::{TickReader, TickRequest};
+use honba_feed::wire::{AggressorSide, UnixNanos};
 
 use crate::ticks_file::parse;
 
@@ -8,7 +9,7 @@ const QUOTE: &str = "{\"kind\":\"quote\",\"symbol\":\"TCS\",\"exchange\":\"NSE\"
 const TRADE: &str = "{\"kind\":\"trade\",\"symbol\":\"TCS\",\"exchange\":\"NSE\",\"ts_event\":100,\"ts_init\":150,\"price\":100.0,\"size\":50,\"aggressor\":\"buyer\",\"trade_id\":\"T-1\"}\n";
 
 fn tcs() -> InstrumentId {
-    InstrumentId::new("TCS", Exchange::new("NSE"))
+    InstrumentId::new(Exchange::Nse, "TCS")
 }
 
 fn err(text: &str) -> String {

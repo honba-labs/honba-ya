@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use honba_messages::TradingState;
+use honba_core::TradingState;
 
 use crate::{CalendarCommands, Cli, Commands, DataCommands};
 
@@ -214,8 +214,13 @@ fn serve_trading_state_defaults_to_active() {
 fn serve_trading_state_accepts_the_wire_spellings() {
     for (raw, expected) in [
         ("active", TradingState::Active),
-        ("reducing", TradingState::Reducing),
-        ("halted", TradingState::Halted),
+        ("reducing", TradingState::Paused { resume_at: None }),
+        (
+            "halted",
+            TradingState::Halted {
+                reason: "operator halt via `--trading-state halted`".to_string(),
+            },
+        ),
     ] {
         match parse(&["serve", "--data-dir", "d", "--trading-state", raw])
             .unwrap()
