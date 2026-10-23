@@ -102,7 +102,7 @@ fn no_store() -> axum::response::Response {
     failure(
         StatusCode::SERVICE_UNAVAILABLE,
         ErrorDetail::new(
-            ErrorCode::Unsupported,
+            ErrorCode::NotImplemented,
             "no portfolios directory is configured",
         )
         .with_context(json!({"reason": "no_portfolios_dir"})),
@@ -113,7 +113,7 @@ fn store_failure(error: PortfolioError) -> axum::response::Response {
     match error {
         PortfolioError::InvalidUserId => failure(
             StatusCode::FORBIDDEN,
-            ErrorDetail::new(ErrorCode::Forbidden, "this token id cannot own a portfolio")
+            ErrorDetail::new(ErrorCode::Unauthorized, "this token id cannot own a portfolio")
                 .with_context(json!({"reason": "invalid_user_id"})),
         ),
         PortfolioError::RevisionConflict { expected, current } => failure(
@@ -853,14 +853,8 @@ pub async fn get_equity_curve(
         filtered.retain(|e| ts_nanos(e.ts_event) <= to);
     }
 
-    let start_equity = filtered
-        .first()
-        .map(|p| p.equity)
-        .unwrap_or_else(Decimal::ZERO);
-    let end_equity = filtered
-        .last()
-        .map(|p| p.equity)
-        .unwrap_or_else(Decimal::ZERO);
+    let start_equity = filtered.first().map(|p| p.equity).unwrap_or(Decimal::ZERO);
+    let end_equity = filtered.last().map(|p| p.equity).unwrap_or(Decimal::ZERO);
     let total_return = end_equity - start_equity;
     let start_equity_f64 = start_equity.to_f64().unwrap_or(0.0);
     let total_return_pct = if start_equity_f64 > 0.0 {
