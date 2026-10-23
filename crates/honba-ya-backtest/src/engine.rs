@@ -349,8 +349,13 @@ impl<S: Strategy> BacktestEngine<S> {
                     ob.add_order(price, quantity.to_i64().unwrap_or(0));
                 }
                 MarketEvent::Bar(b) => {
-                    // Bar approximates close price; add synthetic depth
-                    ob.add_order(b.close, b.volume.0.to_i64().unwrap_or(0));
+                    // Bar approximates close price; add synthetic depth.
+                    // Its traded volume is also the simulation's only
+                    // observable proxy for average daily volume, which the
+                    // participation cap clamps order size against.
+                    let volume = b.volume.0.to_i64().unwrap_or(0);
+                    ob.set_avg_daily_volume(volume);
+                    ob.add_order(b.close, volume);
                 }
             }
         }

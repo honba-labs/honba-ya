@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use chrono::{DateTime, Duration, Utc};
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use honba_core::{OrderSide, Price};
 
 /// Order book level with price and accumulated quantity.
@@ -114,6 +115,10 @@ pub struct OrderBook {
     latency_us: u64,
     /// Volume participation cap: max percentage of average daily volume
     participation_cap: Decimal,
+    /// Average daily volume for the instrument this book represents, used
+    /// together with `participation_cap` to clamp a single order's size.
+    /// Zero means uncapped (no average daily volume known yet).
+    avg_daily_volume: i64,
 }
 
 impl OrderBook {
@@ -124,10 +129,35 @@ impl OrderBook {
             asks: OrderBookSide::new(false),
             latency_us,
             participation_cap,
+            avg_daily_volume: 0,
         }
     }
 
+    /// Sets the average daily volume used by the participation cap. The
+    /// backtest engine calls this as it processes bars, since a bar's
+    /// traded volume is the simulation's only observable proxy for ADV.
+    pub(crate) fn set_avg_daily_volume(&mut self, avg_daily_volume: i64) {
+        self.avg_daily_volume = avg_daily_volume;
+    }
+
+    /// Clamps `order_qty` to the volume participation cap (half of
+    /// `avg_daily_volume * participation_cap`, per `check_participation_cap`),
+    /// given this book's current `avg_daily_volume`. Returns `order_qty`
+    /// unchanged when it already respects the cap or no ADV is known yet.
+    fn clamp_to_participation_cap(&self, order_qty: i64) -> i64 {
+        if self.check_participation_cap(order_qty, self.avg_daily_volume) {
+            return order_qty;
+        }
+        let cap = (Decimal::from(self.avg_daily_volume) * self.participation_cap) / Decimal::from(2);
+        cap.max(Decimal::ZERO).to_i64().unwrap_or(0).min(order_qty.abs())
+    }
+
     /// Execute a market order against the order book.
+    ///
+    /// The requested `quantity` is first clamped to the volume participation
+    /// cap: any amount above the cap is never matched against the book and
+    /// is reported back as part of `remaining_quantity` (a market order is
+    /// partially filled up to the cap rather than rejected outright).
     ///
     /// Returns: (filled_quantity, fill_price, remaining_quantity, worst_price_encountered)
     pub fn execute_market_order(
@@ -135,14 +165,18 @@ impl OrderBook {
         side: OrderSide,
         quantity: i64,
     ) -> (i64, Price, i64, Option<Price>) {
+        let allowed = self.clamp_to_participation_cap(quantity);
+        let capped_excess = quantity - allowed;
         let (filled_qty, filled_price, remaining, worst_price) = match side {
-            OrderSide::Buy => self._buy_market(quantity),
-            OrderSide::Sell => self._sell_market(quantity),
+            OrderSide::Buy => self._buy_market(allowed),
+            OrderSide::Sell => self._sell_market(allowed),
         };
-        (filled_qty, filled_price, remaining, worst_price)
+        (filled_qty, filled_price, remaining + capped_excess, worst_price)
     }
 
     /// Execute a limit order against the order book.
+    ///
+    /// Same participation-cap clamping as [`Self::execute_market_order`].
     ///
     /// Returns: (filled_quantity, fill_price, remaining_quantity)
     pub fn execute_limit_order(
@@ -151,10 +185,13 @@ impl OrderBook {
         quantity: i64,
         limit_price: Price,
     ) -> (i64, Price, i64) {
-        match side {
-            OrderSide::Buy => self._buy_limit(quantity, limit_price),
-            OrderSide::Sell => self._sell_limit(quantity, limit_price),
-        }
+        let allowed = self.clamp_to_participation_cap(quantity);
+        let capped_excess = quantity - allowed;
+        let (filled, price, remaining) = match side {
+            OrderSide::Buy => self._buy_limit(allowed, limit_price),
+            OrderSide::Sell => self._sell_limit(allowed, limit_price),
+        };
+        (filled, price, remaining + capped_excess)
     }
 
     /// Get current best bid and ask prices.
