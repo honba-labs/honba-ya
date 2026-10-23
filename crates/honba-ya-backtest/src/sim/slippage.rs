@@ -1,15 +1,16 @@
 //! Volatility and liquidity slippage models for backtest execution simulation.
 
+use honba_core::{OrderSide, Price};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use std::collections::BTreeMap;
-use honba_core::{OrderSide, Price};
 
-/// Models slippage based on order book depth and volatility.
+/// Models slippage based on order book depth, spread crossing, and volatility.
 ///
 /// When a large order crosses the spread, the execution price deviates from
 /// the mid-price. This model quantifies that deviation based on:
 /// - Order size relative to book depth
+/// - Spread crossing penalty (half-spread on aggressive market orders)
 /// - Recent volatility (quantified by typical daily range)
 /// - Order type (market orders cause more slippage than limit orders)
 #[derive(Debug, Clone)]
@@ -32,7 +33,7 @@ impl SlippageModel {
     /// Create a new slippage model with default parameters.
     pub fn new() -> Self {
         Self {
-            daily_range_pct: dec!(0.02),   // 2% typical daily range
+            daily_range_pct: dec!(0.02),     // 2% typical daily range
             volatility_factor: Decimal::ONE, // 1.0 = normal
             avg_spread_pct: dec!(0.001),     // 0.1% average spread
         }
@@ -56,6 +57,30 @@ impl SlippageModel {
     /// Typical daily range as a percentage of price.
     pub fn daily_range_pct(&self) -> Decimal {
         self.daily_range_pct
+    }
+
+    /// Average bid-ask spread as a percentage of price.
+    pub fn avg_spread_pct(&self) -> Decimal {
+        self.avg_spread_pct
+    }
+
+    /// Compute the spread-crossing penalty (in rupees per share) when an aggressive
+    /// order crosses from mid-price to the contra touch.
+    ///
+    /// Uses the observed `(bid, ask)` spread when `ask > bid`, or falls back to
+    /// `reference_price * avg_spread_pct / 2`.
+    pub fn compute_spread_crossing_penalty(
+        &self,
+        bid: Option<Price>,
+        ask: Option<Price>,
+        reference_price: Price,
+    ) -> Decimal {
+        if let (Some(b), Some(a)) = (bid, ask)
+            && a.0 > b.0
+        {
+            return ((a.0 - b.0) / dec!(2)).round_dp(4);
+        }
+        (reference_price.0 * self.avg_spread_pct / dec!(2)).round_dp(4)
     }
 
     /// Compute slippage for a market order quantity.
@@ -90,7 +115,7 @@ impl SlippageModel {
 
         // Clamp to reasonable bounds [-5%, +5%]
         let clamped = vol_adjusted * side_factor;
-        let max_pct = Decimal::from(500); // 5% in basis points
+        let max_pct = dec!(0.05); // 5%
         clamped.min(max_pct).max(-max_pct)
     }
 
@@ -114,12 +139,13 @@ impl SlippageModel {
             if remaining <= 0 {
                 break;
             }
-            let take = std::cmp::min(remaining, *depth);
+            let depth_val = (*depth).max(1);
+            let take = std::cmp::min(remaining, depth_val);
             remaining -= take;
 
             // Price impact proportional to quantity taken at this level
-            let participation = Decimal::from(take) / Decimal::from(*depth);
-            let level_impact = self.avg_spread_pct * participation;
+            let participation = Decimal::from(take) / Decimal::from(depth_val);
+            let level_impact = self.avg_spread_pct * participation * self.volatility_factor;
             total_price_impact += level_impact;
         }
 
@@ -136,14 +162,14 @@ impl SlippageModel {
 /// Models adverse fill slippage when market moves against the position.
 ///
 /// Simulates the effect of market orders being filled at progressively
-/// worse prices as the order interacts with the book.
+/// worse prices as the order walks deeper into the order book.
 #[derive(Debug, Clone)]
 pub struct AdverseFillModel {
     /// How many price levels to slip per fill round
     levels_per_round: usize,
-    /// Maximum slippage accumulation before order cancellation
+    /// Maximum slippage accumulation percentage before capping (e.g., 5.0 for 5%)
     max_slippage_pct: Decimal,
-    /// Whether slippage compounds (gets worse with each fill)
+    /// Whether slippage compounds (gets worse with each level walked)
     compounding: bool,
 }
 
@@ -157,7 +183,10 @@ impl AdverseFillModel {
         }
     }
 
-    /// Compute slippage for a fill given current book state.
+    /// Compute slippage percentage and adverse fill price given current book state.
+    ///
+    /// Walks `book_levels` in execution priority order (ascending asks for `Buy`,
+    /// descending bids for `Sell`) up to `levels_per_round` levels.
     pub fn compute_fill_slippage(
         &self,
         side: OrderSide,
@@ -165,7 +194,7 @@ impl AdverseFillModel {
         book_levels: &BTreeMap<Price, i64>,
         entry_price: Decimal,
     ) -> (Decimal, Option<Price>) {
-        if fill_quantity == 0 || book_levels.is_empty() {
+        if fill_quantity <= 0 || book_levels.is_empty() || entry_price <= Decimal::ZERO {
             return (Decimal::ZERO, None);
         }
 
@@ -173,61 +202,55 @@ impl AdverseFillModel {
         let mut worst_price: Option<Price> = None;
         let mut worst_price_val: Decimal = entry_price;
 
-        let mut rounds: usize = 0;
+        let ordered_levels: Vec<(Price, i64)> = match side {
+            OrderSide::Buy => book_levels.iter().map(|(p, d)| (*p, *d)).collect(),
+            OrderSide::Sell => book_levels.iter().rev().map(|(p, d)| (*p, *d)).collect(),
+        };
 
-        while fill_quantity != 0 && rounds < self.levels_per_round {
-            rounds += 1;
-
-            // Get best price level for this side
-            let (best_price, best_depth) = match side {
-                OrderSide::Buy => {
-                    let price = book_levels.keys().next().copied().unwrap_or(Price(Decimal::ZERO));
-                    let depth = book_levels.values().next().copied().unwrap_or(0);
-                    (price, depth)
-                }
-                OrderSide::Sell => {
-                    let price = book_levels.keys().last().copied().unwrap_or(Price(Decimal::ZERO));
-                    let depth = book_levels.values().last().copied().unwrap_or(0);
-                    (price, depth)
-                }
-            };
-
-            if best_price.0 == Decimal::ZERO {
+        for (round_idx, (level_price, best_depth)) in ordered_levels
+            .into_iter()
+            .take(self.levels_per_round)
+            .enumerate()
+        {
+            if fill_quantity <= 0 || level_price.0 <= Decimal::ZERO {
                 break;
             }
-
+            let rounds = round_idx + 1;
             let depth = best_depth.max(1);
             let take = std::cmp::min(fill_quantity, depth);
 
-            // Price impact at this level, relative to the entry price (guard
-            // against the zero-depth case with the same `.max(1)` floor used
-            // for `take`, rather than dividing by the raw, possibly-zero
-            // `best_depth`).
+            // Price impact at this level, in percentage points relative to entry_price
             let price_pct_change =
                 (Decimal::from(take) * Decimal::from(100)) / (Decimal::from(depth) * entry_price);
 
-            // `compounding` means each successive round's impact is scaled
-            // by how many rounds have already walked the book; a flat model
-            // just applies each round's own impact once.
             let round_slippage = if self.compounding {
                 price_pct_change * Decimal::from(rounds as i64)
             } else {
                 price_pct_change
             };
             total_slippage += round_slippage;
-            worst_price_val *= Decimal::ONE + price_pct_change;
 
-            // Update worst price tracking
-            if worst_price.is_none_or(|p| worst_price_val > p.0) {
-                worst_price = Some(Price(worst_price_val));
+            match side {
+                OrderSide::Buy => {
+                    worst_price_val *= Decimal::ONE + (round_slippage / Decimal::from(100));
+                    if worst_price.is_none_or(|p| worst_price_val > p.0) {
+                        worst_price = Some(Price(worst_price_val.round_dp(4)));
+                    }
+                }
+                OrderSide::Sell => {
+                    let factor =
+                        (Decimal::ONE - (round_slippage / Decimal::from(100))).max(dec!(0.01));
+                    worst_price_val *= factor;
+                    if worst_price.is_none_or(|p| worst_price_val < p.0) {
+                        worst_price = Some(Price(worst_price_val.round_dp(4)));
+                    }
+                }
             }
 
             fill_quantity -= take;
         }
 
-        // Cap at max slippage
         let capped = total_slippage.min(self.max_slippage_pct);
-
         (capped, worst_price)
     }
 }

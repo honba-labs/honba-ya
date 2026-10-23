@@ -12,6 +12,10 @@ honba-core.workspace = true
 honba-mon.workspace = true
 honba-ya-strategy.workspace = true
 honba-nou-agent.workspace = true
+honba-kokoro-portfolio.workspace = true
+honba-kokoro-ledger.workspace = true
+arrow.workspace = true
+parquet.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 rust_decimal.workspace = true
@@ -26,3 +30,4 @@ tokio.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+tempfile = "3"

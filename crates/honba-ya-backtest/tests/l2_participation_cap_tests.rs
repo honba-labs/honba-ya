@@ -11,7 +11,7 @@ use honba_backtest::sim::latency::NetworkLatency;
 use honba_backtest::sim::mis::MisSquareOffManager;
 use honba_backtest::sim::slippage::SlippageModel;
 use honba_backtest::{BacktestConfig, BacktestEngine, MarketEvent};
-use honba_backtest::{IndianCostModel, NseTradingCalendar, ProductType};
+use honba_backtest::{NseTradingCalendar, ProductType};
 use honba_core::{Bar, Exchange, InstrumentId, Price, Quantity};
 use honba_mon::{OtrConfig, RiskEngine, RiskLimits};
 use honba_strategy::{OrderIntent, Strategy, StrategyContext};
@@ -53,7 +53,11 @@ impl Strategy for OnceBuyer {
     }
 }
 
-fn run_once(instrument: &InstrumentId, order_qty: u64, bar_volume: u64) -> honba_backtest::BacktestResult {
+fn run_once(
+    instrument: &InstrumentId,
+    order_qty: u64,
+    bar_volume: u64,
+) -> honba_backtest::BacktestResult {
     let strategy = OnceBuyer {
         instrument: instrument.clone(),
         quantity: Quantity::from_u64(order_qty),
@@ -76,18 +80,14 @@ fn run_once(instrument: &InstrumentId, order_qty: u64, bar_volume: u64) -> honba
         MisSquareOffManager::new(NseTradingCalendar::new()),
     );
 
-    let mut engine = BacktestEngine::new(
-        strategy,
-        risk_engine,
-        config,
-        IndianCostModel::new(),
-        NseTradingCalendar::new(),
-    );
+    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
 
     let day = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
     let t0 = Utc.from_utc_datetime(&day.and_time(NaiveTime::from_hms_opt(9, 20, 0).unwrap()));
 
-    engine.run_events(vec![MarketEvent::Bar(bar(instrument, "1500.00", bar_volume, t0))])
+    engine.run_events(vec![MarketEvent::Bar(bar(
+        instrument, "1500.00", bar_volume, t0,
+    ))])
 }
 
 #[test]

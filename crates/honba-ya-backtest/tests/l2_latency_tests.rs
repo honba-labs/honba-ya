@@ -10,7 +10,7 @@ use honba_backtest::sim::latency::NetworkLatency;
 use honba_backtest::sim::mis::MisSquareOffManager;
 use honba_backtest::sim::slippage::SlippageModel;
 use honba_backtest::{BacktestConfig, BacktestEngine, MarketEvent};
-use honba_backtest::{IndianCostModel, NseTradingCalendar, ProductType};
+use honba_backtest::{NseTradingCalendar, ProductType};
 use honba_core::{Bar, Exchange, InstrumentId, Price, Quantity};
 use honba_mon::{OtrConfig, RiskEngine, RiskLimits};
 use honba_strategy::{OrderIntent, Strategy, StrategyContext};
@@ -29,9 +29,7 @@ fn bar(inst: &InstrumentId, close: &str, ts: DateTime<Utc>) -> Bar {
 }
 
 fn ts_us(day: NaiveDate, h: u32, m: u32, s: u32, micros: u32) -> DateTime<Utc> {
-    Utc.from_utc_datetime(
-        &day.and_time(NaiveTime::from_hms_micro_opt(h, m, s, micros).unwrap()),
-    )
+    Utc.from_utc_datetime(&day.and_time(NaiveTime::from_hms_micro_opt(h, m, s, micros).unwrap()))
 }
 
 /// Buys once on the first bar it sees.
@@ -58,10 +56,7 @@ impl Strategy for OnceBuyer {
     }
 }
 
-fn make_engine(
-    instrument: &InstrumentId,
-    latency_us: u64,
-) -> BacktestEngine<OnceBuyer> {
+fn make_engine(instrument: &InstrumentId, latency_us: u64) -> BacktestEngine<OnceBuyer> {
     let strategy = OnceBuyer {
         instrument: instrument.clone(),
         quantity: Quantity::from_u64(10),
@@ -79,13 +74,7 @@ fn make_engine(
         MisSquareOffManager::new(NseTradingCalendar::new()),
     );
 
-    BacktestEngine::new(
-        strategy,
-        risk_engine,
-        config,
-        IndianCostModel::new(),
-        NseTradingCalendar::new(),
-    )
+    BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new())
 }
 
 #[test]
@@ -104,7 +93,10 @@ fn test_latency_delays_fill_to_later_event_timestamp() {
         MarketEvent::Bar(bar(&inst, "1500.00", t0)),
         MarketEvent::Bar(bar(&inst, "1501.00", t1)),
     ]);
-    assert_eq!(before.total_trades, 0, "fill must not happen before latency elapses");
+    assert_eq!(
+        before.total_trades, 0,
+        "fill must not happen before latency elapses"
+    );
     assert!(before.fills.is_empty());
 
     // Once an event at or after `t0 + latency` is processed, the order fills.
@@ -114,7 +106,10 @@ fn test_latency_delays_fill_to_later_event_timestamp() {
         MarketEvent::Bar(bar(&inst, "1501.00", t1)),
         MarketEvent::Bar(bar(&inst, "1502.00", t2)),
     ]);
-    assert_eq!(after.total_trades, 1, "fill must happen once latency has elapsed");
+    assert_eq!(
+        after.total_trades, 1,
+        "fill must happen once latency has elapsed"
+    );
     assert_eq!(after.fills.len(), 1);
     assert!(after.fills[0].timestamp >= t2);
 }
@@ -128,7 +123,10 @@ fn test_zero_latency_fills_immediately() {
     let mut engine = make_engine(&inst, 0);
     let result = engine.run_events(vec![MarketEvent::Bar(bar(&inst, "1500.00", t0))]);
 
-    assert_eq!(result.total_trades, 1, "zero latency must fill within the same event");
+    assert_eq!(
+        result.total_trades, 1,
+        "zero latency must fill within the same event"
+    );
     assert_eq!(result.fills.len(), 1);
     assert_eq!(result.fills[0].timestamp, t0);
 }

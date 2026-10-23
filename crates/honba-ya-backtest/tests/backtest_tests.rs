@@ -85,10 +85,9 @@ fn test_historical_day_backtest_with_indian_cost_and_settlement() {
         product_type: ProductType::Delivery,
         ..Default::default()
     };
-    let cost_model = IndianCostModel::new();
     let calendar = NseTradingCalendar::new();
 
-    let mut engine = BacktestEngine::new(strategy, risk_engine, config, cost_model, calendar);
+    let mut engine = BacktestEngine::new(strategy, risk_engine, config, calendar);
 
     // Trade Date: Wednesday, Jan 15, 2025
     let day = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
@@ -150,6 +149,11 @@ fn test_historical_day_backtest_with_indian_cost_and_settlement() {
     assert!(result.total_fees.exchange_turnover > dec!(5.00));
     assert!(result.total_fees.sebi_turnover > dec!(0.20));
     assert!(result.total_fees.gst > dec!(10.00));
+
+    // Gross PnL is now real FIFO-realized PnL (via the fixed
+    // honba_portfolio::apply_fill), not a notional-sum approximation:
+    // close a 100-share long bought @1500 with a sell @1550 = 100*(1550-1500).
+    assert_eq!(result.gross_pnl, dec!(5000.00));
 
     // Net PnL is Gross Profit (₹5,000) minus total statutory fees
     let total_cost = result.total_fees.total();
@@ -242,13 +246,7 @@ fn test_deterministic_llm_prompt_replay_backtest() {
         product_type: ProductType::Delivery,
         ..Default::default()
     };
-    let mut engine = BacktestEngine::new(
-        strategy,
-        risk_engine,
-        config,
-        IndianCostModel::new(),
-        NseTradingCalendar::new(),
-    );
+    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
 
     let day = NaiveDate::from_ymd_opt(2025, 2, 10).unwrap();
     let t1 = Utc.from_utc_datetime(&day.and_time(NaiveTime::from_hms_opt(9, 30, 0).unwrap()));
@@ -278,8 +276,221 @@ fn test_deterministic_llm_prompt_replay_backtest() {
     assert_eq!(result.refused_orders, 0);
     assert_eq!(result.total_trades, 2);
 
-    // Buy: 50 * 2500 = 125,000. Sell: 50 * 2550 = 127,500. Gross: 2,500.
-    assert_eq!(result.gross_pnl, dec!(127500.00));
+    // Buy: 50 * 2500 = 125,000. Sell: 50 * 2550 = 127,500.
+    // Gross PnL is real FIFO-realized PnL: 50 * (2550 - 2500) = 2,500.
+    assert_eq!(result.gross_pnl, dec!(2500.00));
     assert!(result.total_fees.total() > Decimal::ZERO);
     assert!(result.final_equity > dec!(1_000_000.00));
+}
+
+/// Numeric parity: the engine's accumulated `total_fees` must equal exactly
+/// what `TaxCalculator::compute_charges` (the canonical kokoro entry point
+/// the engine calls internally) produces for the same fills, proving the
+/// engine isn't quietly applying some other formula or rounding rule.
+#[test]
+fn test_backtest_fees_match_kokoro_tax_calculator() {
+    let inst = InstrumentId::new(Exchange::Nse, "INFY");
+    let buy_price = Price::from_rupees("1500.00").unwrap();
+    let sell_price = Price::from_rupees("1550.00").unwrap();
+
+    let strategy = MockNseStrategy {
+        symbol: inst.clone(),
+        buy_threshold: buy_price,
+        sell_threshold: sell_price,
+        bought: false,
+        sold: false,
+    };
+
+    let limits = RiskLimits {
+        max_notional_per_order: Some(dec!(1_000_000.00)),
+        ..Default::default()
+    };
+    let mut risk_engine = RiskEngine::new(limits, OtrConfig::default());
+    risk_engine.register_algo("algo-nse-equity");
+    let band = PriceBand::new(
+        Price::from_rupees("1350.00").unwrap(),
+        Price::from_rupees("1650.00").unwrap(),
+        Price::from_rupees("1500.00").unwrap(),
+    );
+    risk_engine.set_price_band(inst.clone(), band);
+
+    let config = BacktestConfig {
+        starting_cash: dec!(500_000.00),
+        product_type: ProductType::Delivery,
+        ..Default::default()
+    };
+    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
+
+    let day = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
+    let t_open = Utc.from_utc_datetime(&day.and_time(NaiveTime::from_hms_opt(9, 15, 0).unwrap()));
+    let t_mid = Utc.from_utc_datetime(&day.and_time(NaiveTime::from_hms_opt(11, 30, 0).unwrap()));
+    let t_close = Utc.from_utc_datetime(&day.and_time(NaiveTime::from_hms_opt(15, 0, 0).unwrap()));
+
+    let events = vec![
+        MarketEvent::Tick(Tick::Ltp {
+            instrument: inst.clone(),
+            price: Price::from_rupees("1520.00").unwrap(),
+            volume: Quantity::from_u64(100),
+            exchange_ts: t_open,
+            receive_ts: t_open,
+        }),
+        MarketEvent::Tick(Tick::Ltp {
+            instrument: inst.clone(),
+            price: Price::from_rupees("1500.00").unwrap(),
+            volume: Quantity::from_u64(200),
+            exchange_ts: t_mid,
+            receive_ts: t_mid,
+        }),
+        MarketEvent::Tick(Tick::Ltp {
+            instrument: inst.clone(),
+            price: Price::from_rupees("1550.00").unwrap(),
+            volume: Quantity::from_u64(300),
+            exchange_ts: t_close,
+            receive_ts: t_close,
+        }),
+    ];
+
+    let result = engine.run_events(events);
+
+    // Recompute expected fees directly from the same canonical
+    // TaxCalculator the engine calls internally, for the two known fills:
+    // Buy 100 @ 1500 (not the first sell of the day; irrelevant for a buy)
+    // and Sell 100 @ 1550 (the first sell of the day for this scrip).
+    let fees_buy = TaxCalculator::compute_charges(
+        TradeSide::Buy,
+        ProductType::Delivery,
+        TaxExchange::Nse,
+        dec!(1500.00),
+        dec!(100),
+        false,
+    );
+    let fees_sell = TaxCalculator::compute_charges(
+        TradeSide::Sell,
+        ProductType::Delivery,
+        TaxExchange::Nse,
+        dec!(1550.00),
+        dec!(100),
+        true,
+    );
+    let mut expected = TaxBreakdown::default();
+    expected.add_assign(&fees_buy);
+    expected.add_assign(&fees_sell);
+
+    assert_eq!(result.total_fees, expected);
+}
+
+/// `decimal_qty_to_u64` is the explicit, tested boundary conversion between
+/// `Decimal` share quantities and the `u64` that
+/// `honba_portfolio::apply_fill`/`apply_fill_to_account` require.
+#[test]
+fn test_decimal_qty_to_u64_truncates_fractional_part() {
+    assert_eq!(decimal_qty_to_u64(dec!(10.75)), 10);
+    assert_eq!(decimal_qty_to_u64(dec!(10.00)), 10);
+    assert_eq!(decimal_qty_to_u64(dec!(0.99)), 0);
+}
+
+#[test]
+fn test_decimal_qty_to_u64_saturates_non_positive_to_zero() {
+    assert_eq!(decimal_qty_to_u64(dec!(-5.00)), 0);
+    assert_eq!(decimal_qty_to_u64(Decimal::ZERO), 0);
+}
+
+/// Proves T+1 settlement timing is driven by `ClearingCalendar` (which
+/// correctly rolls a settlement date past weekends), not a naive
+/// calendar-day+1: a Friday buy must NOT show as settled by Saturday's
+/// event, but must have settled by Monday's.
+#[test]
+fn test_t1_settlement_uses_clearing_calendar() {
+    let inst = InstrumentId::new(Exchange::Nse, "TCS");
+    // Thresholds set so the strategy buys unconditionally on the very
+    // first trade it sees, and never sells.
+    let strategy = MockNseStrategy {
+        symbol: inst.clone(),
+        buy_threshold: Price::from_rupees("999999.00").unwrap(),
+        sell_threshold: Price::from_rupees("999999.00").unwrap(),
+        bought: false,
+        sold: false,
+    };
+
+    let limits = RiskLimits {
+        max_notional_per_order: Some(dec!(1_000_000.00)),
+        ..Default::default()
+    };
+    let mut risk_engine = RiskEngine::new(limits, OtrConfig::default());
+    risk_engine.register_algo("algo-nse-equity");
+    let band = PriceBand::new(
+        Price::from_rupees("900.00").unwrap(),
+        Price::from_rupees("1100.00").unwrap(),
+        Price::from_rupees("1000.00").unwrap(),
+    );
+    risk_engine.set_price_band(inst.clone(), band);
+
+    let config = BacktestConfig {
+        starting_cash: dec!(1_000_000.00),
+        product_type: ProductType::Delivery,
+        ..Default::default()
+    };
+    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
+
+    // Friday Jan 17, 2025 -> Saturday Jan 18 -> Monday Jan 20, 2025.
+    let friday = NaiveDate::from_ymd_opt(2025, 1, 17).unwrap();
+    let saturday = NaiveDate::from_ymd_opt(2025, 1, 18).unwrap();
+    let monday = NaiveDate::from_ymd_opt(2025, 1, 20).unwrap();
+
+    let t_fri = Utc.from_utc_datetime(&friday.and_time(NaiveTime::from_hms_opt(9, 20, 0).unwrap()));
+    let t_sat = Utc.from_utc_datetime(&saturday.and_time(NaiveTime::from_hms_opt(9, 20, 0).unwrap()));
+    let t_mon = Utc.from_utc_datetime(&monday.and_time(NaiveTime::from_hms_opt(9, 20, 0).unwrap()));
+
+    let price = Price::from_rupees("1000.00").unwrap();
+    let events = vec![
+        MarketEvent::Tick(Tick::Ltp {
+            instrument: inst.clone(),
+            price,
+            volume: Quantity::from_u64(100),
+            exchange_ts: t_fri,
+            receive_ts: t_fri,
+        }),
+        MarketEvent::Tick(Tick::Ltp {
+            instrument: inst.clone(),
+            price,
+            volume: Quantity::from_u64(100),
+            exchange_ts: t_sat,
+            receive_ts: t_sat,
+        }),
+        MarketEvent::Tick(Tick::Ltp {
+            instrument: inst.clone(),
+            price,
+            volume: Quantity::from_u64(100),
+            exchange_ts: t_mon,
+            receive_ts: t_mon,
+        }),
+    ];
+
+    let result = engine.run_events(events);
+
+    assert_eq!(result.total_trades, 1); // the one Friday buy
+    assert_eq!(result.equity_curve.len(), 3);
+
+    let equity_fri = result.equity_curve[0].1;
+    let equity_sat = result.equity_curve[1].1;
+    let equity_mon = result.equity_curve[2].1;
+
+    // Between Friday's buy and Saturday's event, nothing has settled yet:
+    // a naive calendar-day+1 would have settled by Saturday, but
+    // ClearingCalendar correctly treats Saturday as a non-settlement day.
+    assert_eq!(equity_fri, equity_sat);
+
+    // By Monday's event the T+1 settlement (correctly rolled past the
+    // weekend) has landed: settled cash drops by roughly the trade
+    // notional (₹100,000), since the position's mark-to-market value is
+    // unchanged (same price throughout).
+    assert!(
+        equity_mon < equity_sat,
+        "settlement must land by Monday, not stay pending forever"
+    );
+    assert!(
+        (equity_sat - equity_mon) > dec!(90_000.00),
+        "the settlement drop should be roughly the trade notional, confirming \
+         it actually landed on Monday rather than some smaller unrelated change"
+    );
 }

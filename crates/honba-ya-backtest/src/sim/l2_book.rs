@@ -1,10 +1,10 @@
 //! L2 Order book depth simulation and matching engine.
 
-use std::collections::BTreeMap;
 use chrono::{DateTime, Duration, Utc};
+use honba_core::{DepthLevel, OrderSide, Price};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
-use honba_core::{OrderSide, Price};
+use std::collections::BTreeMap;
 
 /// Order book level with price and accumulated quantity.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,15 +35,38 @@ impl OrderBookSide {
         }
     }
 
+    /// Clear all levels on this side of the book.
+    pub fn clear(&mut self) {
+        self.levels.clear();
+        self.best_price = None;
+    }
+
     /// Add an order to the book.
     pub fn add_order(&mut self, price: Price, quantity: i64) {
+        if quantity <= 0 {
+            return;
+        }
         let qty = self.levels.entry(price).or_insert(0);
         *qty += quantity;
         // Remove level if quantity becomes zero
-        if *qty == 0 {
+        if *qty <= 0 {
             self.levels.remove(&price);
         }
-        // Update best price
+        self.refresh_best_price();
+    }
+
+    /// Remove an order from the book.
+    pub fn remove_order(&mut self, price: Price, quantity: i64) {
+        if let Some(qty) = self.levels.get_mut(&price) {
+            *qty -= quantity;
+            if *qty <= 0 {
+                self.levels.remove(&price);
+            }
+        }
+        self.refresh_best_price();
+    }
+
+    fn refresh_best_price(&mut self) {
         if self.levels.is_empty() {
             self.best_price = None;
         } else if self.is_bids {
@@ -51,23 +74,6 @@ impl OrderBookSide {
             self.best_price = self.levels.keys().last().cloned();
         } else {
             // For asks, best is lowest price
-            self.best_price = self.levels.keys().next().cloned();
-        }
-    }
-
-    /// Remove an order from the book.
-    pub fn remove_order(&mut self, price: Price, quantity: i64) {
-        if let Some(qty) = self.levels.get_mut(&price) {
-            *qty -= quantity;
-            if *qty == 0 {
-                self.levels.remove(&price);
-            }
-        }
-        if self.levels.is_empty() {
-            self.best_price = None;
-        } else if self.is_bids {
-            self.best_price = self.levels.keys().last().cloned();
-        } else {
             self.best_price = self.levels.keys().next().cloned();
         }
     }
@@ -88,6 +94,11 @@ impl OrderBookSide {
     /// Get total depth at price level.
     pub fn depth_at(&self, price: Price) -> i64 {
         self.levels.get(&price).copied().unwrap_or(0)
+    }
+
+    /// Get total depth across all levels on this side.
+    pub fn total_depth(&self) -> i64 {
+        self.levels.values().copied().sum()
     }
 
     /// Check if book is empty.
@@ -140,6 +151,60 @@ impl OrderBook {
         self.avg_daily_volume = avg_daily_volume;
     }
 
+    /// Bid side reference.
+    pub fn bids(&self) -> &OrderBookSide {
+        &self.bids
+    }
+
+    /// Ask side reference.
+    pub fn asks(&self) -> &OrderBookSide {
+        &self.asks
+    }
+
+    /// Add liquidity specifically to the bid side.
+    pub fn add_bid(&mut self, price: Price, quantity: i64) {
+        self.bids.add_order(price, quantity);
+    }
+
+    /// Add liquidity specifically to the ask side.
+    pub fn add_ask(&mut self, price: Price, quantity: i64) {
+        self.asks.add_order(price, quantity);
+    }
+
+    /// Replace the book's bid and ask depth ladders with an L2 snapshot.
+    pub fn set_depth(&mut self, bids: &[DepthLevel], asks: &[DepthLevel]) {
+        self.bids.clear();
+        self.asks.clear();
+        for level in bids {
+            let qty = level.quantity.0.to_i64().unwrap_or(0);
+            if qty > 0 {
+                self.bids.add_order(level.price, qty);
+            }
+        }
+        for level in asks {
+            let qty = level.quantity.0.to_i64().unwrap_or(0);
+            if qty > 0 {
+                self.asks.add_order(level.price, qty);
+            }
+        }
+    }
+
+    /// Best resting depth on the book side that an incoming `side` order matches against.
+    pub fn best_contra_depth(&self, side: OrderSide) -> i64 {
+        match side {
+            OrderSide::Buy => self.asks.best_quantity(),
+            OrderSide::Sell => self.bids.best_quantity(),
+        }
+    }
+
+    /// Price levels on the book side that an incoming `side` order matches against.
+    pub fn contra_levels(&self, side: OrderSide) -> &BTreeMap<Price, i64> {
+        match side {
+            OrderSide::Buy => self.asks.levels(),
+            OrderSide::Sell => self.bids.levels(),
+        }
+    }
+
     /// Clamps `order_qty` to the volume participation cap (half of
     /// `avg_daily_volume * participation_cap`, per `check_participation_cap`),
     /// given this book's current `avg_daily_volume`. Returns `order_qty`
@@ -148,8 +213,12 @@ impl OrderBook {
         if self.check_participation_cap(order_qty, self.avg_daily_volume) {
             return order_qty;
         }
-        let cap = (Decimal::from(self.avg_daily_volume) * self.participation_cap) / Decimal::from(2);
-        cap.max(Decimal::ZERO).to_i64().unwrap_or(0).min(order_qty.abs())
+        let cap =
+            (Decimal::from(self.avg_daily_volume) * self.participation_cap) / Decimal::from(2);
+        cap.max(Decimal::ZERO)
+            .to_i64()
+            .unwrap_or(0)
+            .min(order_qty.abs())
     }
 
     /// Execute a market order against the order book.
@@ -159,7 +228,7 @@ impl OrderBook {
     /// is reported back as part of `remaining_quantity` (a market order is
     /// partially filled up to the cap rather than rejected outright).
     ///
-    /// Returns: (filled_quantity, fill_price, remaining_quantity, worst_price_encountered)
+    /// Returns: (filled_quantity, vwap_fill_price, remaining_quantity, worst_price_encountered)
     pub fn execute_market_order(
         &mut self,
         side: OrderSide,
@@ -171,14 +240,19 @@ impl OrderBook {
             OrderSide::Buy => self._buy_market(allowed),
             OrderSide::Sell => self._sell_market(allowed),
         };
-        (filled_qty, filled_price, remaining + capped_excess, worst_price)
+        (
+            filled_qty,
+            filled_price,
+            remaining + capped_excess,
+            worst_price,
+        )
     }
 
     /// Execute a limit order against the order book.
     ///
     /// Same participation-cap clamping as [`Self::execute_market_order`].
     ///
-    /// Returns: (filled_quantity, fill_price, remaining_quantity)
+    /// Returns: (filled_quantity, vwap_fill_price, remaining_quantity)
     pub fn execute_limit_order(
         &mut self,
         side: OrderSide,
@@ -250,6 +324,7 @@ impl OrderBook {
     fn _buy_market(&mut self, quantity: i64) -> (i64, Price, i64, Option<Price>) {
         let mut filled = 0i64;
         let mut remaining = quantity;
+        let mut total_notional = Decimal::ZERO;
         let mut worst_price: Option<Price> = None;
         let mut worst_price_val: Decimal = Decimal::ZERO;
 
@@ -260,6 +335,7 @@ impl OrderBook {
             let take = std::cmp::min(remaining, available);
             filled += take;
             remaining -= take;
+            total_notional += ask_price.0 * Decimal::from(take);
 
             // Track worst (highest) price paid
             if worst_price.is_none() || ask_price.0 > worst_price_val {
@@ -268,16 +344,21 @@ impl OrderBook {
             }
 
             // Remove or reduce level
-            self.asks.remove_order(ask_price, take as i64);
+            self.asks.remove_order(ask_price, take);
         }
 
-        let fill_price = worst_price.unwrap_or(Price(Decimal::ZERO));
+        let fill_price = if filled > 0 {
+            Price((total_notional / Decimal::from(filled)).round_dp(4))
+        } else {
+            Price(Decimal::ZERO)
+        };
         (filled, fill_price, remaining, worst_price)
     }
 
     fn _sell_market(&mut self, quantity: i64) -> (i64, Price, i64, Option<Price>) {
         let mut filled = 0i64;
         let mut remaining = quantity;
+        let mut total_notional = Decimal::ZERO;
         let mut worst_price: Option<Price> = None;
         let mut worst_price_val: Decimal = Decimal::MAX;
 
@@ -288,6 +369,7 @@ impl OrderBook {
             let take = std::cmp::min(remaining, available);
             filled += take;
             remaining -= take;
+            total_notional += bid_price.0 * Decimal::from(take);
 
             // Track worst (lowest) price received
             if worst_price.is_none() || bid_price.0 < worst_price_val {
@@ -295,22 +377,26 @@ impl OrderBook {
                 worst_price_val = bid_price.0;
             }
 
-            self.bids.remove_order(bid_price, take as i64);
+            self.bids.remove_order(bid_price, take);
         }
 
-        let fill_price = worst_price.unwrap_or(Price(Decimal::ZERO));
+        let fill_price = if filled > 0 {
+            Price((total_notional / Decimal::from(filled)).round_dp(4))
+        } else {
+            Price(Decimal::ZERO)
+        };
         (filled, fill_price, remaining, worst_price)
     }
 
     fn _buy_limit(&mut self, quantity: i64, limit_price: Price) -> (i64, Price, i64) {
         let mut filled = 0i64;
         let mut remaining = quantity;
+        let mut total_notional = Decimal::ZERO;
 
-        // Market buy can only fill up to limit price
+        // Limit buy can only fill at ask prices <= limit_price
         while remaining > 0 && !self.asks.is_empty() {
             let ask_price = self.asks.best_price().unwrap();
 
-            // Limit check: only buy if ask <= limit
             if ask_price.0 > limit_price.0 {
                 break; // Above limit, cannot fill
             }
@@ -318,14 +404,12 @@ impl OrderBook {
             let take = std::cmp::min(remaining, self.asks.best_quantity());
             filled += take;
             remaining -= take;
-            self.asks.remove_order(ask_price, take as i64);
+            total_notional += ask_price.0 * Decimal::from(take);
+            self.asks.remove_order(ask_price, take);
         }
 
         let fill_price = if filled > 0 {
-            // Use volume-weighted average price
-            // Simplified: use the best ask price that was available
-            let (_, vwap_price, _, _) = self._buy_market(filled);
-            vwap_price
+            Price((total_notional / Decimal::from(filled)).round_dp(4))
         } else {
             Price(Decimal::ZERO)
         };
@@ -336,12 +420,12 @@ impl OrderBook {
     fn _sell_limit(&mut self, quantity: i64, limit_price: Price) -> (i64, Price, i64) {
         let mut filled = 0i64;
         let mut remaining = quantity;
+        let mut total_notional = Decimal::ZERO;
 
-        // Market sell can only fill down to limit price
+        // Limit sell can only fill at bid prices >= limit_price
         while remaining > 0 && !self.bids.is_empty() {
             let bid_price = self.bids.best_price().unwrap();
 
-            // Limit check: only sell if bid >= limit
             if bid_price.0 < limit_price.0 {
                 break; // Below limit, cannot fill
             }
@@ -349,12 +433,12 @@ impl OrderBook {
             let take = std::cmp::min(remaining, self.bids.best_quantity());
             filled += take;
             remaining -= take;
-            self.bids.remove_order(bid_price, take as i64);
+            total_notional += bid_price.0 * Decimal::from(take);
+            self.bids.remove_order(bid_price, take);
         }
 
         let fill_price = if filled > 0 {
-            let (_, vwap_price, _, _) = self._sell_market(filled);
-            vwap_price
+            Price((total_notional / Decimal::from(filled)).round_dp(4))
         } else {
             Price(Decimal::ZERO)
         };

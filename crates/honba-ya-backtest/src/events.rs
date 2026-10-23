@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use honba_core::{Bar, FillReport, OrderRequest, Tick};
 use honba_mon::RiskRefusal;
 
-use crate::costs::IndianFeeBreakdown;
+use honba_kokoro_ledger::TaxBreakdown;
 
 /// Market event entering the event loop (ticks or historical bars).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,12 +69,12 @@ pub enum OrderEvent {
 }
 
 /// Simulated trade fill event matching against market depth/ticks with Indian cost modeling.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FillEvent {
     /// Canonical fill report
     pub fill_report: FillReport,
     /// Exact statutory fees calculated for this fill
-    pub fees: IndianFeeBreakdown,
+    pub fees: TaxBreakdown,
     /// Net cash impact of this fill
     pub net_cash: Decimal,
     /// Execution timestamp

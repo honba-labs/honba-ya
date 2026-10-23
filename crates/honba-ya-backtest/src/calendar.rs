@@ -127,6 +127,17 @@ impl NseTradingCalendar {
         self.ist_offset
     }
 
+    /// Every declared holiday date, as a flat list. This is the real NSE
+    /// holiday *data* this calendar owns; it gets injected into
+    /// `honba_portfolio::ClearingCalendar::with_holidays` so that crate
+    /// never duplicates or hardcodes its own (potentially diverging) copy
+    /// of the same table. Muhurat session dates are intentionally
+    /// excluded: they are trading days (`is_trading_day` returns `true`
+    /// for them), not holidays.
+    pub fn holidays(&self) -> Vec<NaiveDate> {
+        self.holidays.iter().copied().collect()
+    }
+
     /// Check if a UTC timestamp falls within open NSE market hours.
     pub fn is_market_open(&self, utc_time: DateTime<Utc>) -> bool {
         let ist_time = utc_time.with_timezone(&self.ist_offset);

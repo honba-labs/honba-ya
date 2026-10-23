@@ -14,7 +14,7 @@ use rust_decimal_macros::dec;
 
 use honba_backtest::sim::mis::MisSquareOffManager;
 use honba_backtest::{BacktestConfig, BacktestEngine, MarketEvent};
-use honba_backtest::{IndianCostModel, NseTradingCalendar, ProductType};
+use honba_backtest::{NseTradingCalendar, ProductType};
 use honba_core::{Bar, Exchange, InstrumentId, OrderSide, Price, Quantity};
 use honba_mon::{OtrConfig, RiskEngine, RiskLimits};
 use honba_strategy::{OrderIntent, Strategy, StrategyContext};
@@ -98,13 +98,7 @@ fn test_square_off_closes_all_open_mis_positions_at_1520_ist() {
         mis_square_off: Some(MisSquareOffManager::new(NseTradingCalendar::new())),
         ..Default::default()
     };
-    let mut engine = BacktestEngine::new(
-        strategy,
-        risk_engine,
-        config,
-        IndianCostModel::new(),
-        NseTradingCalendar::new(),
-    );
+    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
 
     let events = vec![
         MarketEvent::Bar(bar(&inst1, "1500.00", before_square_off_utc(day))),
@@ -125,7 +119,9 @@ fn test_square_off_closes_all_open_mis_positions_at_1520_ist() {
         } else {
             -fill.quantity.0
         };
-        *net_position.entry(fill.instrument.clone()).or_insert(Decimal::ZERO) += signed;
+        *net_position
+            .entry(fill.instrument.clone())
+            .or_insert(Decimal::ZERO) += signed;
     }
     assert_eq!(
         net_position.get(&inst1).copied().unwrap_or_default(),
@@ -153,15 +149,13 @@ fn test_process_trade_updates_square_off_eligibility() {
         mis_square_off: Some(MisSquareOffManager::new(NseTradingCalendar::new())),
         ..Default::default()
     };
-    let mut engine = BacktestEngine::new(
-        strategy,
-        risk_engine,
-        config,
-        IndianCostModel::new(),
-        NseTradingCalendar::new(),
-    );
+    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
 
-    let events = vec![MarketEvent::Bar(bar(&inst, "1500.00", before_square_off_utc(day)))];
+    let events = vec![MarketEvent::Bar(bar(
+        &inst,
+        "1500.00",
+        before_square_off_utc(day),
+    ))];
     let _ = engine.run_events(events);
 
     let manager = engine
@@ -187,13 +181,7 @@ fn test_no_square_off_for_delivery_positions() {
         mis_square_off: Some(MisSquareOffManager::new(NseTradingCalendar::new())),
         ..Default::default()
     };
-    let mut engine = BacktestEngine::new(
-        strategy,
-        risk_engine,
-        config,
-        IndianCostModel::new(),
-        NseTradingCalendar::new(),
-    );
+    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
 
     let events = vec![
         MarketEvent::Bar(bar(&inst, "1500.00", before_square_off_utc(day))),

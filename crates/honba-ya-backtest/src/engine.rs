@@ -7,13 +7,21 @@
 //! as every other execution mode, instead of reimplementing a subset of it
 //! inline.
 //!
+//! # Research-live parity cost & settlement (Phase 4.2: kokoro canonicalization)
+//! Statutory fee computation (`honba_kokoro_ledger::TaxCalculator`),
+//! double-entry journal posting (`honba_kokoro_ledger::{Transaction, post_transaction}`),
+//! position/PnL tracking (`honba_portfolio::{AccountState, apply_fill_to_account}`),
+//! and ICCL T+1 Demat settlement timing & margin holdbacks
+//! (`honba_portfolio::{ClearingCalendar, DematHoldings, SettlementEngine}`) are all
+//! delegated to the kokoro crates the live-trading actor path also uses.
+//!
 //! # L2 Order Book Simulation (Phase 4.1)
 //! The engine supports optional L2 order book depth simulation with market
-//! order execution, limit order matching, spread tracking, volume participation
-//! caps, and adverse fill slippage modeling. Enable via
+//! order execution, limit order matching, spread-crossing penalties, volume
+//! participation caps, and adverse fill slippage modeling. Enable via
 //! `BacktestConfig::with_l2_simulation()`.
 //!
-//! # MIS 15:20 Square-off (Phase 4.2)
+//! # MIS 15:20 Square-off (Phase 4.1)
 //! The engine enforces mandatory intraday square-off at 15:20 IST for all
 //! open MIS (Margin Intraday Square-off) positions, as per SEBI regulations.
 
@@ -21,27 +29,100 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal_macros::dec;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use uuid::Uuid;
 
 use honba_core::{
-    FeeBreakdown, FillReport, InstrumentId, Money, OrderRequest, OrderSide, OrderType, Price,
-    Quantity, Tick,
+    Currency, FeeBreakdown, FillReport, InstrumentId, Money, OrderRequest, OrderSide, OrderType,
+    Price, Quantity, Tick,
+};
+use honba_kokoro_ledger::{
+    Exchange as TaxExchange, ProductType, TaxBreakdown, TaxCalculator, TradeSide, Transaction,
+    post_transaction,
 };
 use honba_mon::RiskEngine;
+use honba_portfolio::{
+    AccountState, ClearingCalendar, DematHoldings, Fill, PositionSide, Product, SettlementEngine,
+    SettlementInstruction, apply_fill_to_account,
+};
 use honba_strategy::{LedgerContext, Strategy, StrategyRunner};
 
+use crate::calendar::NseTradingCalendar;
+use crate::catalog::{CatalogError, CatalogLoader};
+use crate::events::MarketEvent;
 use crate::sim::{
     l2_book::OrderBook,
     latency::NetworkLatency,
     mis::{MisSquareOffManager, SquareOffResult},
-    slippage::SlippageModel,
+    slippage::{AdverseFillModel, SlippageModel},
 };
 
-use crate::calendar::NseTradingCalendar;
-use crate::costs::{IndianCostModel, IndianFeeBreakdown, ProductType};
-use crate::events::MarketEvent;
-use crate::settlement::SettlementLedger;
+/// Convert a `Decimal` share quantity into the `u64` that
+/// `honba_portfolio::apply_fill`/`apply_fill_to_account` require.
+///
+/// Indian equities trade in whole shares, so in practice this conversion is
+/// always exact, but the boundary is explicit about what happens otherwise:
+/// - The fractional part is TRUNCATED (not rounded), via `Decimal::trunc()`.
+/// - A non-positive or otherwise unrepresentable quantity saturates to `0`
+///   rather than panicking or silently wrapping.
+pub fn decimal_qty_to_u64(qty: Decimal) -> u64 {
+    if qty <= Decimal::ZERO {
+        return 0;
+    }
+    qty.trunc().to_u64().unwrap_or(0)
+}
+
+/// Map this crate's `ProductType` (used for statutory tax rates) onto
+/// `honba_portfolio::Product` (used for T+1 demat-settlement eligibility).
+/// Futures/Options never settle via physical demat delivery either way, so
+/// both map to `Product::Intraday` (`requires_settlement() == false`),
+/// same as a plain intraday equity trade.
+fn to_kokoro_product(product: ProductType) -> Product {
+    match product {
+        ProductType::Delivery => Product::Delivery,
+        ProductType::Intraday | ProductType::Futures | ProductType::Options => Product::Intraday,
+    }
+}
+
+/// Apply a fill to the trading account, additionally handling the one case
+/// `honba_portfolio::apply_fill` does not cover: a fill in the SAME
+/// direction as an already-open position (pyramiding/adding), which
+/// `apply_fill` would otherwise misinterpret as a closing/reducing fill.
+/// Opening a brand-new position, or reducing/closing/reversing an existing
+/// one, both delegate straight to `apply_fill_to_account`.
+fn apply_fill_with_add_support(
+    account: &mut AccountState,
+    instrument: InstrumentId,
+    order_side: OrderSide,
+    filled_qty: u64,
+    fill_price: Price,
+) -> Money {
+    let new_side = if order_side == OrderSide::Buy {
+        PositionSide::Long
+    } else {
+        PositionSide::Short
+    };
+
+    if let Some(idx) = account
+        .positions
+        .iter()
+        .position(|p| p.instrument == instrument)
+        && account.positions[idx].side == new_side
+    {
+        let pos = &mut account.positions[idx];
+        let old_qty = pos.quantity.0;
+        let add_qty = Decimal::from(filled_qty);
+        let new_qty = old_qty + add_qty;
+        if new_qty > Decimal::ZERO {
+            pos.entry_price =
+                Price((pos.entry_price.0 * old_qty + fill_price.0 * add_qty) / new_qty);
+        }
+        pos.quantity = Quantity::new(new_qty);
+        return Money::inr(Decimal::ZERO);
+    }
+
+    apply_fill_to_account(account, instrument, new_side, filled_qty, fill_price)
+}
 
 /// Configuration for backtest execution with L2 simulation options.
 #[derive(Debug, Clone)]
@@ -56,11 +137,16 @@ pub struct BacktestConfig {
     pub latency: Option<NetworkLatency>,
     /// Slippage model configuration
     pub slippage: Option<SlippageModel>,
+    /// Adverse fill slippage model across depth tiers
+    pub adverse_fill: Option<AdverseFillModel>,
     /// MIS square-off manager
     pub mis_square_off: Option<MisSquareOffManager>,
     /// Number of warm-up bars the strategy must see before any intent it
     /// submits becomes a real order (see [`StrategyRunner::with_warmup_bars`]).
     pub warmup_bars: u32,
+    /// ICCL T+1 settlement margin holdback ratio on unsettled delivery sales
+    /// (default 20% = `0.20` per SEBI early pay-in / VaR+ELM rules).
+    pub iccl_margin_holdback_pct: Decimal,
 }
 
 impl Default for BacktestConfig {
@@ -71,8 +157,10 @@ impl Default for BacktestConfig {
             l2_simulation: false,
             latency: None,
             slippage: None,
+            adverse_fill: None,
             mis_square_off: None,
             warmup_bars: 0,
+            iccl_margin_holdback_pct: dec!(0.20),
         }
     }
 }
@@ -92,25 +180,34 @@ impl BacktestConfig {
             l2_simulation: true,
             latency: Some(latency),
             slippage: Some(slippage),
+            adverse_fill: None,
             mis_square_off: Some(mis_square_off),
             warmup_bars: 0,
+            iccl_margin_holdback_pct: dec!(0.20),
         }
+    }
+
+    /// Attach an [`AdverseFillModel`] for multi-level adverse fill slippage.
+    pub fn with_adverse_fill(mut self, model: AdverseFillModel) -> Self {
+        self.adverse_fill = Some(model);
+        self
     }
 }
 
 /// Comprehensive performance and regulatory audit results of a backtest run.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BacktestResult {
     /// Initial capital in INR
     pub initial_cash: Decimal,
-    /// Final equity (settled cash + mark-to-market securities)
+    /// Final equity (settled cash + mark-to-market of live positions)
     pub final_equity: Decimal,
     /// Net PnL after all Indian statutory taxes and transaction fees
     pub net_pnl: Decimal,
-    /// Gross trading PnL before fees
+    /// Gross trading PnL before fees (FIFO realized PnL from
+    /// `honba_portfolio::apply_fill`, summed across every fill)
     pub gross_pnl: Decimal,
     /// Detailed itemized Indian statutory fee breakdown
-    pub total_fees: IndianFeeBreakdown,
+    pub total_fees: TaxBreakdown,
     /// Total executed trades / fills
     pub total_trades: usize,
     /// Total candidate orders generated by strategy (submitted, suppressed
@@ -120,13 +217,15 @@ pub struct BacktestResult {
     pub refused_orders: usize,
     /// Maximum portfolio drawdown percentage (e.g. 5.25 for 5.25%)
     pub max_drawdown_pct: Decimal,
-    /// Simulated L2 fill price impact (if L2 simulation enabled)
+    /// Cumulative simulated L2 fill price impact & slippage in INR
     pub price_impact: Decimal,
     /// Every fill booked during the run, in execution order.
     pub fills: Vec<FillReport>,
     /// Mark-to-market equity sampled after every processed event, in
     /// chronological order.
     pub equity_curve: Vec<(DateTime<Utc>, Decimal)>,
+    /// Double-entry journal transactions posted to `honba-kokoro-ledger`.
+    pub ledger_transactions: Vec<Transaction>,
 }
 
 /// An approved, risk-checked order waiting for the L2 book's configured
@@ -141,9 +240,15 @@ struct PendingOrder {
 /// Event-driven backtester core engine.
 pub struct BacktestEngine<S: Strategy> {
     runner: StrategyRunner<S>,
-    cost_model: IndianCostModel,
-    calendar: NseTradingCalendar,
-    ledger: SettlementLedger,
+    clearing_calendar: ClearingCalendar,
+    settlement_engine: SettlementEngine,
+    /// Live (T+0) trading position & FIFO-realized-PnL state, per
+    /// `honba_portfolio::apply_fill_to_account`.
+    account: AccountState,
+    /// ICCL T+1 Demat holdings state (free vs blocked pending settlement).
+    demat_holdings: DematHoldings,
+    /// Pending T+1 Demat settlement instructions awaiting settlement date.
+    pending_instructions: Vec<SettlementInstruction>,
 
     // L2 order book simulation state
     order_book: Option<OrderBook>,
@@ -151,17 +256,31 @@ pub struct BacktestEngine<S: Strategy> {
     // latency before they can execute (see `OrderBook::ready_ts`).
     pending_orders: Vec<PendingOrder>,
 
-    // Slippage model (latency is consumed at construction time into
-    // `order_book`'s own `latency_us`; nothing else needs it afterward)
+    // Slippage and adverse fill models
     slippage_model: Option<SlippageModel>,
+    adverse_fill_model: Option<AdverseFillModel>,
 
     // MIS square-off manager
     mis_square_off: Option<MisSquareOffManager>,
 
-    // Performance tracking
+    // Performance & accounting tracking
     initial_cash: Decimal,
     gross_pnl: Decimal,
-    total_fees: IndianFeeBreakdown,
+    total_fees: TaxBreakdown,
+    total_price_impact: Decimal,
+    /// Cash that has actually settled (T+1-aware, via `ClearingCalendar` +
+    /// `SettlementEngine::create_instruction`). Notional and statutory fees
+    /// for a fill settle together, on the same settlement date.
+    settled_cash: Decimal,
+    /// Fills whose cash impact hasn't settled yet: (settle_date, net cash delta).
+    pending_settlements: Vec<(NaiveDate, Decimal)>,
+    /// Margin holdbacks blocked by ICCL pending T+1 settlement: (settle_date, holdback_amount).
+    pending_margin_holdbacks: Vec<(NaiveDate, Decimal)>,
+    /// Currently blocked ICCL settlement/delivery margin in INR.
+    margin_blocked: Decimal,
+    iccl_margin_holdback_pct: Decimal,
+    /// Balanced double-entry ledger transactions posted via `honba-kokoro-ledger`.
+    ledger_transactions: Vec<Transaction>,
     peak_equity: Decimal,
     max_drawdown: Decimal,
     equity_curve: Vec<(DateTime<Utc>, Decimal)>,
@@ -184,11 +303,16 @@ impl<S: Strategy> BacktestEngine<S> {
     /// Internally wraps `strategy` in a [`StrategyRunner`] seeded with
     /// `config.starting_cash`, `risk_engine` as its pre-trade gate, and
     /// `config.warmup_bars` as its warm-up-bar suppression window.
+    ///
+    /// `calendar`'s real NSE holiday data (seeded, including Muhurat
+    /// sessions) is injected into a `honba_portfolio::ClearingCalendar`
+    /// (which otherwise has no hardcoded holiday table of its own) via
+    /// `ClearingCalendar::with_holidays`, so T+1 settlement dates respect
+    /// the real exchange calendar.
     pub fn new(
         strategy: S,
         risk_engine: RiskEngine,
         config: BacktestConfig,
-        cost_model: IndianCostModel,
         calendar: NseTradingCalendar,
     ) -> Self {
         let initial_cash = config.starting_cash;
@@ -196,25 +320,47 @@ impl<S: Strategy> BacktestEngine<S> {
         let runner = StrategyRunner::with_context(strategy, ctx)
             .with_risk(risk_engine)
             .with_warmup_bars(config.warmup_bars);
+
+        let clearing_calendar = ClearingCalendar::with_holidays(&calendar.holidays());
+        let settlement_engine = SettlementEngine::new(clearing_calendar.clone());
+
         Self {
             runner,
-            cost_model,
-            calendar,
-            ledger: SettlementLedger::new(initial_cash),
+            clearing_calendar,
+            settlement_engine,
+            account: AccountState::new(Currency::Inr, Vec::new()),
+            demat_holdings: DematHoldings::new(),
+            pending_instructions: Vec::new(),
             order_book: if config.l2_simulation {
                 Some(OrderBook::new(
-                    config.latency.as_ref().map(|l| l.current_latency()).unwrap_or(0),
-                    config.slippage.as_ref().map(|s| s.daily_range_pct()).unwrap_or_default(),
+                    config
+                        .latency
+                        .as_ref()
+                        .map(|l| l.current_latency())
+                        .unwrap_or(0),
+                    config
+                        .slippage
+                        .as_ref()
+                        .map(|s| s.daily_range_pct())
+                        .unwrap_or_default(),
                 ))
             } else {
                 None
             },
             pending_orders: Vec::new(),
             slippage_model: config.slippage,
+            adverse_fill_model: config.adverse_fill,
             mis_square_off: config.mis_square_off,
             initial_cash,
             gross_pnl: Decimal::ZERO,
-            total_fees: IndianFeeBreakdown::default(),
+            total_fees: TaxBreakdown::default(),
+            total_price_impact: Decimal::ZERO,
+            settled_cash: initial_cash,
+            pending_settlements: Vec::new(),
+            pending_margin_holdbacks: Vec::new(),
+            margin_blocked: Decimal::ZERO,
+            iccl_margin_holdback_pct: config.iccl_margin_holdback_pct,
+            ledger_transactions: Vec::new(),
             peak_equity: initial_cash,
             max_drawdown: Decimal::ZERO,
             equity_curve: Vec::new(),
@@ -229,6 +375,45 @@ impl<S: Strategy> BacktestEngine<S> {
     /// The attached MIS square-off manager, if any.
     pub fn mis_square_off(&self) -> Option<&MisSquareOffManager> {
         self.mis_square_off.as_ref()
+    }
+
+    /// Current T+1 Demat holdings state (free vs blocked pending settlement).
+    pub fn demat_holdings(&self) -> &DematHoldings {
+        &self.demat_holdings
+    }
+
+    /// Currently blocked ICCL settlement/delivery margin in INR.
+    pub fn margin_blocked(&self) -> Decimal {
+        self.margin_blocked
+    }
+
+    /// Current settled cash balance in INR.
+    pub fn settled_cash(&self) -> Decimal {
+        self.settled_cash
+    }
+
+    /// Available trading cash after subtracting ICCL margin holdbacks.
+    pub fn available_trading_cash(&self) -> Decimal {
+        (self.settled_cash - self.margin_blocked).max(Decimal::ZERO)
+    }
+
+    /// Double-entry journal transactions recorded so far.
+    pub fn ledger_transactions(&self) -> &[Transaction] {
+        &self.ledger_transactions
+    }
+
+    /// Load historical bars for `instruments` at `timeframe` from `loader` and run
+    /// the deterministic event loop over them.
+    pub fn run_catalog(
+        &mut self,
+        loader: &CatalogLoader,
+        instruments: &[InstrumentId],
+        timeframe: &str,
+        from: Option<DateTime<Utc>>,
+        to: Option<DateTime<Utc>>,
+    ) -> Result<BacktestResult, CatalogError> {
+        let events = loader.load_market_events(instruments, timeframe, from, to)?;
+        Ok(self.run_events(events))
     }
 
     /// Process a stream of chronological market events through the complete event loop:
@@ -251,8 +436,8 @@ impl<S: Strategy> BacktestEngine<S> {
 
         // Final settlement flush to current date
         if let Some(date) = self.current_date {
-            let next_day = self.calendar.next_trading_day(date);
-            self.ledger.settle_up_to(next_day);
+            let next_day = self.clearing_calendar.next_trading_day(date);
+            self.flush_settlements(next_day);
         }
 
         let final_equity = self.current_equity();
@@ -263,21 +448,6 @@ impl<S: Strategy> BacktestEngine<S> {
         } else {
             Decimal::ZERO
         };
-
-        let price_impact = self
-            .order_book
-            .as_ref()
-            .map(|_ob| {
-                // Compute average slippage across all fills
-                self.total_fees
-                    .stt
-                    .max(self.total_fees.stamp_duty)
-                    .max(self.total_fees.exchange_turnover)
-                    .max(self.total_fees.sebi_turnover)
-                    .max(self.total_fees.gst)
-                    .max(self.total_fees.dp_charge)
-            })
-            .unwrap_or_default();
 
         let fills = self.runner.fills().to_vec();
         let total_trades = fills.len();
@@ -292,14 +462,15 @@ impl<S: Strategy> BacktestEngine<S> {
             final_equity,
             net_pnl,
             gross_pnl: self.gross_pnl,
-            total_fees: self.total_fees.clone(),
+            total_fees: self.total_fees,
             total_trades,
             total_signals,
             refused_orders,
             max_drawdown_pct,
-            price_impact,
+            price_impact: self.total_price_impact,
             fills,
             equity_curve: self.equity_curve.clone(),
+            ledger_transactions: self.ledger_transactions.clone(),
         }
     }
 
@@ -311,7 +482,7 @@ impl<S: Strategy> BacktestEngine<S> {
         if self.current_date != Some(event_date) {
             self.current_date = Some(event_date);
             self.scrips_sold_today.clear();
-            self.ledger.settle_up_to(event_date);
+            self.flush_settlements(event_date);
         }
 
         // 2. Update price cache
@@ -319,6 +490,12 @@ impl<S: Strategy> BacktestEngine<S> {
             MarketEvent::Tick(t) => {
                 if let Some(p) = t.last_price() {
                     self.latest_prices.insert(t.instrument().clone(), p);
+                } else if let Tick::Quote { bid, ask, .. } = t
+                    && bid.0 > Decimal::ZERO
+                    && ask.0 > Decimal::ZERO
+                {
+                    let mid = Price(((bid.0 + ask.0) / dec!(2)).round_dp(4));
+                    self.latest_prices.insert(t.instrument().clone(), mid);
                 }
             }
             MarketEvent::Bar(b) => {
@@ -341,25 +518,39 @@ impl<S: Strategy> BacktestEngine<S> {
         // 3. L2 order book simulation: update order book with incoming tick/bar
         if let Some(ob) = self.order_book.as_mut() {
             match &event {
-                MarketEvent::Tick(t) => {
-                    let price = t.last_price().unwrap_or_default();
-                    // `Tick` has no single "quantity" concept across its
-                    // variants: use the last-trade volume for `Ltp`, and
-                    // the larger of the best bid/ask size for `Quote`/
-                    // `Depth` as a simple proxy for available liquidity.
-                    let quantity = match t {
-                        Tick::Ltp { volume, .. } => volume.0,
-                        Tick::Quote {
-                            bid_qty, ask_qty, ..
-                        } => bid_qty.0.max(ask_qty.0),
-                        Tick::Depth { bids, asks, .. } => {
-                            let best_bid = bids.first().map(|l| l.quantity.0).unwrap_or_default();
-                            let best_ask = asks.first().map(|l| l.quantity.0).unwrap_or_default();
-                            best_bid.max(best_ask)
+                MarketEvent::Tick(t) => match t {
+                    Tick::Ltp { price, volume, .. } => {
+                        ob.add_order(*price, volume.0.to_i64().unwrap_or(0));
+                    }
+                    Tick::Quote {
+                        bid,
+                        ask,
+                        bid_qty,
+                        ask_qty,
+                        last_price,
+                        ..
+                    } => {
+                        if bid.0 > Decimal::ZERO && ask.0 > Decimal::ZERO {
+                            ob.add_bid(*bid, bid_qty.0.to_i64().unwrap_or(0));
+                            ob.add_ask(*ask, ask_qty.0.to_i64().unwrap_or(0));
+                        } else if let Some(lp) = last_price {
+                            let qty = bid_qty.0.max(ask_qty.0).to_i64().unwrap_or(0);
+                            ob.add_order(*lp, qty);
                         }
-                    };
-                    ob.add_order(price, quantity.to_i64().unwrap_or(0));
-                }
+                    }
+                    Tick::Depth {
+                        bids,
+                        asks,
+                        last_price,
+                        ..
+                    } => {
+                        if !bids.is_empty() || !asks.is_empty() {
+                            ob.set_depth(bids, asks);
+                        } else if let Some(lp) = last_price {
+                            ob.add_order(*lp, 1);
+                        }
+                    }
+                },
                 MarketEvent::Bar(b) => {
                     // Bar approximates close price; add synthetic depth.
                     // Its traded volume is also the simulation's only
@@ -405,7 +596,8 @@ impl<S: Strategy> BacktestEngine<S> {
     }
 
     /// Execute an order (already risk-checked and latency-delayed, if
-    /// applicable) with the Indian cost model and optional L2 slippage.
+    /// applicable) with the canonical kokoro cost model and optional L2
+    /// slippage.
     fn execute_order(&mut self, order: OrderRequest, timestamp: DateTime<Utc>) {
         let instrument = &order.instrument;
         let current_price = match self.latest_prices.get(instrument) {
@@ -417,23 +609,96 @@ impl<S: Strategy> BacktestEngine<S> {
         // `remaining_qty` are kept as `Decimal` across both branches (the L2
         // branch's `i64` counts are converted up) so this `if`/`else` type-checks
         // and downstream arithmetic against `Decimal` prices works directly.
-        let (filled_qty, fill_price, _remaining_qty, price_impact) =
-            if let Some(ob) = self.order_book.as_mut() {
-                // Use L2 order book simulation
-                let qty = order.quantity.0.to_i64().unwrap_or(0);
-                let (filled, price, remaining, worst) = ob.execute_market_order(order.side, qty);
-                let price_impact = worst.map_or(Decimal::ZERO, |p| p.0);
-                (
-                    Decimal::from(filled),
-                    price,
-                    Decimal::from(remaining),
-                    price_impact,
-                )
-            } else {
-                // Direct execution at current market price (no L2 simulation)
-                let fill_price = current_price;
-                (order.quantity.0, fill_price, Decimal::ZERO, Decimal::ZERO)
+        let (filled_qty, mut fill_price, _remaining_qty, mut order_impact) = if let Some(ob) =
+            self.order_book.as_mut()
+        {
+            let qty = order.quantity.0.to_i64().unwrap_or(0);
+            let (bid_before, ask_before) = ob.get_spread();
+            let pre_depth = ob.best_contra_depth(order.side).max(1);
+            let contra_levels_snapshot = ob.contra_levels(order.side).clone();
+
+            let (filled, matched_price, remaining, worst) = match order.order_type {
+                OrderType::Limit(limit_price) => {
+                    let (f, p, r) = ob.execute_limit_order(order.side, qty, limit_price);
+                    (f, p, r, if f > 0 { Some(p) } else { None })
+                }
+                _ => ob.execute_market_order(order.side, qty),
             };
+
+            if filled <= 0 {
+                return;
+            }
+
+            // Depth-walk price impact vs current reference price
+            let mut impact = (matched_price.0 - current_price.0).abs() * Decimal::from(filled);
+
+            // Spread-crossing & volume-participation slippage calculation
+            if let Some(model) = self.slippage_model.as_ref() {
+                let spread_penalty =
+                    model.compute_spread_crossing_penalty(bid_before, ask_before, matched_price);
+                let slip_pct =
+                    model.compute_slippage(order.side, filled, pre_depth, matched_price.0);
+                let slip_rupees =
+                    (matched_price.0 * slip_pct.abs() + spread_penalty) * Decimal::from(filled);
+                impact += slip_rupees.round_dp(4);
+            }
+
+            // Adverse fill slippage across depth levels, if configured
+            let mut final_price = matched_price;
+            if let Some(adverse) = self.adverse_fill_model.as_ref() {
+                let (adv_pct, adv_worst) = adverse.compute_fill_slippage(
+                    order.side,
+                    filled,
+                    &contra_levels_snapshot,
+                    matched_price.0,
+                );
+                if let Some(wp) = adv_worst {
+                    final_price = wp;
+                }
+                impact +=
+                    (matched_price.0 * (adv_pct / dec!(100)) * Decimal::from(filled)).round_dp(4);
+            }
+
+            let _ = worst;
+            (
+                Decimal::from(filled),
+                final_price,
+                Decimal::from(remaining),
+                impact,
+            )
+        } else {
+            // Direct execution at current market price (no L2 simulation)
+            (
+                order.quantity.0,
+                current_price,
+                Decimal::ZERO,
+                Decimal::ZERO,
+            )
+        };
+
+        if filled_qty <= Decimal::ZERO {
+            return;
+        }
+
+        // If slippage model is configured without L2 book, still track slippage impact
+        if self.order_book.is_none()
+            && let Some(model) = self.slippage_model.as_ref()
+        {
+            let slip_pct = model.compute_slippage(
+                order.side,
+                filled_qty.to_i64().unwrap_or(0),
+                1_000,
+                fill_price.0,
+            );
+            let adj = (fill_price.0 * slip_pct).round_dp(4);
+            match order.side {
+                OrderSide::Buy => fill_price = Price(fill_price.0 + adj.abs()),
+                OrderSide::Sell => fill_price = Price((fill_price.0 - adj.abs()).max(dec!(0.01))),
+            }
+            order_impact += (adj.abs() * filled_qty).round_dp(4);
+        }
+
+        self.total_price_impact += order_impact;
 
         let notional = fill_price.0 * filled_qty;
         let is_first_sell = if order.side == OrderSide::Sell {
@@ -442,14 +707,27 @@ impl<S: Strategy> BacktestEngine<S> {
             false
         };
 
-        // Compute exact statutory taxes & brokerage
-        let fees = self
-            .cost_model
-            .compute_fees(order.side, self.product_type, notional, is_first_sell);
+        // Compute exact statutory taxes & brokerage via the canonical
+        // kokoro TaxCalculator (always NSE cash-segment rates, matching the
+        // old IndianCostModel's assumption).
+        let tax_side = match order.side {
+            OrderSide::Buy => TradeSide::Buy,
+            OrderSide::Sell => TradeSide::Sell,
+        };
+        let fees: TaxBreakdown = TaxCalculator::compute_charges(
+            tax_side,
+            self.product_type,
+            TaxExchange::Nse,
+            fill_price.0,
+            filled_qty,
+            is_first_sell,
+        );
         self.total_fees.add_assign(&fees);
 
-        let trade_date = timestamp.date_naive();
         let fill_id = Uuid::new_v4().to_string();
+
+        // Post a balanced double-entry journal transaction to `honba-kokoro-ledger`.
+        self.record_ledger_transaction(&fill_id, timestamp, order.side, notional, &fees);
 
         // `honba_core::FeeBreakdown` has no dedicated slot for the DP
         // (depository participant) charge, so it's folded into
@@ -466,7 +744,7 @@ impl<S: Strategy> BacktestEngine<S> {
         let fee = fee_breakdown.total();
 
         let fill_report = FillReport {
-            fill_id,
+            fill_id: fill_id.clone(),
             order_id: order.tag.clone().unwrap_or_default(),
             client_order_id: order.client_order_id,
             instrument: order.instrument.clone(),
@@ -489,11 +767,23 @@ impl<S: Strategy> BacktestEngine<S> {
             tracing::error!("strategy runner on_fill failed: {e}");
         }
 
+        // Live (T+0) position & FIFO-realized-PnL tracking, via the
+        // canonical kokoro apply_fill (fixed: short PnL and long/short
+        // reversal both now compute correctly).
+        let filled_qty_u64 = decimal_qty_to_u64(filled_qty);
+        let realized = apply_fill_with_add_support(
+            &mut self.account,
+            order.instrument.clone(),
+            order.side,
+            filled_qty_u64,
+            fill_price,
+        );
+        self.gross_pnl += realized.amount;
+
         // Track the net position per instrument so `check_mis_square_off`
         // can find every instrument with an open position, and feed the
         // fill to the MIS square-off manager so its per-instrument
-        // eligibility tracking stays live (it is otherwise never called
-        // and permanently stale).
+        // eligibility tracking stays live.
         let signed_qty = if order.side == OrderSide::Buy {
             filled_qty
         } else {
@@ -514,47 +804,139 @@ impl<S: Strategy> BacktestEngine<S> {
             tracing::error!("MIS square-off process_trade refused: {e:?}");
         }
 
-        // Apply T+1 settlement or cash update
-        match order.side {
-            OrderSide::Buy => {
-                let total_debit = notional + fees.total();
-                self.gross_pnl -= Decimal::ZERO; // buy establishes cost basis
-                self.ledger.record_delivery_buy(
-                    order.instrument,
-                    Quantity(filled_qty),
-                    total_debit,
-                    trade_date,
-                    &self.calendar,
-                );
-            }
-            OrderSide::Sell => {
-                let net_credit = notional - fees.total();
-                self.gross_pnl += notional;
-                self.ledger.record_delivery_sell(
-                    order.instrument,
-                    Quantity(filled_qty),
-                    net_credit,
-                    trade_date,
-                    &self.calendar,
-                );
+        // ICCL T+1 Demat rolling settlement & margin holdback tracking:
+        // ClearingCalendar supplies the settlement date (T+1 for Delivery,
+        // respecting weekends/holidays; same-day otherwise), and
+        // SettlementEngine::create_instruction supplies the signed cash flow.
+        let kfill = Fill {
+            trade_id: fill_id.clone(),
+            instrument: order.instrument.clone(),
+            side: if order.side == OrderSide::Buy {
+                PositionSide::Long
+            } else {
+                PositionSide::Short
+            },
+            quantity: Quantity(filled_qty),
+            price: fill_price,
+            product: to_kokoro_product(self.product_type),
+            timestamp,
+            account_id: "default".to_string(),
+        };
+        let instruction = self
+            .settlement_engine
+            .create_instruction(&kfill, "default".to_string());
+
+        if instruction.product.requires_settlement() {
+            match order.side {
+                OrderSide::Buy => {
+                    // Block bought Demat shares as unsettled receivable until T+1
+                    self.demat_holdings.block_for_settlement(
+                        order.instrument.clone(),
+                        Quantity(filled_qty),
+                        instruction.settle_date,
+                        fill_id,
+                    );
+                    // Upfront purchase obligation + fees blocked until T+1 cash settlement
+                    let holdback = notional + fees.total();
+                    self.margin_blocked += holdback;
+                    self.pending_margin_holdbacks
+                        .push((instruction.settle_date, holdback));
+                    self.pending_instructions.push(instruction.clone());
+                }
+                OrderSide::Sell => {
+                    // If free Demat shares are already settled, debit them via SettlementEngine
+                    // on T+1; if selling unsettled (BTST) or without early pay-in, ICCL holds
+                    // back VaR+ELM margin (`iccl_margin_holdback_pct`) until T+1 settlement.
+                    let holdback = (notional * self.iccl_margin_holdback_pct).round_dp(2);
+                    if holdback > Decimal::ZERO {
+                        self.margin_blocked += holdback;
+                        self.pending_margin_holdbacks
+                            .push((instruction.settle_date, holdback));
+                    }
+                    if self.demat_holdings.free_holdings(&order.instrument).0 >= filled_qty {
+                        self.pending_instructions.push(instruction.clone());
+                    }
+                }
             }
         }
 
-        // Apply slippage model if enabled
-        if let Some(model) = self.slippage_model.as_mut() {
-            let side = order.side;
-            let _slippage = model.compute_slippage(
-                side,
-                filled_qty.to_i64().unwrap_or(0),
-                self.order_book
-                    .as_ref()
-                    .map_or(0, |ob| ob.depth_at(Price(Decimal::ZERO)))
-                    .max(1),
-                fill_price.0,
-            );
-            // Slippage is tracked internally; PnL already reflects execution at fill_price
+        self.pending_settlements.push((
+            instruction.settle_date,
+            instruction.cash_flow.amount - fees.total(),
+        ));
+    }
+
+    /// Record a balanced double-entry journal transaction in `honba-kokoro-ledger`.
+    fn record_ledger_transaction(
+        &mut self,
+        fill_id: &str,
+        timestamp: DateTime<Utc>,
+        side: OrderSide,
+        notional: Decimal,
+        fees: &TaxBreakdown,
+    ) {
+        let mut debits = BTreeMap::new();
+        let mut credits = BTreeMap::new();
+        let total_fees = fees.total();
+
+        match side {
+            OrderSide::Buy => {
+                debits.insert("HoldingsEquityDelivery".to_string(), notional);
+                if fees.brokerage > Decimal::ZERO {
+                    debits.insert("ExpensesBrokerage".to_string(), fees.brokerage);
+                }
+                if fees.stt > Decimal::ZERO {
+                    debits.insert("ExpensesTaxesSTT".to_string(), fees.stt);
+                }
+                if fees.stamp_duty > Decimal::ZERO {
+                    debits.insert("ExpensesTaxesStampDuty".to_string(), fees.stamp_duty);
+                }
+                let exch_and_sebi = fees.exchange_turnover + fees.sebi_turnover + fees.dp_charge;
+                if exch_and_sebi > Decimal::ZERO {
+                    debits.insert("ExpensesExchangeFees".to_string(), exch_and_sebi);
+                }
+                if fees.gst > Decimal::ZERO {
+                    debits.insert("ExpensesTaxesGST".to_string(), fees.gst);
+                }
+                credits.insert("CashAtBroker".to_string(), notional + total_fees);
+            }
+            OrderSide::Sell => {
+                // Gross sale proceeds + fee expense debits balanced against
+                // holdings credit + fee outflow credit
+                debits.insert("CashAtBroker".to_string(), notional);
+                if fees.brokerage > Decimal::ZERO {
+                    debits.insert("ExpensesBrokerage".to_string(), fees.brokerage);
+                }
+                if fees.stt > Decimal::ZERO {
+                    debits.insert("ExpensesTaxesSTT".to_string(), fees.stt);
+                }
+                if fees.stamp_duty > Decimal::ZERO {
+                    debits.insert("ExpensesTaxesStampDuty".to_string(), fees.stamp_duty);
+                }
+                let exch_and_sebi = fees.exchange_turnover + fees.sebi_turnover + fees.dp_charge;
+                if exch_and_sebi > Decimal::ZERO {
+                    debits.insert("ExpensesExchangeFees".to_string(), exch_and_sebi);
+                }
+                if fees.gst > Decimal::ZERO {
+                    debits.insert("ExpensesTaxesGST".to_string(), fees.gst);
+                }
+                credits.insert("HoldingsEquityDelivery".to_string(), notional);
+                if total_fees > Decimal::ZERO {
+                    credits.insert("LiabilitiesMarginPayable".to_string(), total_fees);
+                }
+            }
         }
-        let _ = price_impact;
+
+        let tx = Transaction {
+            id: fill_id.to_string(),
+            timestamp,
+            debits,
+            credits,
+            description: format!("Backtest {:?} fill {}", side, fill_id),
+        };
+        if post_transaction(&tx).is_ok() {
+            self.ledger_transactions.push(tx);
+        }
     }
 
     /// Force-close every instrument with an open MIS (intraday) position
@@ -605,16 +987,69 @@ impl<S: Strategy> BacktestEngine<S> {
         }
     }
 
-    /// Current total equity: settled cash plus the mark-to-market value of
-    /// every settled security, priced at the most recent tick/bar seen for
-    /// that instrument.
+    /// Apply every pending settlement whose settle_date has arrived (<= `as_of`).
+    fn flush_settlements(&mut self, as_of: NaiveDate) {
+        let mut i = 0;
+        while i < self.pending_settlements.len() {
+            if self.pending_settlements[i].0 <= as_of {
+                let (_, amount) = self.pending_settlements.remove(i);
+                self.settled_cash += amount;
+            } else {
+                i += 1;
+            }
+        }
+
+        // Release ICCL margin holdbacks whose settlement date has arrived
+        let mut j = 0;
+        while j < self.pending_margin_holdbacks.len() {
+            if self.pending_margin_holdbacks[j].0 <= as_of {
+                let (_, holdback) = self.pending_margin_holdbacks.remove(j);
+                self.margin_blocked = (self.margin_blocked - holdback).max(Decimal::ZERO);
+            } else {
+                j += 1;
+            }
+        }
+
+        // Settle due Demat instructions (moves blocked shares into free Demat holdings)
+        let mut due_instructions = Vec::new();
+        let mut k = 0;
+        while k < self.pending_instructions.len() {
+            if self.pending_instructions[k].settle_date <= as_of {
+                due_instructions.push(self.pending_instructions.remove(k));
+            } else {
+                k += 1;
+            }
+        }
+        if !due_instructions.is_empty() {
+            let _ = self.settlement_engine.process_settlements(
+                &mut self.demat_holdings,
+                &due_instructions,
+                as_of,
+            );
+        }
+    }
+
+    /// Current total equity: settled cash (T+1-aware) plus the live
+    /// mark-to-market value of every currently-held trading position,
+    /// priced at the most recent tick/bar seen for that instrument.
     fn current_equity(&self) -> Decimal {
-        self.ledger.total_equity(|instrument| {
-            self.latest_prices
-                .get(instrument)
+        let mut equity = self.settled_cash;
+        for pos in &self.account.positions {
+            if pos.quantity.0 == Decimal::ZERO {
+                continue;
+            }
+            let mark = self
+                .latest_prices
+                .get(&pos.instrument)
                 .map(|p| p.0)
-                .unwrap_or(Decimal::ZERO)
-        })
+                .unwrap_or(Decimal::ZERO);
+            let signed_qty = match pos.side {
+                PositionSide::Long => pos.quantity.0,
+                PositionSide::Short => -pos.quantity.0,
+            };
+            equity += mark * signed_qty;
+        }
+        equity
     }
 
     /// Recompute equity, update the running peak/drawdown tracking, and
