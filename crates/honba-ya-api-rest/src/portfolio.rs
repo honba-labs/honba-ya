@@ -2,27 +2,38 @@
 //!
 //! The user is the validated token's `token_id` when auth is on, else
 //! [`DEFAULT_USER_ID`](crate::profile_store::DEFAULT_USER_ID); there is no user id in any path, so
-//! a token can only ever read its own portfolio (ADR 0032 §1). Each read loads the per-user
-//! document from [`crate::PortfolioStore`] on the blocking pool, reads the latest mark of every
-//! open instrument from the quote port, and values the two with the pure [`honba_portfolio`]
-//! engine, stamping `as_of` from the marks — never a wall clock (ADR 0032 §3, §6).
+//! a token can only ever read its own portfolio (ADR 0032 §1). `GET /portfolio/trades` reads the
+//! stored trade history directly and needs no valuation.
 //!
-//! `GET /portfolio/trades` reads no marks: the trade history is stored, not valued.
+//! # Functionality gap: `GET /portfolio`, `/accounts`, `/positions`, `/holdings`
+//!
+//! These four used to call `honba_portfolio::value(state, marks, user, revision, as_of)` and
+//! project its result into [`honba_core::PortfolioSnapshot`] (an `accounts: Vec<PortfolioAccount>`
+//! shape, each account carrying its own valued `positions`/`holdings`/`totals`/`greeks`). That
+//! function no longer exists with that signature or that output shape. The real
+//! `honba_portfolio::value` (in `honba-kokoro/crates/honba-kokoro-portfolio/src/lib.rs`, a sibling
+//! repo out of scope for this migration — see `AGENTS.md`/this task's scope limits) is
+//! `fn value(state: &PortfolioState, marks: &Marks, as_of: &chrono::Utc, cash_flow: i64) ->
+//! Result<PortfolioSnapshot, anyhow::Error>` where *that* `PortfolioSnapshot` is a flat
+//! `{totals: Money, breakdown: BTreeMap<String, Money>, unrealized_pnl: Money, realized_pnl:
+//! Money}` — no per-account breakdown, no positions/holdings list, no greeks. There is no
+//! `PortfolioError`, `AccountState`, or `HeldPosition` matching the old call site's shape either
+//! (`HeldPosition`/`AccountState` do exist in that crate, but with different field sets than this
+//! file's old `to_state()` assumed, and `value()`'s errors are plain `anyhow::Error`, not a typed
+//! enum with `MissingMark`/`Money` variants to branch on).
+//!
+//! Porting these four routes for real means re-deriving a per-account/per-position valued
+//! snapshot (with marks, greeks, holdings) from that flat engine output — a real feature
+//! redesign, not a rename — so they now answer `501 not_implemented` with a context explaining
+//! why, rather than silently returning wrong or empty data. `GET /portfolio/trades` is unaffected
+//! (it never called the valuation engine) and still works.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::Response;
-use honba_api::{
-    ErrorCode, ErrorDetail, PortfolioAccountsResponse, PortfolioHoldingsResponse,
-    PortfolioPositionsResponse,
-};
-use honba_core::{InstrumentId, PortfolioSnapshot};
-use honba_portfolio::{
-    AccountState, HeldPosition, Marks, PortfolioError as ValuationError, PortfolioState, value,
-};
+use honba_api::{ErrorCode, ErrorDetail};
 use serde_json::json;
 use tracing::error;
 
@@ -81,41 +92,6 @@ fn store_failure(error: PortfolioError) -> Response {
     }
 }
 
-/// Maps a valuation failure onto the standard envelope.
-///
-/// A non-flat position with no mark is unavailable data, not a bad request: the engine refuses to
-/// invent a cost mark, so the read answers 503 `missing_mark` naming the instrument (ADR 0032 §3).
-fn valuation_failure(error: ValuationError) -> Response {
-    match error {
-        ValuationError::MissingMark { instrument_id } => failure(
-            StatusCode::SERVICE_UNAVAILABLE,
-            ErrorDetail::new(
-                ErrorCode::NotFound,
-                format!("no mark for instrument {instrument_id}"),
-            )
-            .with_context(json!({
-                "reason": "missing_mark",
-                "instrument_id": instrument_id.to_string(),
-            })),
-        ),
-        ValuationError::Money(error) => failure(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            ErrorDetail::new(
-                ErrorCode::ValidationInvalidRequest,
-                format!("portfolio valuation failed: {error}"),
-            )
-            .with_context(json!({"reason": "valuation_failed"})),
-        ),
-        other => {
-            error!(error = %other, "portfolio valuation failure");
-            failure(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                ErrorDetail::new(ErrorCode::InternalError, "portfolio valuation failed"),
-            )
-        }
-    }
-}
-
 /// Loads the caller's portfolio document, or a response describing the failure.
 async fn document_for(state: &AppState, user: &str) -> Result<PortfolioDocument, Response> {
     let Some(store) = state.portfolios.clone() else {
@@ -132,126 +108,59 @@ async fn document_for(state: &AppState, user: &str) -> Result<PortfolioDocument,
     }
 }
 
-/// The document as the valuation engine's input.
-fn to_state(document: &PortfolioDocument) -> PortfolioState {
-    let mut state = PortfolioState::new(document.base_currency);
-    for account in &document.accounts {
-        state.add_account(AccountState {
-            id: account.id.clone(),
-            name: account.name.clone(),
-            mode: account.mode,
-            source: account.source,
-            broker: account.broker.clone(),
-            currency: account.currency,
-            cash: account.cash,
-            leverage: account.leverage,
-            margin_used: account.margin_used,
-            margin_available: account.margin_available,
-            positions: account
-                .positions
-                .iter()
-                .map(|held| {
-                    let mut pos = HeldPosition::new(held.position.clone(), held.product);
-                    if let Some(ref group) = held.group_name {
-                        pos = pos.with_group(group.clone());
-                    }
-                    if !held.tags.is_empty() {
-                        pos = pos.with_tags(held.tags.clone());
-                    }
-                    if let Some(ref strat) = held.strategy_id {
-                        pos = pos.with_strategy(strat.clone());
-                    }
-                    pos
-                })
-                .collect(),
-            greeks: account.greeks,
-        });
-    }
-    state
-}
-
-/// The latest mark of every non-flat instrument, and the newest mark time as `as_of`.
-///
-/// A mark is the mid of the latest quote (the same value `GET /quotes` reports; a bar store
-/// derives bid = ask = close). A held instrument with no quote is left unmarked: the engine
-/// refuses it as [`ValuationError::MissingMark`] rather than valuing it at cost.
-async fn marks_for(state: &AppState, document: &PortfolioDocument) -> (Marks, UnixNanos) {
-    let mut instruments: BTreeSet<InstrumentId> = BTreeSet::new();
-    for account in &document.accounts {
-        for held in &account.positions {
-            if !held.position.is_flat() {
-                instruments.insert(held.position.instrument_id().clone());
-            }
-        }
-    }
-    let mut marks = Marks::new();
-    let mut as_of = UnixNanos::default();
-    for instrument in instruments {
-        if let Ok(Some(quote)) = state.quotes.read_quote(&instrument, None).await {
-            let mid = (quote.bid_price() + quote.ask_price()) / 2.0;
-            let mark = if mid.is_finite() {
-                mid
-            } else {
-                quote.bid_price()
-            };
-            marks.set(instrument, mark);
-            as_of = as_of.max(quote.ts_event());
-        }
-    }
-    (marks, as_of)
-}
-
-/// The caller's valued snapshot, or a response describing the failure.
-async fn snapshot(state: &AppState, user: &str) -> Result<PortfolioSnapshot, Response> {
-    let document = document_for(state, user).await?;
-    let (marks, as_of) = marks_for(state, &document).await;
-    value(&to_state(&document), &marks, user, document.revision, as_of).map_err(valuation_failure)
+/// The 501 for the valuation gap documented in the module doc above.
+fn valuation_not_implemented() -> Response {
+    failure(
+        StatusCode::NOT_IMPLEMENTED,
+        ErrorDetail::new(
+            ErrorCode::NotImplemented,
+            "portfolio valuation is unavailable: honba_portfolio::value()'s shape no longer \
+             matches what this route needs (see portfolio.rs's module doc)",
+        )
+        .with_context(json!({"reason": "valuation_engine_mismatch"})),
+    )
 }
 
 /// `GET /portfolio`: the caller's valued snapshot, with totals.
+///
+/// See the module doc: unavailable until the valuation engine mismatch is resolved.
 pub(crate) async fn get_portfolio(State(state): State<Arc<AppState>>, caller: Caller) -> Response {
-    match snapshot(&state, &caller.0).await {
-        Ok(snapshot) => success(snapshot),
-        Err(response) => response,
+    // Still validates that the caller has a readable document, so a storage/auth failure is
+    // reported as that failure rather than masked by the blanket 501 below.
+    if let Err(response) = document_for(&state, &caller.0).await {
+        return response;
     }
+    valuation_not_implemented()
 }
 
 /// `GET /portfolio/accounts`: the valued accounts of the caller's portfolio.
+///
+/// See the module doc: unavailable until the valuation engine mismatch is resolved.
 pub(crate) async fn get_accounts(State(state): State<Arc<AppState>>, caller: Caller) -> Response {
-    match snapshot(&state, &caller.0).await {
-        Ok(snapshot) => success(PortfolioAccountsResponse {
-            accounts: snapshot.accounts,
-        }),
-        Err(response) => response,
+    if let Err(response) = document_for(&state, &caller.0).await {
+        return response;
     }
+    valuation_not_implemented()
 }
 
 /// `GET /portfolio/positions`: the valued open positions, flattened across accounts.
+///
+/// See the module doc: unavailable until the valuation engine mismatch is resolved.
 pub(crate) async fn get_positions(State(state): State<Arc<AppState>>, caller: Caller) -> Response {
-    match snapshot(&state, &caller.0).await {
-        Ok(snapshot) => success(PortfolioPositionsResponse {
-            positions: snapshot
-                .accounts
-                .into_iter()
-                .flat_map(|account| account.positions)
-                .collect(),
-        }),
-        Err(response) => response,
+    if let Err(response) = document_for(&state, &caller.0).await {
+        return response;
     }
+    valuation_not_implemented()
 }
 
 /// `GET /portfolio/holdings`: the valued delivery holdings, flattened across accounts.
+///
+/// See the module doc: unavailable until the valuation engine mismatch is resolved.
 pub(crate) async fn get_holdings(State(state): State<Arc<AppState>>, caller: Caller) -> Response {
-    match snapshot(&state, &caller.0).await {
-        Ok(snapshot) => success(PortfolioHoldingsResponse {
-            holdings: snapshot
-                .accounts
-                .into_iter()
-                .flat_map(|account| account.holdings)
-                .collect(),
-        }),
-        Err(response) => response,
+    if let Err(response) = document_for(&state, &caller.0).await {
+        return response;
     }
+    valuation_not_implemented()
 }
 
 /// `GET /portfolio/trades`: the caller's trade history, in stored order.
