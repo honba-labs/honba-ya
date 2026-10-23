@@ -74,7 +74,7 @@ impl OrderBookSide {
 
     /// Get best price (highest for bids, lowest for asks).
     pub fn best_price(&self) -> Option<Price> {
-        self.best_price.clone()
+        self.best_price
     }
 
     /// Get total quantity at best price.

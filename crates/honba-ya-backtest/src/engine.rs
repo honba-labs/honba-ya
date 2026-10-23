@@ -151,9 +151,9 @@ pub struct BacktestEngine<S: Strategy> {
     // latency before they can execute (see `OrderBook::ready_ts`).
     pending_orders: Vec<PendingOrder>,
 
-    // Slippage and latency models
+    // Slippage model (latency is consumed at construction time into
+    // `order_book`'s own `latency_us`; nothing else needs it afterward)
     slippage_model: Option<SlippageModel>,
-    network_latency: Option<NetworkLatency>,
 
     // MIS square-off manager
     mis_square_off: Option<MisSquareOffManager>,
@@ -211,7 +211,6 @@ impl<S: Strategy> BacktestEngine<S> {
             },
             pending_orders: Vec::new(),
             slippage_model: config.slippage,
-            network_latency: config.latency,
             mis_square_off: config.mis_square_off,
             initial_cash,
             gross_pnl: Decimal::ZERO,
@@ -268,17 +267,15 @@ impl<S: Strategy> BacktestEngine<S> {
         let price_impact = self
             .order_book
             .as_ref()
-            .and_then(|_ob| {
+            .map(|_ob| {
                 // Compute average slippage across all fills
-                let total_slippage: Decimal = self
-                    .total_fees
+                self.total_fees
                     .stt
                     .max(self.total_fees.stamp_duty)
                     .max(self.total_fees.exchange_turnover)
                     .max(self.total_fees.sebi_turnover)
                     .max(self.total_fees.gst)
-                    .max(self.total_fees.dp_charge);
-                Some(total_slippage)
+                    .max(self.total_fees.dp_charge)
             })
             .unwrap_or_default();
 
@@ -420,33 +417,23 @@ impl<S: Strategy> BacktestEngine<S> {
         // `remaining_qty` are kept as `Decimal` across both branches (the L2
         // branch's `i64` counts are converted up) so this `if`/`else` type-checks
         // and downstream arithmetic against `Decimal` prices works directly.
-        let (filled_qty, fill_price, _remaining_qty, price_impact) = if self.order_book.is_some() {
-            // Use L2 order book simulation
-            let side = order.side;
-            let qty = order.quantity.0.to_i64().unwrap_or(0);
-            let (filled, price, remaining, worst) = if side == OrderSide::Buy {
-                self.order_book
-                    .as_mut()
-                    .unwrap()
-                    .execute_market_order(OrderSide::Buy, qty)
+        let (filled_qty, fill_price, _remaining_qty, price_impact) =
+            if let Some(ob) = self.order_book.as_mut() {
+                // Use L2 order book simulation
+                let qty = order.quantity.0.to_i64().unwrap_or(0);
+                let (filled, price, remaining, worst) = ob.execute_market_order(order.side, qty);
+                let price_impact = worst.map_or(Decimal::ZERO, |p| p.0);
+                (
+                    Decimal::from(filled),
+                    price,
+                    Decimal::from(remaining),
+                    price_impact,
+                )
             } else {
-                self.order_book
-                    .as_mut()
-                    .unwrap()
-                    .execute_market_order(OrderSide::Sell, qty)
+                // Direct execution at current market price (no L2 simulation)
+                let fill_price = current_price;
+                (order.quantity.0, fill_price, Decimal::ZERO, Decimal::ZERO)
             };
-            let price_impact = worst.map_or(Decimal::ZERO, |p| p.0);
-            (
-                Decimal::from(filled),
-                price,
-                Decimal::from(remaining),
-                price_impact,
-            )
-        } else {
-            // Direct execution at current market price (no L2 simulation)
-            let fill_price = current_price;
-            (order.quantity.0, fill_price, Decimal::ZERO, Decimal::ZERO)
-        };
 
         let notional = fill_price.0 * filled_qty;
         let is_first_sell = if order.side == OrderSide::Sell {
@@ -516,15 +503,15 @@ impl<S: Strategy> BacktestEngine<S> {
             .open_positions
             .entry(order.instrument.clone())
             .or_insert(Decimal::ZERO) += signed_qty;
-        if let Some(manager) = self.mis_square_off.as_mut() {
-            if let Err(e) = manager.process_trade(
+        if let Some(manager) = self.mis_square_off.as_mut()
+            && let Err(e) = manager.process_trade(
                 order.instrument.clone(),
                 order.side,
                 filled_qty.to_i64().unwrap_or(0),
                 timestamp,
-            ) {
-                tracing::error!("MIS square-off process_trade refused: {e:?}");
-            }
+            )
+        {
+            tracing::error!("MIS square-off process_trade refused: {e:?}");
         }
 
         // Apply T+1 settlement or cash update

@@ -39,8 +39,6 @@ pub struct MisSquareOffManager {
     calendar: NseTradingCalendar,
     /// Instruments that have been square-off eligible today
     square_off_eligible: HashSet<InstrumentId>,
-    /// Track square-off timestamps per instrument
-    square_off_timestamps: HashSet<(InstrumentId, DateTime<Utc>)>,
 }
 
 impl MisSquareOffManager {
@@ -49,7 +47,6 @@ impl MisSquareOffManager {
         Self {
             calendar,
             square_off_eligible: HashSet::new(),
-            square_off_timestamps: HashSet::new(),
         }
     }
 
@@ -66,7 +63,7 @@ impl MisSquareOffManager {
     /// Check if square-off has been triggered for an instrument at the given time.
     pub fn check_square_off_time(
         &self,
-        instrument: &InstrumentId,
+        _instrument: &InstrumentId,
         timestamp: DateTime<Utc>,
     ) -> Option<SquareOffResult> {
         // Check if we're past 15:20 IST
@@ -102,10 +99,10 @@ impl MisSquareOffManager {
     pub fn process_trade(
         &mut self,
         instrument: InstrumentId,
-        side: OrderSide,
-        quantity: i64,
+        _side: OrderSide,
+        _quantity: i64,
         timestamp: DateTime<Utc>,
-    ) -> Result<Option<SquareOffResult>, RiskRefusal> {
+    ) -> Result<Option<SquareOffResult>, Box<RiskRefusal>> {
         // Check if this is a closing order (reduces existing position)
         // If it reduces or eliminates a position, no square-off needed
         // If it increases an open MIS position and we're past square-off time, refuse

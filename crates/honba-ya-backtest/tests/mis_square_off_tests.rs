@@ -64,11 +64,11 @@ impl Strategy for MultiOnceBuyer {
     }
 
     fn on_bar(&mut self, ctx: &mut dyn StrategyContext, bar: &Bar) -> honba_strategy::Result<()> {
-        if let Some(qty) = self.orders.get(&bar.instrument) {
-            if !self.bought[&bar.instrument] {
-                ctx.submit(OrderIntent::market_buy(bar.instrument.clone(), *qty));
-                self.bought.insert(bar.instrument.clone(), true);
-            }
+        if let Some(qty) = self.orders.get(&bar.instrument)
+            && !self.bought[&bar.instrument]
+        {
+            ctx.submit(OrderIntent::market_buy(bar.instrument.clone(), *qty));
+            self.bought.insert(bar.instrument.clone(), true);
         }
         Ok(())
     }

@@ -88,9 +88,7 @@ impl NetworkLatency {
     pub fn advance_step(&mut self) {
         self.step += 1;
         // Simple trending: latency increases slowly over time
-        self.current_latency_us = (self.mean_us as u64)
-            .saturating_add(self.step / 1000)
-            .max(self.mean_us);
+        self.current_latency_us = self.mean_us.saturating_add(self.step / 1000).max(self.mean_us);
     }
 }
 
@@ -147,6 +145,12 @@ impl MisSquareOffLatency {
             return None;
         }
         let remaining = self.square_off_seconds.saturating_sub(self.current_time_ist_seconds);
-        Some(remaining.max(0))
+        Some(remaining)
+    }
+}
+
+impl Default for MisSquareOffLatency {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -22,6 +22,12 @@ pub struct SlippageModel {
     avg_spread_pct: Decimal,
 }
 
+impl Default for SlippageModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SlippageModel {
     /// Create a new slippage model with default parameters.
     pub fn new() -> Self {
@@ -60,7 +66,7 @@ impl SlippageModel {
         side: OrderSide,
         order_quantity: i64,
         book_depth: i64, // total depth at best price
-        current_price: Decimal,
+        _current_price: Decimal,
     ) -> Decimal {
         if order_quantity == 0 || book_depth == 0 {
             return Decimal::ZERO;
@@ -94,7 +100,7 @@ impl SlippageModel {
         side: OrderSide,
         order_quantity: i64,
         levels: &BTreeMap<Price, i64>,
-        current_price: Decimal,
+        _current_price: Decimal,
     ) -> Decimal {
         if order_quantity == 0 || levels.is_empty() {
             return Decimal::ZERO;
@@ -103,14 +109,12 @@ impl SlippageModel {
         // Find how much of the order can be filled at each price level
         let mut remaining = order_quantity.abs();
         let mut total_price_impact: Decimal = Decimal::ZERO;
-        let mut cumulative_qty: i64 = 0;
 
-        for (price, depth) in levels {
+        for depth in levels.values() {
             if remaining <= 0 {
                 break;
             }
-            let take = std::cmp::min(remaining, *depth as i64);
-            cumulative_qty += take;
+            let take = std::cmp::min(remaining, *depth);
             remaining -= take;
 
             // Price impact proportional to quantity taken at this level
