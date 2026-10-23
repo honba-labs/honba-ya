@@ -11,7 +11,7 @@ use honba_mon::{RiskLimits, RiskRefusal};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use schemars::schema::*;
-use schemars::JsonSchema;
+use schemars::{JsonSchema, schema_for};
 use std::collections::BTreeMap;
 
 /// OpenAPI 3.1 info block.

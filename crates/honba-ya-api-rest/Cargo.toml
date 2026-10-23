@@ -12,6 +12,7 @@ name = "honba_api_rest"
 
 [dependencies]
 honba-core.workspace = true
+honba-mon.workspace = true
 honba-api.workspace = true
 honba-feed.workspace = true
 honba-strategy.workspace = true
