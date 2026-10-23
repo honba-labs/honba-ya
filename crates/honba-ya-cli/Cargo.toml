@@ -25,6 +25,7 @@ honba-ya-testing.workspace = true
 honba-ya-backtest.workspace = true
 
 # Cross-workspace crates
+honba-api.workspace = true
 honba-core.workspace = true
 honba-mon.workspace = true
 honba-portfolio.workspace = true

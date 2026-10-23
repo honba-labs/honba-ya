@@ -48,6 +48,17 @@ pub(crate) fn parse_trading_state(raw: &str) -> Result<TradingState, String> {
     }
 }
 
+/// Maps the richer `honba_core::TradingState` (with payload) onto the flat
+/// `honba_api::wire::TradingState` `AppState` is built on, inverting the mapping documented on
+/// [`parse_trading_state`] (`Paused` -> `Reducing`, any `Halted` reason -> `Halted`).
+fn to_api_trading_state(state: TradingState) -> honba_api::TradingState {
+    match state {
+        TradingState::Active => honba_api::TradingState::Active,
+        TradingState::Paused { .. } => honba_api::TradingState::Reducing,
+        TradingState::Halted { .. } => honba_api::TradingState::Halted,
+    }
+}
+
 /// The stderr warning for an `--addr` that is not loopback, or `None` when it is.
 pub(crate) fn non_loopback_warning(addr: SocketAddr) -> Option<String> {
     if addr.ip().is_loopback() {
@@ -278,11 +289,11 @@ pub fn run(
     };
     let mut state = state
         .with_context(|| format!("loading data directory {}", data_dir.display()))?
-        .with_trading_state(trading_state)
+        .with_trading_state(to_api_trading_state(trading_state))
         .with_risk_limits(risk_limits)
         .with_execution(execution);
     if let Some(ticks) = ticks {
-        let reader: std::sync::Arc<dyn honba_core::TickReader> = match ticks {
+        let reader: std::sync::Arc<dyn honba_feed::ports::TickReader> = match ticks {
             TickSource::Ndjson(reader) => std::sync::Arc::new(reader),
             TickSource::Parquet(store) => std::sync::Arc::new(store),
         };

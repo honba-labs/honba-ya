@@ -32,7 +32,7 @@ pub fn ticks_import(ticks: &Path, out: &Path) -> Result<()> {
 
 pub fn load(source: &str, symbol: &str, exchange: Option<&str>) -> Result<()> {
     let instrument = resolve_instrument(symbol, exchange)?;
-    let qualified = format!("{}:{}", instrument.exchange(), instrument.symbol());
+    let qualified = format!("{}:{}", instrument.exchange, instrument.symbol);
 
     let bars = if source.to_ascii_lowercase().ends_with(".parquet") {
         ParquetBarSource::new(source, instrument)
