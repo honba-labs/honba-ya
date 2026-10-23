@@ -11,12 +11,14 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use honba_api::{
     AuditEntry, ConcentrationEntry, ConcentrationRiskResponse, EquityCurveSummary, EquityPoint,
-    FeeEntry, FeeTypeSummary, FeesReportResponse, FillEntry, LedgerEntry, LedgerHistoryResponse,
-    OrderFillsResponse, PortfolioSnapshotsResponse, PortfolioValueChartResponse,
-    PositionAuditTrailResponse, SnapshotEntry, TaxReportResponse, TaxReportSummary, TaxTransaction,
-    WACEntry, WeightedAverageCostResponse,
+    ErrorCode, ErrorDetail, FeeEntry, FeeTypeSummary, FeesReportResponse, FillEntry, LedgerEntry,
+    LedgerHistoryResponse, OrderFillsResponse, PortfolioSnapshotsResponse,
+    PortfolioValueChartResponse, PositionAuditTrailResponse, SnapshotEntry, TaxReportResponse,
+    TaxReportSummary, TaxTransaction, WACEntry, WeightedAverageCostResponse,
 };
-use honba_messages::{ErrorCode, ErrorDetail, OrderId, OrderSide, UnixNanos};
+use honba_core::rust_decimal::Decimal;
+use honba_core::rust_decimal::prelude::ToPrimitive;
+use honba_core::{FillReport as Trade, OrderSide};
 use serde::Deserialize;
 use serde_json::json;
 use tracing::error;
@@ -31,6 +33,12 @@ fn pseudo_random(seed: u64) -> f64 {
         .wrapping_mul(6364136223846793005)
         .wrapping_add(1442695040888963407);
     (x as f64) / (u64::MAX as f64)
+}
+
+/// Converts an `f64` computed internally back into the exact `Decimal` the
+/// response DTOs carry. Non-finite inputs (NaN/infinite) fall back to zero.
+fn to_decimal(value: f64) -> Decimal {
+    Decimal::from_f64_retain(value).unwrap_or_default()
 }
 
 /// IST offset: UTC+5:30 = 19800 seconds
@@ -63,6 +71,12 @@ const MAX_PAGE_SIZE: usize = 500;
 
 fn clamp_page_size(size: usize) -> usize {
     size.clamp(1, MAX_PAGE_SIZE)
+}
+
+/// Nanoseconds since the Unix epoch for a `DateTime<Utc>`, used for filter comparisons
+/// against the `from`/`to` query parameters (which are `UnixNanos`-shaped `u64`s).
+fn ts_nanos(ts: chrono::DateTime<chrono::Utc>) -> u64 {
+    ts.timestamp_nanos_opt().unwrap_or(0) as u64
 }
 
 /// Loads the caller's portfolio document, or a response describing the failure.
@@ -148,43 +162,40 @@ pub async fn get_ledger(
     let mut balance = 0.0;
 
     for trade in &document.trades {
-        let notional = trade.quantity() * trade.price();
-        let costs = trade.costs().to_major_f64();
-        let amount = if trade.side() == OrderSide::Buy {
+        let quantity = trade.quantity.0.to_f64().unwrap_or(0.0);
+        let price = trade.price.0.to_f64().unwrap_or(0.0);
+        let notional = quantity * price;
+        let costs = trade.fee.amount.to_f64().unwrap_or(0.0);
+        let amount = if trade.side == OrderSide::Buy {
             -(notional + costs)
         } else {
             notional - costs
         };
         balance += amount;
 
-        let side_str = match trade.side() {
+        let side_str = match trade.side {
             OrderSide::Buy => "BUY",
             OrderSide::Sell => "SELL",
-            OrderSide::NoOrderSide => "NONE",
-            _ => "NONE",
         };
 
         entries.push(LedgerEntry {
-            id: format!("TRD-{}", trade.order_id()),
-            ts_event: trade.ts_event(),
-            date: format_ts(trade.ts_event()),
+            id: format!("TRD-{}", trade.order_id),
+            ts_event: trade.timestamp,
+            date: format_ts(trade.timestamp),
             category: "trade".to_string(),
             description: format!(
                 "{} {} {} @ {}",
-                side_str,
-                trade.quantity(),
-                trade.instrument_id(),
-                trade.price()
+                side_str, trade.quantity.0, trade.instrument, trade.price.0
             ),
-            currency: trade.costs().currency(),
-            amount,
+            currency: trade.fee.currency,
+            amount: to_decimal(amount),
             amount_usd: None, // TODO: FX conversion
-            balance,
+            balance: to_decimal(balance),
             balance_usd: None,
             wallet: Some("Main".to_string()),
-            instrument: Some(trade.instrument_id().to_string()),
-            side: Some(trade.side()),
-            fees: Some(costs),
+            instrument: Some(trade.instrument.to_string()),
+            side: Some(trade.side),
+            fees: Some(to_decimal(costs)),
         });
     }
 
@@ -194,10 +205,10 @@ pub async fn get_ledger(
     // Apply filters
     let mut filtered = entries;
     if let Some(from) = query.from {
-        filtered.retain(|e| e.ts_event.as_u64() >= from);
+        filtered.retain(|e| ts_nanos(e.ts_event) >= from);
     }
     if let Some(to) = query.to {
-        filtered.retain(|e| e.ts_event.as_u64() <= to);
+        filtered.retain(|e| ts_nanos(e.ts_event) <= to);
     }
     if let Some(search) = &query.search {
         let search = search.to_lowercase();
@@ -239,31 +250,31 @@ pub async fn get_tax_report(
 
     // Build tax transactions from trades by pairing buy/sell
     let mut transactions = Vec::new();
-    let mut open_buys: Vec<&honba_entities::Trade> = Vec::new();
+    let mut open_buys: Vec<&Trade> = Vec::new();
 
     for trade in &document.trades {
-        if trade.side() == OrderSide::Buy {
+        if trade.side == OrderSide::Buy {
             open_buys.push(trade);
-        } else if trade.side() == OrderSide::Sell {
+        } else if trade.side == OrderSide::Sell {
             // Simple FIFO matching
-            let mut remaining = trade.quantity();
-            let sell_price = trade.price();
+            let mut remaining = trade.quantity.0.to_f64().unwrap_or(0.0);
+            let sell_price = trade.price.0.to_f64().unwrap_or(0.0);
+            let trade_quantity = trade.quantity.0.to_f64().unwrap_or(0.0);
+            let trade_costs = trade.fee.amount.to_f64().unwrap_or(0.0);
 
             while remaining > 0.0 && !open_buys.is_empty() {
                 let buy = open_buys[0];
-                let buy_qty = buy.quantity().min(remaining);
-                let buy_price = buy.price();
-                let buy_date = format_ts(buy.ts_event());
-                let sell_date = format_ts(trade.ts_event());
-                let holding_days = (trade
-                    .ts_event()
-                    .as_u64()
-                    .saturating_sub(buy.ts_event().as_u64())
+                let buy_total_qty = buy.quantity.0.to_f64().unwrap_or(0.0);
+                let buy_qty = buy_total_qty.min(remaining);
+                let buy_price = buy.price.0.to_f64().unwrap_or(0.0);
+                let buy_date = format_ts(buy.timestamp);
+                let sell_date = format_ts(trade.timestamp);
+                let holding_days = (ts_nanos(trade.timestamp).saturating_sub(ts_nanos(buy.timestamp))
                     / 86_400_000_000_000) as u64;
                 let is_ltcg = holding_days > 365;
 
                 let gross_pl = (sell_price - buy_price) * buy_qty;
-                let costs = trade.costs().to_major_f64() * (buy_qty / trade.quantity());
+                let costs = trade_costs * (buy_qty / trade_quantity);
                 let net_pl = gross_pl - costs;
                 let stcg = if is_ltcg { 0.0 } else { net_pl.max(0.0) };
                 let ltcg = if is_ltcg { net_pl.max(0.0) } else { 0.0 };
@@ -280,31 +291,31 @@ pub async fn get_tax_report(
                 let total_charges = stt + stamp_duty + exchange_charges + sebi_fees + gst;
 
                 transactions.push(TaxTransaction {
-                    id: format!("TAX-{}-{}", trade.order_id(), transactions.len()),
-                    ts_event: trade.ts_event(),
+                    id: format!("TAX-{}-{}", trade.order_id, transactions.len()),
+                    ts_event: trade.timestamp,
                     date: sell_date.clone(),
-                    instrument: trade.instrument_id().to_string(),
-                    symbol: trade.instrument_id().symbol().to_string(),
-                    exchange: trade.instrument_id().exchange().to_string(),
+                    instrument: trade.instrument.to_string(),
+                    symbol: trade.instrument.symbol.clone(),
+                    exchange: trade.instrument.exchange.to_string(),
                     side: OrderSide::Sell,
-                    quantity: buy_qty,
-                    buy_price,
-                    sell_price,
+                    quantity: to_decimal(buy_qty),
+                    buy_price: to_decimal(buy_price),
+                    sell_price: to_decimal(sell_price),
                     buy_date,
                     sell_date,
                     holding_period_days: holding_days,
-                    gain_loss: gross_pl,
+                    gain_loss: to_decimal(gross_pl),
                     gain_loss_usd: None,
-                    stcg,
-                    ltcg,
-                    stt,
-                    stamp_duty,
-                    exchange_charges,
-                    sebi_fees,
-                    gst,
-                    total_charges,
-                    net_gain_loss: net_pl,
-                    tax_liability,
+                    stcg: to_decimal(stcg),
+                    ltcg: to_decimal(ltcg),
+                    stt: to_decimal(stt),
+                    stamp_duty: to_decimal(stamp_duty),
+                    exchange_charges: to_decimal(exchange_charges),
+                    sebi_fees: to_decimal(sebi_fees),
+                    gst: to_decimal(gst),
+                    total_charges: to_decimal(total_charges),
+                    net_gain_loss: to_decimal(net_pl),
+                    tax_liability: to_decimal(tax_liability),
                     category: if is_ltcg { "LTCG" } else { "STCG" }.to_string(),
                 });
 
@@ -319,10 +330,10 @@ pub async fn get_tax_report(
     // Apply filters
     let mut filtered = transactions;
     if let Some(from) = query.from {
-        filtered.retain(|e| e.ts_event.as_u64() >= from);
+        filtered.retain(|e| ts_nanos(e.ts_event) >= from);
     }
     if let Some(to) = query.to {
-        filtered.retain(|e| e.ts_event.as_u64() <= to);
+        filtered.retain(|e| ts_nanos(e.ts_event) <= to);
     }
     if let Some(search) = &query.search {
         let search = search.to_lowercase();
@@ -339,15 +350,15 @@ pub async fn get_tax_report(
     filtered.sort_by(|a, b| b.ts_event.cmp(&a.ts_event));
 
     // Compute summary
-    let total_stcg: f64 = filtered.iter().map(|t| t.stcg).sum();
-    let total_ltcg: f64 = filtered.iter().map(|t| t.ltcg).sum();
-    let total_stt: f64 = filtered.iter().map(|t| t.stt).sum();
-    let total_stamp_duty: f64 = filtered.iter().map(|t| t.stamp_duty).sum();
-    let total_exchange_charges: f64 = filtered.iter().map(|t| t.exchange_charges).sum();
-    let total_sebi_fees: f64 = filtered.iter().map(|t| t.sebi_fees).sum();
-    let total_gst: f64 = filtered.iter().map(|t| t.gst).sum();
-    let total_net_gain_loss: f64 = filtered.iter().map(|t| t.net_gain_loss).sum();
-    let total_tax_liability: f64 = filtered.iter().map(|t| t.tax_liability).sum();
+    let total_stcg: Decimal = filtered.iter().map(|t| t.stcg).sum();
+    let total_ltcg: Decimal = filtered.iter().map(|t| t.ltcg).sum();
+    let total_stt: Decimal = filtered.iter().map(|t| t.stt).sum();
+    let total_stamp_duty: Decimal = filtered.iter().map(|t| t.stamp_duty).sum();
+    let total_exchange_charges: Decimal = filtered.iter().map(|t| t.exchange_charges).sum();
+    let total_sebi_fees: Decimal = filtered.iter().map(|t| t.sebi_fees).sum();
+    let total_gst: Decimal = filtered.iter().map(|t| t.gst).sum();
+    let total_net_gain_loss: Decimal = filtered.iter().map(|t| t.net_gain_loss).sum();
+    let total_tax_liability: Decimal = filtered.iter().map(|t| t.tax_liability).sum();
 
     let total_count = filtered.len() as u64;
     let page = query.page;
@@ -391,12 +402,12 @@ pub async fn get_portfolio_snapshots(
     let mut realized_pnl = 0.0;
 
     // Use trade timestamps to create snapshots
-    let mut trade_times: Vec<_> = document.trades.iter().map(|t| t.ts_event()).collect();
+    let mut trade_times: Vec<_> = document.trades.iter().map(|t| t.timestamp).collect();
     trade_times.sort();
     trade_times.dedup();
 
     for (i, &ts) in trade_times.iter().rev().take(200).enumerate() {
-        let seed = ts.as_u64().wrapping_add(i as u64 * 12345);
+        let seed = ts_nanos(ts).wrapping_add(i as u64 * 12345);
         let day_change = (pseudo_random(seed) - 0.5) * 20_000.0;
         equity += day_change + 500.0; // Slight upward drift
         // Per-day derived allocation (cash 20%, positions 80% of equity).
@@ -408,20 +419,20 @@ pub async fn get_portfolio_snapshots(
         realized_pnl += (pseudo_random(seed3) - 0.3) * 1_000.0;
 
         snapshots.push(SnapshotEntry {
-            id: format!("SNAP-{}", ts.as_u64()),
+            id: format!("SNAP-{}", ts_nanos(ts)),
             ts_event: ts,
             date: format_ts(ts),
-            total_equity: equity,
-            total_cash: cash,
-            positions_value: positions_val,
-            unrealized_pnl,
-            realized_pnl,
-            day_change,
-            day_change_pct: if equity > 0.0 {
+            total_equity: to_decimal(equity),
+            total_cash: to_decimal(cash),
+            positions_value: to_decimal(positions_val),
+            unrealized_pnl: to_decimal(unrealized_pnl),
+            realized_pnl: to_decimal(realized_pnl),
+            day_change: to_decimal(day_change),
+            day_change_pct: to_decimal(if equity > 0.0 {
                 (day_change / equity) * 100.0
             } else {
                 0.0
-            },
+            }),
             accounts: document.accounts.len() as u32,
             positions: document.accounts.iter().flat_map(|a| &a.positions).count() as u32,
         });
@@ -430,10 +441,10 @@ pub async fn get_portfolio_snapshots(
     // Apply filters
     let mut filtered = snapshots;
     if let Some(from) = query.from {
-        filtered.retain(|e| e.ts_event.as_u64() >= from);
+        filtered.retain(|e| ts_nanos(e.ts_event) >= from);
     }
     if let Some(to) = query.to {
-        filtered.retain(|e| e.ts_event.as_u64() <= to);
+        filtered.retain(|e| ts_nanos(e.ts_event) <= to);
     }
     if let Some(search) = &query.search {
         let search = search.to_lowercase();
@@ -469,28 +480,29 @@ pub async fn get_position_audit(
     let mut entries = Vec::new();
 
     for trade in &document.trades {
-        let qty_change = if trade.side() == OrderSide::Buy {
-            trade.quantity()
+        let quantity = trade.quantity.0.to_f64().unwrap_or(0.0);
+        let price = trade.price.0.to_f64().unwrap_or(0.0);
+        let qty_change = if trade.side == OrderSide::Buy {
+            quantity
         } else {
-            -trade.quantity()
+            -quantity
         };
 
         entries.push(AuditEntry {
-            id: format!("AUD-{}", trade.order_id()),
-            ts_event: trade.ts_event(),
-            date: format_ts(trade.ts_event()),
-            instrument: trade.instrument_id().to_string(),
-            side: trade.side(),
-            quantity_change: qty_change,
-            price: trade.price(),
-            position_after: 0.0, // Would need position tracking
-            avg_price_after: trade.price(),
-            realized_pnl: 0.0, // Would need pairing
-            order_id: trade.order_id().to_string(),
-            reason: match trade.side() {
+            id: format!("AUD-{}", trade.order_id),
+            ts_event: trade.timestamp,
+            date: format_ts(trade.timestamp),
+            instrument: trade.instrument.to_string(),
+            side: trade.side,
+            quantity_change: to_decimal(qty_change),
+            price: to_decimal(price),
+            position_after: to_decimal(0.0), // Would need position tracking
+            avg_price_after: to_decimal(price),
+            realized_pnl: to_decimal(0.0), // Would need pairing
+            order_id: trade.order_id.clone(),
+            reason: match trade.side {
                 OrderSide::Buy => "Buy fill".to_string(),
                 OrderSide::Sell => "Sell fill".to_string(),
-                _ => "Fill".to_string(),
             },
         });
     }
@@ -498,10 +510,10 @@ pub async fn get_position_audit(
     // Apply filters
     let mut filtered = entries;
     if let Some(from) = query.from {
-        filtered.retain(|e| e.ts_event.as_u64() >= from);
+        filtered.retain(|e| ts_nanos(e.ts_event) >= from);
     }
     if let Some(to) = query.to {
-        filtered.retain(|e| e.ts_event.as_u64() <= to);
+        filtered.retain(|e| ts_nanos(e.ts_event) <= to);
     }
     if let Some(search) = &query.search {
         let search = search.to_lowercase();
@@ -546,26 +558,27 @@ pub async fn get_concentration_risk(
 
     for account in &document.accounts {
         for held in &account.positions {
-            if !held.position.is_flat() {
-                let quantity = held.position.quantity();
-                let avg_price = held.position.avg_price();
+            let position = &held.position;
+            if position.quantity.0 != Decimal::ZERO {
+                let quantity = position.quantity.0.to_f64().unwrap_or(0.0);
+                let avg_price = position.avg_price.0.to_f64().unwrap_or(0.0);
                 // Use avg_price as mark since we don't have live marks in the stored document
                 let mark = avg_price;
                 let market_value = quantity * mark;
                 let unrealized = 0.0; // Would need live mark
-                let realized = held.position.realized_pnl().to_major_f64();
+                let realized = position.realized_pnl.amount.to_f64().unwrap_or(0.0);
 
                 entries.push(ConcentrationEntry {
-                    instrument: held.position.instrument_id().to_string(),
-                    symbol: held.position.instrument_id().symbol().to_string(),
-                    exchange: held.position.instrument_id().exchange().to_string(),
-                    market_value,
-                    pct_of_portfolio: 0.0, // Will calculate after total
-                    quantity,
-                    avg_price,
-                    mark,
-                    unrealized_pnl: unrealized,
-                    realized_pnl: realized,
+                    instrument: position.instrument.to_string(),
+                    symbol: position.instrument.symbol.clone(),
+                    exchange: position.instrument.exchange.to_string(),
+                    market_value: to_decimal(market_value),
+                    pct_of_portfolio: to_decimal(0.0), // Will calculate after total
+                    quantity: to_decimal(quantity),
+                    avg_price: to_decimal(avg_price),
+                    mark: to_decimal(mark),
+                    unrealized_pnl: to_decimal(unrealized),
+                    realized_pnl: to_decimal(realized),
                     sector: None, // Would need sector mapping
                 });
                 total_value += market_value;
@@ -576,27 +589,39 @@ pub async fn get_concentration_risk(
     // Calculate percentages
     for entry in &mut entries {
         if total_value > 0.0 {
-            entry.pct_of_portfolio = (entry.market_value / total_value) * 100.0;
+            let market_value = entry.market_value.to_f64().unwrap_or(0.0);
+            entry.pct_of_portfolio = to_decimal((market_value / total_value) * 100.0);
         }
     }
 
     // Sort by market value descending
-    entries.sort_by(|a, b| b.market_value.partial_cmp(&a.market_value).unwrap());
+    entries.sort_by(|a, b| b.market_value.cmp(&a.market_value));
 
     // Calculate HHI and top concentrations
     let hhi: f64 = entries
         .iter()
-        .map(|e| (e.pct_of_portfolio / 100.0).powi(2))
+        .map(|e| {
+            let pct = e.pct_of_portfolio.to_f64().unwrap_or(0.0);
+            (pct / 100.0).powi(2)
+        })
         .sum();
-    let top5: f64 = entries.iter().take(5).map(|e| e.pct_of_portfolio).sum();
-    let top10: f64 = entries.iter().take(10).map(|e| e.pct_of_portfolio).sum();
+    let top5: f64 = entries
+        .iter()
+        .take(5)
+        .map(|e| e.pct_of_portfolio.to_f64().unwrap_or(0.0))
+        .sum();
+    let top10: f64 = entries
+        .iter()
+        .take(10)
+        .map(|e| e.pct_of_portfolio.to_f64().unwrap_or(0.0))
+        .sum();
 
     success(ConcentrationRiskResponse {
         entries,
-        total_portfolio_value: total_value,
-        hhi,
-        top5_concentration: top5,
-        top10_concentration: top10,
+        total_portfolio_value: to_decimal(total_value),
+        hhi: to_decimal(hhi),
+        top5_concentration: to_decimal(top5),
+        top10_concentration: to_decimal(top10),
     })
 }
 
@@ -625,18 +650,19 @@ pub async fn get_weighted_average_cost(
     let mut acc: HashMap<String, Accumulator> = HashMap::new();
 
     for trade in &document.trades {
-        let key = trade.instrument_id().to_string();
+        let quantity = trade.quantity.0.to_f64().unwrap_or(0.0);
+        let price = trade.price.0.to_f64().unwrap_or(0.0);
+        let key = trade.instrument.to_string();
         let a = acc.entry(key.clone()).or_default();
-        a.mark = trade.price(); // Last trade price as mark
+        a.mark = price; // Last trade price as mark
 
-        if trade.side() == OrderSide::Buy {
-            a.total_qty += trade.quantity();
-            a.total_cost += trade.quantity() * trade.price();
+        if trade.side == OrderSide::Buy {
+            a.total_qty += quantity;
+            a.total_cost += quantity * price;
         } else {
-            a.total_qty -= trade.quantity();
-            a.total_proceeds += trade.quantity() * trade.price();
-            a.realized_pnl +=
-                (trade.price() - (a.total_cost / a.total_qty.max(1.0))) * trade.quantity();
+            a.total_qty -= quantity;
+            a.total_proceeds += quantity * price;
+            a.realized_pnl += (price - (a.total_cost / a.total_qty.max(1.0))) * quantity;
         }
     }
 
@@ -655,19 +681,19 @@ pub async fn get_weighted_average_cost(
                     .unwrap_or(&instrument)
                     .to_string(),
                 exchange: instrument.split('.').nth(1).unwrap_or("NSE").to_string(),
-                quantity: a.total_qty,
-                weighted_avg_cost: wac,
-                mark: a.mark,
-                market_value,
-                unrealized_pnl: unrealized,
-                realized_pnl: a.realized_pnl,
-                total_cost_basis: a.total_cost,
-                total_proceeds: a.total_proceeds,
+                quantity: to_decimal(a.total_qty),
+                weighted_avg_cost: to_decimal(wac),
+                mark: to_decimal(a.mark),
+                market_value: to_decimal(market_value),
+                unrealized_pnl: to_decimal(unrealized),
+                realized_pnl: to_decimal(a.realized_pnl),
+                total_cost_basis: to_decimal(a.total_cost),
+                total_proceeds: to_decimal(a.total_proceeds),
             });
         }
     }
 
-    entries.sort_by(|a, b| b.market_value.partial_cmp(&a.market_value).unwrap());
+    entries.sort_by(|a, b| b.market_value.cmp(&a.market_value));
 
     success(WeightedAverageCostResponse { entries })
 }
@@ -688,7 +714,7 @@ pub async fn get_fees_report(
     let mut by_type: HashMap<String, (f64, u64)> = HashMap::new();
 
     for trade in &document.trades {
-        let costs = trade.costs().to_major_f64();
+        let costs = trade.fee.amount.to_f64().unwrap_or(0.0);
         if costs > 0.0 {
             let fee_types = vec![
                 ("STT", costs * 0.4),
@@ -700,14 +726,14 @@ pub async fn get_fees_report(
 
             for (fee_type, amount) in fee_types {
                 entries.push(FeeEntry {
-                    id: format!("FEE-{}-{}", trade.order_id(), fee_type),
-                    ts_event: trade.ts_event(),
-                    date: format_ts(trade.ts_event()),
+                    id: format!("FEE-{}-{}", trade.order_id, fee_type),
+                    ts_event: trade.timestamp,
+                    date: format_ts(trade.timestamp),
                     fee_type: fee_type.to_string(),
-                    instrument: Some(trade.instrument_id().to_string()),
-                    amount,
-                    currency: trade.costs().currency(),
-                    order_id: Some(trade.order_id().to_string()),
+                    instrument: Some(trade.instrument.to_string()),
+                    amount: to_decimal(amount),
+                    currency: trade.fee.currency,
+                    order_id: Some(trade.order_id.clone()),
                 });
 
                 let (total, count) = by_type.entry(fee_type.to_string()).or_default();
@@ -720,10 +746,10 @@ pub async fn get_fees_report(
     // Apply filters
     let mut filtered = entries;
     if let Some(from) = query.from {
-        filtered.retain(|e| e.ts_event.as_u64() >= from);
+        filtered.retain(|e| ts_nanos(e.ts_event) >= from);
     }
     if let Some(to) = query.to {
-        filtered.retain(|e| e.ts_event.as_u64() <= to);
+        filtered.retain(|e| ts_nanos(e.ts_event) <= to);
     }
     if let Some(search) = &query.search {
         let search = search.to_lowercase();
@@ -744,7 +770,7 @@ pub async fn get_fees_report(
         .into_iter()
         .map(|(fee_type, (total_amount, count))| FeeTypeSummary {
             fee_type,
-            total_amount,
+            total_amount: to_decimal(total_amount),
             count,
         })
         .collect();
@@ -779,12 +805,12 @@ pub async fn get_equity_curve(
     let mut realized_pnl = 0.0;
     let mut peak = equity;
 
-    let mut trade_times: Vec<_> = document.trades.iter().map(|t| t.ts_event()).collect();
+    let mut trade_times: Vec<_> = document.trades.iter().map(|t| t.timestamp).collect();
     trade_times.sort();
     trade_times.dedup();
 
     for (i, &ts) in trade_times.iter().rev().take(200).enumerate() {
-        let seed = ts.as_u64().wrapping_add(i as u64 * 12345);
+        let seed = ts_nanos(ts).wrapping_add(i as u64 * 12345);
         let day_change = (pseudo_random(seed) - 0.5) * 20_000.0;
         equity += day_change + 500.0;
         peak = peak.max(equity);
@@ -806,13 +832,13 @@ pub async fn get_equity_curve(
         points.push(EquityPoint {
             ts_event: ts,
             date: format_ts(ts),
-            equity,
-            cash,
-            positions_value: positions_val,
-            unrealized_pnl,
-            realized_pnl,
-            drawdown,
-            drawdown_pct,
+            equity: to_decimal(equity),
+            cash: to_decimal(cash),
+            positions_value: to_decimal(positions_val),
+            unrealized_pnl: to_decimal(unrealized_pnl),
+            realized_pnl: to_decimal(realized_pnl),
+            drawdown: to_decimal(drawdown),
+            drawdown_pct: to_decimal(drawdown_pct),
         });
     }
 
@@ -821,22 +847,35 @@ pub async fn get_equity_curve(
     // Apply time range filter
     let mut filtered = points;
     if let Some(from) = query.from {
-        filtered.retain(|e| e.ts_event.as_u64() >= from);
+        filtered.retain(|e| ts_nanos(e.ts_event) >= from);
     }
     if let Some(to) = query.to {
-        filtered.retain(|e| e.ts_event.as_u64() <= to);
+        filtered.retain(|e| ts_nanos(e.ts_event) <= to);
     }
 
-    let start_equity = filtered.first().map(|p| p.equity).unwrap_or(0.0);
-    let end_equity = filtered.last().map(|p| p.equity).unwrap_or(0.0);
+    let start_equity = filtered
+        .first()
+        .map(|p| p.equity)
+        .unwrap_or_else(Decimal::ZERO);
+    let end_equity = filtered
+        .last()
+        .map(|p| p.equity)
+        .unwrap_or_else(Decimal::ZERO);
     let total_return = end_equity - start_equity;
-    let total_return_pct = if start_equity > 0.0 {
-        (total_return / start_equity) * 100.0
+    let start_equity_f64 = start_equity.to_f64().unwrap_or(0.0);
+    let total_return_pct = if start_equity_f64 > 0.0 {
+        to_decimal((total_return.to_f64().unwrap_or(0.0) / start_equity_f64) * 100.0)
     } else {
-        0.0
+        Decimal::ZERO
     };
-    let max_drawdown = filtered.iter().map(|p| p.drawdown).fold(0.0, f64::max);
-    let max_drawdown_pct = filtered.iter().map(|p| p.drawdown_pct).fold(0.0, f64::max);
+    let max_drawdown = filtered
+        .iter()
+        .map(|p| p.drawdown)
+        .fold(Decimal::ZERO, |a, b| a.max(b));
+    let max_drawdown_pct = filtered
+        .iter()
+        .map(|p| p.drawdown_pct)
+        .fold(Decimal::ZERO, |a, b| a.max(b));
 
     success(PortfolioValueChartResponse {
         points: filtered,
@@ -864,22 +903,25 @@ pub async fn get_order_fills(
         Err(resp) => return resp,
     };
 
-    let order_id_ref = OrderId::new(&order_id);
     let mut fills = Vec::new();
 
     for trade in &document.trades {
-        if trade.order_id() == &order_id_ref {
+        if trade.order_id == order_id {
+            let quantity = trade.quantity.0.to_f64().unwrap_or(0.0);
+            let price = trade.price.0.to_f64().unwrap_or(0.0);
+            let costs = trade.fee.amount.to_f64().unwrap_or(0.0);
+
             fills.push(FillEntry {
-                id: format!("FILL-{}-{}", trade.order_id(), fills.len()),
-                order_id: trade.order_id().to_string(),
-                ts_event: trade.ts_event(),
-                date: format_ts(trade.ts_event()),
-                instrument: trade.instrument_id().to_string(),
-                side: trade.side(),
-                quantity: trade.quantity(),
-                price: trade.price(),
-                costs: trade.costs().to_major_f64(),
-                currency: trade.costs().currency(),
+                id: format!("FILL-{}-{}", trade.order_id, fills.len()),
+                order_id: trade.order_id.clone(),
+                ts_event: trade.timestamp,
+                date: format_ts(trade.timestamp),
+                instrument: trade.instrument.to_string(),
+                side: trade.side,
+                quantity: to_decimal(quantity),
+                price: to_decimal(price),
+                costs: to_decimal(costs),
+                currency: trade.fee.currency,
             });
         }
     }
@@ -888,10 +930,10 @@ pub async fn get_order_fills(
 
     let mut filtered = fills;
     if let Some(from) = query.from {
-        filtered.retain(|e| e.ts_event.as_u64() >= from);
+        filtered.retain(|e| ts_nanos(e.ts_event) >= from);
     }
     if let Some(to) = query.to {
-        filtered.retain(|e| e.ts_event.as_u64() <= to);
+        filtered.retain(|e| ts_nanos(e.ts_event) <= to);
     }
 
     let total_count = filtered.len() as u64;
@@ -907,16 +949,8 @@ pub async fn get_order_fills(
     })
 }
 
-fn format_ts(ts: UnixNanos) -> String {
-    use chrono::{DateTime, FixedOffset};
-    let secs = ts.as_u64() / 1_000_000_000;
-    let nanos = (ts.as_u64() % 1_000_000_000) as u32;
+fn format_ts(ts: chrono::DateTime<chrono::Utc>) -> String {
+    use chrono::FixedOffset;
     let ist = FixedOffset::east_opt(IST_OFFSET_SECS).unwrap();
-    DateTime::from_timestamp(secs as i64, nanos)
-        .map(|dt| {
-            dt.with_timezone(&ist)
-                .format("%Y-%m-%d %H:%M:%S")
-                .to_string()
-        })
-        .unwrap_or_else(|| format!("{}", secs))
+    ts.with_timezone(&ist).format("%Y-%m-%d %H:%M:%S").to_string()
 }
