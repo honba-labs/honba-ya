@@ -1,6 +1,7 @@
 //! L2 Order book depth simulation and matching engine.
 
 use std::collections::BTreeMap;
+use chrono::{DateTime, Duration, Utc};
 use rust_decimal::Decimal;
 use honba_core::{OrderSide, Price};
 
@@ -188,10 +189,18 @@ impl OrderBook {
         self.bids.depth_at(price) + self.asks.depth_at(price)
     }
 
-    /// Apply latency delay (simulate network/broker latency).
-    pub(crate) fn apply_latency(&self) {
-        // In a real simulation, this would tick a clock
-        // For now, we just note the latency exists
+    /// The configured network/broker propagation latency, in microseconds.
+    pub(crate) fn latency_us(&self) -> u64 {
+        self.latency_us
+    }
+
+    /// The timestamp at which an order submitted at `submit_ts` becomes
+    /// ready to execute, given this book's configured latency. Pure
+    /// arithmetic on the caller-supplied timestamp — no clock is read here,
+    /// so replaying the same events always yields the same `ready_ts`
+    /// (`AGENTS.md` §2.5).
+    pub(crate) fn ready_ts(&self, submit_ts: DateTime<Utc>) -> DateTime<Utc> {
+        submit_ts + Duration::microseconds(self.latency_us as i64)
     }
 
     /// Check if order respects volume participation cap.

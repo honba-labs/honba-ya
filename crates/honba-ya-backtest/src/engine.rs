@@ -125,6 +125,15 @@ pub struct BacktestResult {
     pub equity_curve: Vec<(DateTime<Utc>, Decimal)>,
 }
 
+/// An approved, risk-checked order waiting for the L2 book's configured
+/// network/broker latency to elapse before it executes.
+struct PendingOrder {
+    /// The event timestamp at or after which this order may execute.
+    ready_ts: DateTime<Utc>,
+    /// The order itself.
+    order: OrderRequest,
+}
+
 /// Event-driven backtester core engine.
 pub struct BacktestEngine<S: Strategy> {
     runner: StrategyRunner<S>,
@@ -134,6 +143,9 @@ pub struct BacktestEngine<S: Strategy> {
 
     // L2 order book simulation state
     order_book: Option<OrderBook>,
+    // Orders approved and risk-checked but still waiting out network/broker
+    // latency before they can execute (see `OrderBook::ready_ts`).
+    pending_orders: Vec<PendingOrder>,
 
     // Slippage and latency models
     slippage_model: Option<SlippageModel>,
@@ -188,6 +200,7 @@ impl<S: Strategy> BacktestEngine<S> {
             } else {
                 None
             },
+            pending_orders: Vec::new(),
             slippage_model: config.slippage,
             network_latency: config.latency,
             mis_square_off: config.mis_square_off,
@@ -301,6 +314,18 @@ impl<S: Strategy> BacktestEngine<S> {
             }
         }
 
+        // 2.5. Execute any previously-approved order whose network/broker
+        //    latency has now elapsed, using the price just cached above.
+        let mut i = 0;
+        while i < self.pending_orders.len() {
+            if self.pending_orders[i].ready_ts <= ts {
+                let pending = self.pending_orders.remove(i);
+                self.execute_order(pending.order, ts);
+            } else {
+                i += 1;
+            }
+        }
+
         // 3. L2 order book simulation: update order book with incoming tick/bar
         if let Some(ob) = self.order_book.as_mut() {
             match &event {
@@ -338,10 +363,22 @@ impl<S: Strategy> BacktestEngine<S> {
             tracing::error!("strategy runner on_event failed: {e}");
         }
 
-        // 5. Drain the risk-checked orders the runner queued and execute them.
+        // 5. Drain the risk-checked orders the runner queued. An order
+        //    executes immediately unless the L2 book has nonzero latency
+        //    configured, in which case it waits in `pending_orders` until a
+        //    later event reaches its `ready_ts` (step 2.5 above).
         let orders = self.runner.drain_orders();
         for order in orders {
-            self.simulate_execution(order, ts);
+            let ready_ts = self
+                .order_book
+                .as_ref()
+                .map(|ob| ob.ready_ts(ts))
+                .unwrap_or(ts);
+            if ready_ts > ts {
+                self.pending_orders.push(PendingOrder { ready_ts, order });
+            } else {
+                self.execute_order(order, ts);
+            }
         }
 
         // 6. MIS square-off check after each execution
@@ -350,8 +387,9 @@ impl<S: Strategy> BacktestEngine<S> {
         self.update_drawdown(ts);
     }
 
-    /// Simulate order execution with Indian cost model and optional L2 slippage.
-    fn simulate_execution(&mut self, order: OrderRequest, timestamp: DateTime<Utc>) {
+    /// Execute an order (already risk-checked and latency-delayed, if
+    /// applicable) with the Indian cost model and optional L2 slippage.
+    fn execute_order(&mut self, order: OrderRequest, timestamp: DateTime<Utc>) {
         let instrument = &order.instrument;
         let current_price = match self.latest_prices.get(instrument) {
             Some(p) => *p,
