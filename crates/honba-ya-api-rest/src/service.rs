@@ -10,9 +10,9 @@ use std::time::{Duration, Instant};
 
 use honba_api::{
     BacktestRequest, BacktestResponse, ErrorCode, ErrorDetail, JournalWriter, ResolvedRequest,
-    RunExecutor, RunId, RunJob, StrategyCatalog, SweepRequest, unknown_strategy,
+    RunExecutor, RunId, RunJob, StrategyCatalog, StrategyIr, StrategyManifest, Subscriptions,
+    SweepRequest, TimeframeSpec, Universe, unknown_strategy,
 };
-use honba_strategy::StrategyIr;
 
 use serde_json::json;
 
@@ -60,6 +60,64 @@ pub struct ShutdownReport {
     pub cancelled_running: usize,
 }
 
+/// Converts `honba-nou-strategy`'s own bar-aggregation unit (used by a Rust-registered
+/// strategy's manifest) to the REST contract's `honba_api::wire::BarAggregation`. Every
+/// `honba_strategy::BarAggregation` variant has a direct match; the wire enum's extra
+/// `Month` variant has no `honba_strategy` source and so is never produced here.
+fn to_api_aggregation(
+    aggregation: honba_strategy::BarAggregation,
+) -> honba_api::wire::BarAggregation {
+    use honba_api::wire::BarAggregation as Api;
+    use honba_strategy::BarAggregation as Strategy;
+    match aggregation {
+        Strategy::Second => Api::Second,
+        Strategy::Minute => Api::Minute,
+        Strategy::Hour => Api::Hour,
+        Strategy::Day => Api::Day,
+        Strategy::Week => Api::Week,
+    }
+}
+
+/// Converts a `honba-nou-strategy` manifest (what [`StrategyRegistry::ir_for`] compiles a
+/// Rust-registered strategy's IR from) to `honba_api::StrategyManifest`, the wire/persisted
+/// shape [`RunStore::submit`]/[`honba_api::RunManifest`] actually store. The two manifests
+/// have diverged beyond a field renaming — `honba_strategy`'s has no `honba_api` equivalent
+/// for `schedules`/`parameters` (dropped here: the registered strategies never set them) and
+/// its `Universe::Named` has no `honba_api::Universe` equivalent (approximated as
+/// `Unrestricted`; `StrategyRegistry::ir_for` never actually builds a `Named` universe, only
+/// `Explicit`, so this never actually triggers today).
+fn to_api_manifest(manifest: &honba_strategy::StrategyManifest) -> StrategyManifest {
+    let universe = match &manifest.universe {
+        honba_strategy::Universe::Explicit(ids) => Universe::Explicit(ids.clone()),
+        honba_strategy::Universe::Named(_) => Universe::Unrestricted,
+    };
+    StrategyManifest::new(
+        manifest.name.clone(),
+        manifest.source_hash.clone(),
+        universe,
+        TimeframeSpec::new(
+            manifest.driving_timeframe.interval,
+            to_api_aggregation(manifest.driving_timeframe.aggregation),
+        ),
+    )
+    .with_subscriptions(Subscriptions {
+        instruments: manifest.subscriptions.instruments.clone(),
+    })
+    .with_warmup_bars(u64::from(manifest.warmup_bars))
+}
+
+/// Converts a `honba-nou-strategy` IR (what [`StrategyRegistry::ir_for`] returns) to the
+/// `honba_api::StrategyIr` [`resolve_strategy`] must return either way (the catalog branch
+/// already holds one); see [`to_api_manifest`] for what that conversion drops. Re-derives
+/// subscriptions/warmup through [`StrategyIr::compile`] rather than copying
+/// `honba_strategy::StrategyIr`'s own (differently-shaped) resolved fields.
+fn to_api_ir(ir: honba_strategy::StrategyIr) -> Result<StrategyIr, ErrorDetail> {
+    StrategyIr::compile(to_api_manifest(&ir.manifest)).map_err(|e| {
+        ErrorDetail::new(ErrorCode::InternalError, e.to_string())
+            .with_context(json!({"reason": "registered_ir"}))
+    })
+}
+
 /// Resolves `strategy` for a backtest over `universe` (ADR 0017 decision 6).
 pub(crate) fn resolve_strategy(
     catalog: &Mutex<StrategyCatalog>,
@@ -87,7 +145,7 @@ pub(crate) fn resolve_strategy(
     }
     if registry.contains(strategy) {
         let ir = registry.ir_for(strategy, &instrument, bar_spec)?;
-        return Ok((strategy.to_owned(), ir));
+        return Ok((strategy.to_owned(), to_api_ir(ir)?));
     }
     Err(unknown_strategy(strategy))
 }

@@ -14,9 +14,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use chrono::{DateTime, SecondsFormat};
 use honba_api::{
     ErrorCode, ErrorDetail, MANIFEST_VERSION, Message, ResolvedRequest, RunId, RunIdGenerator,
-    RunKind, RunManifest, RunStatus, SCHEMA_VERSION,
+    RunKind, RunManifest, RunStatus, SCHEMA_VERSION, StrategyIr,
 };
-use honba_strategy::StrategyIr;
 use serde_json::json;
 
 use crate::journal::NdjsonJournal;
