@@ -12,7 +12,33 @@ use honba_strategy::{
 use serde_json::json;
 
 /// Order quantity of every registered strategy until strategy parameters are on the wire.
-const QUANTITY: f64 = 10.0;
+fn default_quantity() -> honba_core::Quantity {
+    honba_core::Quantity::from_u64(10)
+}
+
+/// Converts the REST contract's bar-aggregation unit (`honba_api::wire::BarAggregation`) to
+/// `honba-nou-strategy`'s own, unrelated `BarAggregation` (a strategy-manifest concept with
+/// no `honba_core` or wire equivalent; see its doc comment). That enum has no `Month`
+/// variant, so a month-aggregation `bar_spec` is refused as a 422 rather than silently
+/// mapped onto some other unit.
+fn to_strategy_aggregation(
+    aggregation: honba_api::wire::BarAggregation,
+) -> Result<honba_strategy::BarAggregation, ErrorDetail> {
+    use honba_api::wire::BarAggregation as Api;
+    use honba_strategy::BarAggregation as Strategy;
+    match aggregation {
+        Api::Second => Ok(Strategy::Second),
+        Api::Minute => Ok(Strategy::Minute),
+        Api::Hour => Ok(Strategy::Hour),
+        Api::Day => Ok(Strategy::Day),
+        Api::Week => Ok(Strategy::Week),
+        Api::Month => Err(ErrorDetail::new(
+            ErrorCode::ValidationInvalidRequest,
+            "bar_spec of month aggregation has no equivalent strategy timeframe".to_string(),
+        )
+        .with_context(json!({"field": "bar_spec", "reason": "unsupported_aggregation"}))),
+    }
+}
 
 /// The set of strategies implemented in Rust, by name.
 #[derive(Clone, Debug, Default)]
@@ -49,10 +75,12 @@ impl StrategyRegistry {
         let _ = seed;
         let instrument = instrument.clone();
         Some(match name {
-            "buy_and_hold" => Box::new(BuyAndHold::new(instrument, QUANTITY)),
-            "rsi_reversal" => Box::new(RsiReversal::new(instrument, 14, 30.0, 70.0, QUANTITY)),
+            "buy_and_hold" => Box::new(BuyAndHold::new(instrument, default_quantity())),
+            "rsi_reversal" => {
+                Box::new(RsiReversal::new(instrument, 14, 30.0, 70.0, default_quantity()))
+            }
             "sma_crossover" | "sma_cross" => {
-                Box::new(SmaCrossover::new(instrument, 3, 8, QUANTITY))
+                Box::new(SmaCrossover::new(instrument, 3, 8, default_quantity()))
             }
             _ => return None,
         })
@@ -82,11 +110,12 @@ impl StrategyRegistry {
         let interval = u32::try_from(spec.step()).map_err(|_| {
             field_error("bar_spec", "invalid_bar_spec", "bar step too large".into())
         })?;
+        let aggregation = to_strategy_aggregation(spec.aggregation())?;
         let manifest = StrategyManifest::new(
             name,
             format!("registered:{name}"),
             Universe::Explicit(vec![instrument.clone()]),
-            TimeframeSpec::new(interval, spec.aggregation()),
+            TimeframeSpec::new(interval, aggregation),
         )
         .with_subscriptions(Subscriptions {
             instruments: vec![instrument.clone()],
