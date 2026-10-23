@@ -10,8 +10,9 @@ use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
 use honba_api::{ErrorDetail, StrategyCatalog, TradingState};
 use honba_core::Currency;
+use honba_feed::ports::{BarReader, DepthReader, InstrumentMaster, QuoteReader};
 use honba_feed::{DatasetReader, LiveQuoteStore, ReaderError};
-use honba_ports::{BarReader, DepthReader, InstrumentMaster, QuoteReader};
+use honba_mon::RiskEngine;
 
 use crate::{
     ApprovalQueue, BacktestExecutor, OrderLedger, PortfolioStore, ProfileStore, RunService,
@@ -56,9 +57,11 @@ pub struct AppState {
     /// clone of the state, so the order gate and `POST /positions/close` see a change on the
     /// next request. `Halted` refuses placements while cancel and close still pass.
     trading_state: Arc<RwLock<TradingState>>,
-    /// Risk limits the order routes build their stage with (default: none). Set in process
-    /// by the composition root ([`AppState::with_risk_limits`]).
-    pub risk_limits: honba_risk::RiskLimits,
+    /// The pre-trade risk gate the order routes check against (ADR 0018 decision 7). Persistent
+    /// across requests (SEBI algo registration, OTR trackers, halts) so a fresh `RiskEngine`
+    /// isn't built per request; [`crate::orders::REST_ALGO_ID`] is pre-registered at
+    /// construction. Limits default to none; set them with [`AppState::with_risk_limits`].
+    pub risk_engine: Arc<Mutex<RiskEngine>>,
     /// Approval queue for order placements (E5-S4).
     ///
     /// When enabled, `POST /orders` is held here until approved by an operator.
@@ -73,7 +76,7 @@ pub struct AppState {
     live: Option<Arc<LiveQuoteStore>>,
     /// The quote/trade tick source `fill_model = l2` runs match against (ADR 0030); `None`
     /// refuses such runs with `l2_requires_ticks`.
-    ticks: Option<Arc<dyn honba_ports::TickReader>>,
+    ticks: Option<Arc<dyn honba_feed::ports::TickReader>>,
     /// Execution config the run service's executor is built with (default: bar fills).
     execution: honba_config::ExecutionConfig,
     /// The sending side of the bar ingest channel behind `POST /bars`; `None` until
@@ -90,6 +93,8 @@ impl AppState {
         quotes: Arc<dyn QuoteReader>,
         depth: Arc<dyn DepthReader>,
     ) -> Self {
+        let mut engine = RiskEngine::default();
+        engine.register_algo(crate::orders::REST_ALGO_ID);
         Self {
             instruments,
             bars,
@@ -101,8 +106,10 @@ impl AppState {
             portfolios: None,
             operator_journal: None,
             account_currency: Currency::Inr,
-            trading_state: Arc::default(),
-            risk_limits: honba_risk::RiskLimits::default(),
+            // `honba_api::TradingState` has no `Default` (ADR 0018 enumerates three
+            // operator states with no "untouched" one); `Active` is the sensible start.
+            trading_state: Arc::new(RwLock::new(TradingState::Active)),
+            risk_engine: Arc::new(Mutex::new(engine)),
             approval_queue: None,
             orders: OrderLedger::default(),
             exec: crate::exec::ExecGateway::default_sim(),
@@ -130,17 +137,10 @@ impl AppState {
         self
     }
 
-    /// Replaces the embedded execution simulator (cash, costs, slippage, seed).
-    pub fn with_execution_sim(self, sim: honba_sim::NextOpenSim) -> Self {
-        self.with_execution_gateway(sim)
-    }
-
-    /// Plugs in the execution venue every order route submits to and cancels on (E3-S7).
-    ///
-    /// The default is a `NextOpenSim`. Events the venue reports (fills, rejects, cancels) update
-    /// the order ledger through the same mapping as the simulator's; see [`ExecutionVenue`](crate::ExecutionVenue).
-    pub fn with_execution_gateway(mut self, gateway: impl crate::ExecutionVenue) -> Self {
-        self.exec = crate::exec::ExecGateway::new(gateway);
+    /// Replaces the embedded execution simulator with a fresh one (clears whatever it was
+    /// tracking as working orders and simulated holdings).
+    pub fn with_execution_sim(mut self, sim: crate::NextOpenSim) -> Self {
+        self.exec = crate::exec::ExecGateway::new(sim);
         self
     }
 
@@ -182,14 +182,17 @@ impl AppState {
     }
 
     /// Sets the risk limits the order routes enforce (ADR 0018), e.g. `price_collar_bps`.
-    pub fn with_risk_limits(mut self, limits: honba_risk::RiskLimits) -> Self {
-        self.risk_limits = limits;
+    pub fn with_risk_limits(self, limits: honba_mon::RiskLimits) -> Self {
+        self.risk_engine
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .limits = limits;
         self
     }
 
     /// Sets the tick source L2 backtests read (call before [`AppState::with_journals_dir`]).
     #[must_use]
-    pub fn with_tick_reader(mut self, ticks: Arc<dyn honba_ports::TickReader>) -> Self {
+    pub fn with_tick_reader(mut self, ticks: Arc<dyn honba_feed::ports::TickReader>) -> Self {
         self.ticks = Some(ticks);
         self
     }
@@ -219,10 +222,19 @@ impl AppState {
         config: RunServiceConfig,
     ) -> Result<Self, ErrorDetail> {
         let registry = StrategyRegistry::builtin();
-        let mut executor = BacktestExecutor::new(self.bars.clone(), registry.clone())
+        // `BacktestExecutor` is typed over the canonical, zero-I/O `honba_core::BarReader`/
+        // `TickReader` (ADR 0018 decision 7's port vocabulary), not the async `honba-feed`
+        // ports `self.bars`/`self.ticks` actually are (`market.rs`/`screener.rs` still read
+        // bars through those, with `.await`, so those fields cannot change type). Its
+        // `bars`/`ticks` fields are `#[allow(dead_code)]` today — `execute` always answers
+        // `NotImplemented` because the engine/sim kernel they would be read through was
+        // deleted (see executor.rs's module doc) — so a stub that is honest about never
+        // being called is enough; it is not worth writing a real async-to-sync bridge for a
+        // port nothing yet drives.
+        let mut executor = BacktestExecutor::new(Arc::new(DeadBarReader), registry.clone())
             .with_execution(self.execution.clone());
-        if let Some(ticks) = &self.ticks {
-            executor = executor.with_tick_reader(ticks.clone());
+        if self.ticks.is_some() {
+            executor = executor.with_tick_reader(Arc::new(DeadTickReader));
         }
         self.account_currency = executor.account_currency()?;
         let service = RunService::start(
@@ -317,6 +329,47 @@ impl Default for AppState {
     /// An empty catalogue: no instruments and no bars.
     fn default() -> Self {
         Self::from_reader(DatasetReader::from_dataset(Default::default()))
+    }
+}
+
+/// A [`honba_core::BarReader`] that refuses every request.
+///
+/// `BacktestExecutor` (see `executor.rs`) is typed over this canonical, zero-I/O port, but
+/// never actually calls it: `execute` always answers `NotImplemented` since the
+/// `honba_engine`/`honba_sim` kernel that would have read bars through it was removed with no
+/// replacement. [`AppState::with_journals_dir`] uses this stub rather than bridging
+/// `self.bars` (a real, async `honba-feed` port `market.rs`/`screener.rs` still read through)
+/// across the sync/async boundary for a trait method nothing calls.
+struct DeadBarReader;
+
+impl honba_core::BarReader for DeadBarReader {
+    fn read_bars(
+        &self,
+        _req: &honba_core::BarRequest,
+    ) -> honba_core::PortResult<Vec<honba_core::Bar>> {
+        Err(honba_core::PortError::Unsupported(
+            "backtest execution is unavailable: honba_engine/honba_sim/honba_sweep were \
+             removed from the workspace with no replacement kernel; see executor.rs's module \
+             doc"
+            .into(),
+        ))
+    }
+}
+
+/// A [`honba_core::TickReader`] that refuses every request; see [`DeadBarReader`].
+struct DeadTickReader;
+
+impl honba_core::TickReader for DeadTickReader {
+    fn read_ticks(
+        &self,
+        _req: &honba_core::TickRequest,
+    ) -> honba_core::PortResult<Vec<honba_core::Tick>> {
+        Err(honba_core::PortError::Unsupported(
+            "backtest execution is unavailable: honba_engine/honba_sim/honba_sweep were \
+             removed from the workspace with no replacement kernel; see executor.rs's module \
+             doc"
+            .into(),
+        ))
     }
 }
 

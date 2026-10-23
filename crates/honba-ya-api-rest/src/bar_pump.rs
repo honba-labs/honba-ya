@@ -12,9 +12,36 @@ use std::sync::PoisonError;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::task::JoinHandle;
 
+use honba_core::rust_decimal::prelude::ToPrimitive;
 use honba_core::Bar;
 
 use crate::AppState;
+
+/// Converts a canonical bar to `honba-feed`'s own wire shape for
+/// [`LiveQuoteStore::put_bar`](honba_feed::LiveQuoteStore::put_bar) (ADR 0030; see
+/// `honba-me-feed::wire`'s module doc for why the two `Bar` types differ: that crate's
+/// columnar engine is still `f64`/dual-timestamp and has not been ported onto `Decimal`).
+/// `put_bar` only reads the instrument, close and `ts_event`, so the bar specification
+/// built here is a placeholder — a live-fed [`honba_core::Bar`] carries no timeframe of its
+/// own to put in it, and nothing downstream of `put_bar` reads it back.
+fn to_feed_bar(bar: &Bar) -> honba_feed::wire::Bar {
+    let spec = honba_feed::wire::BarSpecification::new(
+        1,
+        honba_feed::wire::BarAggregation::Minute,
+        honba_feed::wire::PriceType::Last,
+    );
+    let ts = honba_feed::wire::UnixNanos::from_datetime(bar.timestamp);
+    honba_feed::wire::Bar::new(
+        honba_feed::wire::BarType::new(bar.instrument.clone(), spec),
+        bar.open.0.to_f64().unwrap_or_default(),
+        bar.high.0.to_f64().unwrap_or_default(),
+        bar.low.0.to_f64().unwrap_or_default(),
+        bar.close.0.to_f64().unwrap_or_default(),
+        bar.volume.0.to_f64().unwrap_or_default(),
+        ts,
+        ts,
+    )
+}
 
 /// What a finished bar pump did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -81,7 +108,7 @@ impl AppState {
         while let Some(bar) = bars.recv().await {
             report.bars += 1;
             if let Some(live) = self.live_quotes() {
-                live.put_bar(&bar);
+                live.put_bar(&to_feed_bar(&bar));
             }
             if let Err(e) = self.advance_market(std::slice::from_ref(&bar)) {
                 report.errors += 1;
