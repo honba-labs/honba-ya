@@ -71,7 +71,9 @@ DAY = 86_400_000_000_000
 # ---- step builders -------------------------------------------------------------------------
 
 
-def quote(ts: int, bid: float, ask: float, bid_size: float, ask_size: float, sym: str = "AAA"):
+def quote(
+    ts: int, bid: float, ask: float, bid_size: float, ask_size: float, sym: str = "AAA"
+):
     return {
         "op": "quote", "symbol": sym, "ts": ts, "bid": bid, "ask": ask,
         "bid_size": bid_size, "ask_size": ask_size,
@@ -114,7 +116,15 @@ DRAIN = {"op": "drain"}
 # ---- expectation builders ------------------------------------------------------------------
 
 
-def fill(oid: str, side: str, qty: float, price: float, ts: int, costs: int = 0, sym: str = "AAA"):
+def fill(
+    oid: str,
+    side: str,
+    qty: float,
+    price: float,
+    ts: int,
+    costs: int = 0,
+    sym: str = "AAA",
+):
     return [oid, sym, side, qty, price, ts, costs]
 
 
@@ -130,14 +140,18 @@ def cfg(cash: int = 1_000_000, **kw: Any) -> dict[str, Any]:
     return {"cash": cash, "currency": "INR", "long_only": True, "lot_sizes": {}, **kw}
 
 
-def final(cash: int, fees: int, notional: int, positions: dict[str, float], working: list[str]):
+def final(
+    cash: int, fees: int, notional: int, positions: dict[str, float], working: list[str]
+):
     return {
         "cash": cash, "positions": positions, "working": working,
         "fees": fees, "traded_notional": notional,
     }  # fmt: skip
 
 
-def scenario(name: str, config: dict[str, Any], steps: list[Any], drains: list[Any], fin: Any):
+def scenario(
+    name: str, config: dict[str, Any], steps: list[Any], drains: list[Any], fin: Any
+):
     return {
         "name": name, "chunk": 1, "config": config, "steps": steps,
         "expect": {"drains": drains, "final": fin},

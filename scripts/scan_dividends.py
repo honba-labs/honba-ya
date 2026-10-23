@@ -9,11 +9,11 @@ import argparse
 import csv
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+
+import yfinance as yf
+from honba.markets.india.universes import NIFTY_50_SYMBOLS
 from rich.console import Console
 from rich.table import Table
-import yfinance as yf
-
-from honba.markets.india.universes import NIFTY_50_SYMBOLS
 
 
 def get_large_cap_symbols() -> list[str]:
@@ -22,7 +22,11 @@ def get_large_cap_symbols() -> list[str]:
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             reader = csv.DictReader(resp.read().decode("utf-8").splitlines())
-            symbols = [r["Symbol"].strip() for r in reader if "Symbol" in r and r["Symbol"].strip()]
+            symbols = [
+                r["Symbol"].strip()
+                for r in reader
+                if "Symbol" in r and r["Symbol"].strip()
+            ]
             if len(symbols) >= 50:
                 return sorted(set(symbols))
     except Exception:
@@ -36,7 +40,11 @@ def fetch_symbol_dividend(sym: str) -> dict | None:
         inf = t.info
         dy = inf.get("dividendYield")
         rate = inf.get("dividendRate")
-        price = inf.get("currentPrice") or inf.get("regularMarketPrice") or inf.get("previousClose")
+        price = (
+            inf.get("currentPrice")
+            or inf.get("regularMarketPrice")
+            or inf.get("previousClose")
+        )
         name = inf.get("shortName") or sym
         if dy is not None and dy > 0:
             return {
@@ -52,14 +60,25 @@ def fetch_symbol_dividend(sym: str) -> dict | None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Scan large cap stocks for dividend yields")
-    parser.add_argument("--min-yield", type=float, default=2.0, help="Minimum dividend yield percentage (default: 2.0)")
-    parser.add_argument("--limit", type=int, default=50, help="Max results to display (default: 50)")
+    parser = argparse.ArgumentParser(
+        description="Scan large cap stocks for dividend yields"
+    )
+    parser.add_argument(
+        "--min-yield",
+        type=float,
+        default=2.0,
+        help="Minimum dividend yield percentage (default: 2.0)",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=50, help="Max results to display (default: 50)"
+    )
     args = parser.parse_args()
 
     console = Console()
     symbols = get_large_cap_symbols()
-    console.print(f"[cyan]Scanning {len(symbols)} Large Cap stocks for dividend yield >= {args.min_yield}%...[/cyan]")
+    console.print(
+        f"[cyan]Scanning {len(symbols)} Large Cap stocks for dividend yield >= {args.min_yield}%...[/cyan]"
+    )
 
     with ThreadPoolExecutor(max_workers=10) as ex:
         results = [r for r in ex.map(fetch_symbol_dividend, symbols) if r]
@@ -69,7 +88,9 @@ def main() -> None:
     filtered.sort(key=lambda x: x["dividend_yield"], reverse=True)
     displayed = filtered[: args.limit]
 
-    table = Table(title=f"Large Cap Dividend Stocks ({len(displayed)} matched, yield >= {args.min_yield}%)")
+    table = Table(
+        title=f"Large Cap Dividend Stocks ({len(displayed)} matched, yield >= {args.min_yield}%)"
+    )
     table.add_column("Symbol", style="cyan", no_wrap=True)
     table.add_column("Company", style="white")
     table.add_column("CMP (₹)", justify="right", style="green")

@@ -11,7 +11,6 @@ import datetime as dt
 import lzma
 import time
 import urllib.request
-from pathlib import Path
 
 from honba.data.loaders import parse_bhavcopy_csv
 from honba.data.loaders.yfinance import YFinanceProvider
@@ -29,7 +28,11 @@ def get_large_cap_symbols() -> list[str]:
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             reader = csv.DictReader(resp.read().decode("utf-8").splitlines())
-            symbols = [r["Symbol"].strip() for r in reader if "Symbol" in r and r["Symbol"].strip()]
+            symbols = [
+                r["Symbol"].strip()
+                for r in reader
+                if "Symbol" in r and r["Symbol"].strip()
+            ]
             if len(symbols) >= 50:
                 return sorted(set(symbols))
     except Exception as e:
@@ -47,7 +50,9 @@ def main() -> None:
 
     # 1. Convert cached Bhavcopies for target symbols into Parquet
     if bhav_files:
-        print(f"Step 1: Converting {len(bhav_files)} cached Bhavcopy files for Large Caps...")
+        print(
+            f"Step 1: Converting {len(bhav_files)} cached Bhavcopy files for Large Caps..."
+        )
         symbol_set = set(symbols)
         bars_by_symbol: dict[str, list] = {}
 
@@ -67,7 +72,10 @@ def main() -> None:
         for sym, bars in bars_by_symbol.items():
             if not bars:
                 continue
-            dates = [dt.datetime.fromtimestamp(b.ts / 1e9, tz=dt.timezone.utc).date() for b in bars]
+            dates = [
+                dt.datetime.fromtimestamp(b.ts / 1e9, tz=dt.timezone.utc).date()
+                for b in bars
+            ]
             min_d, max_d = min(dates), max(dates)
             record = CoverageRecord(
                 exchange="NSE",
@@ -82,7 +90,9 @@ def main() -> None:
             store.append(record, bars)
             ingested_count += len(bars)
 
-        print(f"  Converted {ingested_count} bars across {len(bars_by_symbol)} symbols in {time.time() - t0:.2f}s.")
+        print(
+            f"  Converted {ingested_count} bars across {len(bars_by_symbol)} symbols in {time.time() - t0:.2f}s."
+        )
 
         # 2. Remove bhavcopy cache files
         print(f"Step 2: Removing {len(bhav_files)} cached Bhavcopy files...")
@@ -98,7 +108,9 @@ def main() -> None:
         print("Step 1 & 2: No Bhavcopy cache files to convert/remove.")
 
     # 3. Fetch 10 years of daily data via YFinanceProvider
-    print(f"\nStep 3: Fetching 10 years of daily data for {len(symbols)} Large Cap stocks...")
+    print(
+        f"\nStep 3: Fetching 10 years of daily data for {len(symbols)} Large Cap stocks..."
+    )
     provider = YFinanceProvider()
     service = DataService(store=store, providers=[provider])
 
@@ -122,12 +134,16 @@ def main() -> None:
                 bars = res.bars.get(inst, [])
                 total_bars_fetched += len(bars)
                 success_count += 1
-                print(f"[{idx:3d}/{len(symbols)}] {sym:12s} -> {len(bars):4d} bars ({time.time() - t_sym:.2f}s)")
+                print(
+                    f"[{idx:3d}/{len(symbols)}] {sym:12s} -> {len(bars):4d} bars ({time.time() - t_sym:.2f}s)"
+                )
             else:
                 bars = store.read(inst, "1D", req_interval)
                 total_bars_fetched += len(bars)
                 success_count += 1
-                print(f"[{idx:3d}/{len(symbols)}] {sym:12s} -> already complete ({len(bars)} bars)")
+                print(
+                    f"[{idx:3d}/{len(symbols)}] {sym:12s} -> already complete ({len(bars)} bars)"
+                )
         except Exception as exc:
             fail_count += 1
             print(f"[{idx:3d}/{len(symbols)}] {sym:12s} -> FAILED: {exc}")

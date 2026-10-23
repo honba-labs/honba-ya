@@ -36,7 +36,11 @@ ALLOWED_PROD = {
     # Pure pre-trade risk stage (ADR 0018). Reads honba-market's rules (default features only:
     # never the `india` pack, rule 4 below) and must stay tokio-free.
     "honba-risk": {"honba-messages", "honba-entities", "honba-market"},
-    "honba-engine": {"honba-messages", "honba-entities", "honba-risk"},  # Engine::submit gate
+    "honba-engine": {
+        "honba-messages",
+        "honba-entities",
+        "honba-risk",
+    },  # Engine::submit gate
     "honba-indicators": {"honba-messages", "honba-entities"},
     # Explainable buy/sell detectors (ADR 0031). Pure and causal: composes the
     # honba-indicators engine over the honba-entities signal contract.
@@ -77,7 +81,11 @@ ALLOWED_PROD = {
         "honba-feed",
         "honba-analytics",
     },
-    "honba-config": {"honba-messages", "honba-strategy", "honba-risk"},  # RiskLimits re-export
+    "honba-config": {
+        "honba-messages",
+        "honba-strategy",
+        "honba-risk",
+    },  # RiskLimits re-export
     "honba-codegen": {
         "honba-messages",
         "honba-entities",
@@ -85,7 +93,13 @@ ALLOWED_PROD = {
         "honba-config",
         "honba-api",
     },
-    "honba-api": {"honba-messages", "honba-entities", "honba-strategy", "honba-indicators", "honba-analytics"},
+    "honba-api": {
+        "honba-messages",
+        "honba-entities",
+        "honba-strategy",
+        "honba-indicators",
+        "honba-analytics",
+    },
     "honba-testing": {
         "honba-engine",
         "honba-messages",
@@ -103,7 +117,7 @@ ALLOWED_PROD = {
         "honba-codegen",
         # The in-process SDK transport drives the served router (no handler is reimplemented).
         "honba-api-rest",
-        "honba-risk",   # bindings (ADR 0018 decision 10)
+        "honba-risk",  # bindings (ADR 0018 decision 10)
         "honba-async",  # operator Command binding (E2-S1 rest)
         # PythonGateway: a Python broker adapter as a honba_ports::ExecutionGateway (E3-S7, ADR 0030).
         "honba-ports",
@@ -121,7 +135,7 @@ ALLOWED_PROD = {
         "honba-codegen",
         "honba-api",
         "honba-api-rest",
-        "honba-risk",   # CLI backtest assembler
+        "honba-risk",  # CLI backtest assembler
         "honba-async",  # operator Command::State in `trading-state set`
         "honba-config",  # FillModel/ExecutionConfig for `serve --fill-model` (ADR 0030)
         "honba-ports",  # TickReader for `serve --ticks` (ADR 0030)
@@ -166,7 +180,10 @@ ALLOWED_DEV = {
     "honba-market": {"honba-engine", "honba-sim"},
     "honba-ports": {"honba-testing"},
     "honba-risk": set(),
-    "honba-engine": {"honba-sim", "honba-market"},  # tests name InstrumentRules for a RulesSource
+    "honba-engine": {
+        "honba-sim",
+        "honba-market",
+    },  # tests name InstrumentRules for a RulesSource
     "honba-indicators": set(),
     "honba-signals": set(),
     "honba-portfolio": set(),

@@ -25,7 +25,12 @@ from honba.screener.evaluator import (
     extract_metrics_from_bars,
 )
 
-OUT = Path(__file__).resolve().parents[1] / "schema" / "conformance" / "screener_scan.json"
+OUT = (
+    Path(__file__).resolve().parents[1]
+    / "schema"
+    / "conformance"
+    / "screener_scan.json"
+)
 DAY_NS = 86_400_000_000_000
 
 
@@ -60,11 +65,49 @@ INPUTS = {
     "single": ohlcv([42.0]),
     # Falls then bounces: SMA3 crosses above SMA5 on the last bar.
     "cross_up": ohlcv(
-        [20, 19.5, 19, 18.5, 18, 17.5, 17, 16.5, 16, 15.5, 15, 14.5, 14, 13.5, 13, 12.5, 12, 18]
+        [
+            20,
+            19.5,
+            19,
+            18.5,
+            18,
+            17.5,
+            17,
+            16.5,
+            16,
+            15.5,
+            15,
+            14.5,
+            14,
+            13.5,
+            13,
+            12.5,
+            12,
+            18,
+        ]
     ),
     # Rises then drops: SMA3 crosses below SMA5 on the last bar.
     "cross_down": ohlcv(
-        [10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5, 14, 14.5, 15, 15.5, 16, 16.5, 17, 17.5, 18, 11]
+        [
+            10,
+            10.5,
+            11,
+            11.5,
+            12,
+            12.5,
+            13,
+            13.5,
+            14,
+            14.5,
+            15,
+            15.5,
+            16,
+            16.5,
+            17,
+            17.5,
+            18,
+            11,
+        ]
     ),
     "up20": ohlcv([round(100 + i * 0.7 + (i % 3) * 0.15, 2) for i in range(20)]),
     "down20": ohlcv([round(120 - i * 0.9 + (i % 4) * 0.2, 2) for i in range(20)]),
@@ -150,9 +193,21 @@ CASES: list[tuple[str, str, dict]] = [
     ("rsi_warmup_false", "short3", pred("RSI", "gt", 0)),
     ("rsi_between", "walk260", pred("RSI", "between", [0, 100])),
     ("sma3_crosses_above_sma5", "cross_up", pred("SMA3", "crosses_above", ref("SMA5"))),
-    ("sma3_crosses_below_sma5_no", "cross_up", pred("SMA3", "crosses_below", ref("SMA5"))),
-    ("sma3_crosses_below_sma5", "cross_down", pred("SMA3", "crosses_below", ref("SMA5"))),
-    ("sma3_crosses_above_sma5_no", "cross_down", pred("SMA3", "crosses_above", ref("SMA5"))),
+    (
+        "sma3_crosses_below_sma5_no",
+        "cross_up",
+        pred("SMA3", "crosses_below", ref("SMA5")),
+    ),
+    (
+        "sma3_crosses_below_sma5",
+        "cross_down",
+        pred("SMA3", "crosses_below", ref("SMA5")),
+    ),
+    (
+        "sma3_crosses_above_sma5_no",
+        "cross_down",
+        pred("SMA3", "crosses_above", ref("SMA5")),
+    ),
     ("close_crosses_above_number", "cross_up", pred("close", "crosses_above", 17)),
     ("close_crosses_above_number_no", "up20", pred("close", "crosses_above", 105)),
     ("close_crosses_below_number", "cross_down", pred("close", "crosses_below", 12)),
@@ -170,7 +225,11 @@ CASES: list[tuple[str, str, dict]] = [
 
 UNSUPPORTED = [
     ("unknown_key", "short3", pred("not_a_metric", "gt", 1)),
-    ("fundamental_pe_ttm", "short3", pred("price_earnings_ttm", "lt", 20, period="TTM")),
+    (
+        "fundamental_pe_ttm",
+        "short3",
+        pred("price_earnings_ttm", "lt", 20, period="TTM"),
+    ),
     ("fundamental_market_cap", "short3", pred("market_cap", "gte", 1000)),
     ("unsupported_ref_key", "short3", pred("close", "gt", ref("ema20"))),
     ("sma_zero_period", "up20", pred("sma0", "gt", 1)),
@@ -181,20 +240,36 @@ UNSUPPORTED = [
 # window and can be True. The Rust evaluator applies the invariant case-insensitively (the
 # documented intent), so these cases pin BOTH answers and are reported as a discrepancy.
 DIVERGENCES = [
-    ("low52_upper_case_key_insufficient", "up20", pred("PRICE_52_WEEK_LOW", "gt", 0), False),
-    ("high52_upper_case_key_insufficient", "up20", pred("Price_52_Week_High", "gt", 0), False),
+    (
+        "low52_upper_case_key_insufficient",
+        "up20",
+        pred("PRICE_52_WEEK_LOW", "gt", 0),
+        False,
+    ),
+    (
+        "high52_upper_case_key_insufficient",
+        "up20",
+        pred("Price_52_Week_High", "gt", 0),
+        False,
+    ),
 ]
 
 GROUPS = [
     (
         "group_and_all_true",
         "up20",
-        {"operator": "AND", "items": [pred("close", "gt", 100), pred("SMA3", "gt", 100)]},
+        {
+            "operator": "AND",
+            "items": [pred("close", "gt", 100), pred("SMA3", "gt", 100)],
+        },
     ),
     (
         "group_and_one_false",
         "up20",
-        {"operator": "AND", "items": [pred("close", "gt", 100), pred("close", "lt", 100)]},
+        {
+            "operator": "AND",
+            "items": [pred("close", "gt", 100), pred("close", "lt", 100)],
+        },
     ),
     (
         "group_or_one_true",
@@ -215,7 +290,10 @@ GROUPS = [
             "operator": "AND",
             "items": [
                 pred("close", "gt", 100),
-                {"operator": "OR", "items": [pred("RSI", "lt", 10), pred("SMA5", "gt", 100)]},
+                {
+                    "operator": "OR",
+                    "items": [pred("RSI", "lt", 10), pred("SMA5", "gt", 100)],
+                },
             ],
         },
     ),
@@ -225,8 +303,10 @@ GROUPS = [
 def keys_of(p: dict) -> list[str]:
     keys = [p["key"]]
     v = p["value"]
-    if isinstance(v, dict) and "key" in v and p["op"] in (
-        "gt", "gte", "lt", "lte", "crosses_above", "crosses_below"
+    if (
+        isinstance(v, dict)
+        and "key" in v
+        and p["op"] in ("gt", "gte", "lt", "lte", "crosses_above", "crosses_below")
     ):
         keys.append(v["key"])
     return keys
@@ -257,14 +337,26 @@ def main() -> None:
         out = run_predicate(p, bars)
         assert out == {"result": False} or "error" in out, (name, out)
         unsupported.append(
-            {"name": name, "input": inp, "predicate": p, "python": out, "rust": "unsupported_metric"}
+            {
+                "name": name,
+                "input": inp,
+                "predicate": p,
+                "python": out,
+                "rust": "unsupported_metric",
+            }
         )
     divergences = []
     for name, inp, p, rust in DIVERGENCES:
         out = run_predicate(p, bars_of(inp))
         assert out["result"] is not rust, (name, out)
         divergences.append(
-            {"name": name, "input": inp, "predicate": p, "python": out, "rust": {"result": rust}}
+            {
+                "name": name,
+                "input": inp,
+                "predicate": p,
+                "python": out,
+                "rust": {"result": rust},
+            }
         )
     groups = []
     for name, inp, g in GROUPS:
@@ -279,7 +371,11 @@ def main() -> None:
             }
         )
     results = [c["expected"].get("result") for c in cases]
-    assert True in results and False in results and any("error" in c["expected"] for c in cases)
+    assert (
+        True in results
+        and False in results
+        and any("error" in c["expected"] for c in cases)
+    )
     doc = {
         "$comment": (
             "Generated once from the Python evaluator by scripts/gen_screener_scan_vectors.py."
@@ -295,7 +391,9 @@ def main() -> None:
         "divergences": divergences,
     }
     OUT.write_text(json.dumps(doc, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(f"wrote {OUT}: {len(cases)} cases, {len(groups)} groups, {len(unsupported)} unsupported")
+    print(
+        f"wrote {OUT}: {len(cases)} cases, {len(groups)} groups, {len(unsupported)} unsupported"
+    )
 
 
 if __name__ == "__main__":
