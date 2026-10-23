@@ -60,9 +60,15 @@ pub struct WsTick {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum WsClientMsg {
     /// Subscribe to tick updates for an instrument.
-    Subscribe { symbol: String },
+    Subscribe {
+        /// Instrument symbol to subscribe to.
+        symbol: String,
+    },
     /// Unsubscribe from tick updates for an instrument.
-    Unsubscribe { symbol: String },
+    Unsubscribe {
+        /// Instrument symbol to unsubscribe from.
+        symbol: String,
+    },
     /// Ping message for connection liveness.
     Ping,
     /// Close connection.
