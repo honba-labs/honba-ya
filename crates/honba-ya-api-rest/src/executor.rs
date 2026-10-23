@@ -51,6 +51,7 @@ use honba_api::{
     RunExecutor, RunJob, RunOutcome, parse_instrument_id,
 };
 use honba_config::{AccountConfig, ExecutionConfig, FillModel};
+use honba_core::rust_decimal::Decimal;
 use honba_core::{BarReader, Currency, InstrumentId, PortError, TickReader};
 use serde_json::{Value, json};
 
@@ -69,7 +70,7 @@ use crate::registry::StrategyRegistry;
 /// gains them back for free once a real port lands.
 pub struct BacktestExecutor {
     #[allow(dead_code)]
-    bars: Arc<dyn BarReader>,
+    bars: Arc<dyn BarReader + Send + Sync>,
     #[allow(dead_code)]
     registry: StrategyRegistry,
     #[allow(dead_code)]
@@ -79,13 +80,13 @@ pub struct BacktestExecutor {
     #[allow(dead_code)]
     cache: Option<ResultCache>,
     #[allow(dead_code)]
-    ticks: Option<Arc<dyn TickReader>>,
+    ticks: Option<Arc<dyn TickReader + Send + Sync>>,
 }
 
 impl BacktestExecutor {
     /// An executor over `bars` running the strategies in `registry`, with the default
     /// account and execution config.
-    pub fn new(bars: Arc<dyn BarReader>, registry: StrategyRegistry) -> Self {
+    pub fn new(bars: Arc<dyn BarReader + Send + Sync>, registry: StrategyRegistry) -> Self {
         Self {
             bars,
             registry,
@@ -112,7 +113,7 @@ impl BacktestExecutor {
 
     /// Attaches the quote/trade tick source `fill_model = l2` runs would match against.
     #[must_use]
-    pub fn with_tick_reader(mut self, ticks: Arc<dyn TickReader>) -> Self {
+    pub fn with_tick_reader(mut self, ticks: Arc<dyn TickReader + Send + Sync>) -> Self {
         self.ticks = Some(ticks);
         self
     }
@@ -180,11 +181,9 @@ fn fill_model_from_name(name: &str) -> Result<FillModel, ErrorDetail> {
 fn port_error(e: &PortError) -> ErrorDetail {
     let code = match e {
         PortError::Unsupported(_) => ErrorCode::NotImplemented,
-        PortError::InvalidRequest(_) => ErrorCode::ValidationInvalidRequest,
-        PortError::Unavailable(_) | PortError::Timeout | PortError::Transport(_) => {
-            ErrorCode::NotFound
-        }
-        _ => ErrorCode::InternalError,
+        PortError::NotFound(_) => ErrorCode::NotFound,
+        PortError::Timeout => ErrorCode::Timeout,
+        PortError::ConnectionFailed(_) => ErrorCode::InternalError,
     };
     ErrorDetail::new(code, format!("bar read failed: {e}"))
         .with_context(json!({"reason": "bar_read"}))
@@ -214,10 +213,10 @@ const PERIODS_PER_YEAR: f64 = 252.0;
 #[allow(dead_code)]
 fn assumptions(spec: &ResolvedBacktest) -> Value {
     let mut not_modelled: Vec<&str> = Vec::new();
-    if spec.commission_per_fill == 0.0 {
+    if spec.commission_per_fill == Decimal::ZERO {
         not_modelled.push("transaction_costs");
     }
-    if spec.slippage_bps == 0.0 {
+    if spec.slippage_bps == Decimal::ZERO {
         not_modelled.push("slippage");
     }
     not_modelled.extend([
