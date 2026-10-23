@@ -25,13 +25,17 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use honba_core::{
-    FeeBreakdown, FillReport, InstrumentId, Money, OrderRequest, OrderSide, Price, Quantity, Tick,
+    FeeBreakdown, FillReport, InstrumentId, Money, OrderRequest, OrderSide, OrderType, Price,
+    Quantity, Tick,
 };
 use honba_mon::RiskEngine;
 use honba_strategy::{LedgerContext, Strategy, StrategyRunner};
 
 use crate::sim::{
-    l2_book::OrderBook, latency::NetworkLatency, mis::MisSquareOffManager, slippage::SlippageModel,
+    l2_book::OrderBook,
+    latency::NetworkLatency,
+    mis::{MisSquareOffManager, SquareOffResult},
+    slippage::SlippageModel,
 };
 
 use crate::calendar::NseTradingCalendar;
@@ -167,6 +171,11 @@ pub struct BacktestEngine<S: Strategy> {
     latest_prices: HashMap<InstrumentId, Price>,
     scrips_sold_today: HashSet<InstrumentId>,
     product_type: ProductType,
+    /// Net signed quantity held per instrument (positive long, negative
+    /// short), updated on every fill. Used by `check_mis_square_off` to
+    /// find every instrument with an open position to force-close, rather
+    /// than guessing at a single arbitrary instrument.
+    open_positions: HashMap<InstrumentId, Decimal>,
 }
 
 impl<S: Strategy> BacktestEngine<S> {
@@ -214,7 +223,13 @@ impl<S: Strategy> BacktestEngine<S> {
             latest_prices: HashMap::new(),
             scrips_sold_today: HashSet::new(),
             product_type: config.product_type,
+            open_positions: HashMap::new(),
         }
+    }
+
+    /// The attached MIS square-off manager, if any.
+    pub fn mis_square_off(&self) -> Option<&MisSquareOffManager> {
+        self.mis_square_off.as_ref()
     }
 
     /// Process a stream of chronological market events through the complete event loop:
@@ -487,6 +502,31 @@ impl<S: Strategy> BacktestEngine<S> {
             tracing::error!("strategy runner on_fill failed: {e}");
         }
 
+        // Track the net position per instrument so `check_mis_square_off`
+        // can find every instrument with an open position, and feed the
+        // fill to the MIS square-off manager so its per-instrument
+        // eligibility tracking stays live (it is otherwise never called
+        // and permanently stale).
+        let signed_qty = if order.side == OrderSide::Buy {
+            filled_qty
+        } else {
+            -filled_qty
+        };
+        *self
+            .open_positions
+            .entry(order.instrument.clone())
+            .or_insert(Decimal::ZERO) += signed_qty;
+        if let Some(manager) = self.mis_square_off.as_mut() {
+            if let Err(e) = manager.process_trade(
+                order.instrument.clone(),
+                order.side,
+                filled_qty.to_i64().unwrap_or(0),
+                timestamp,
+            ) {
+                tracing::error!("MIS square-off process_trade refused: {e:?}");
+            }
+        }
+
         // Apply T+1 settlement or cash update
         match order.side {
             OrderSide::Buy => {
@@ -530,19 +570,51 @@ impl<S: Strategy> BacktestEngine<S> {
         let _ = price_impact;
     }
 
-    /// Check MIS square-off after each execution.
+    /// Force-close every instrument with an open MIS (intraday) position
+    /// once the 15:20 IST square-off window is reached, per SEBI
+    /// regulations. A no-op for delivery (non-MIS) runs: squaring off a
+    /// product the broker never auto-closes would be wrong.
     fn check_mis_square_off(&mut self, timestamp: DateTime<Utc>) {
-        if let Some(ref manager) = self.mis_square_off {
-            // Check if square-off time has been reached
-            // We need an instrument - use the latest instrument from prices
-            let fallback = honba_core::InstrumentId::new(honba_core::Exchange::Nse, "UNKNOWN");
-            let instrument = self.latest_prices.keys().next().unwrap_or(&fallback);
-            if let Some(result) = manager.check_square_off_time(instrument, timestamp) {
-                // Square-off triggered - refuse new orders that increase MIS position
-                // In a full implementation, would force square-off of existing positions
-                // For now, just log the square-off event
-                let _ = result;
-            }
+        if self.product_type != ProductType::Intraday {
+            return;
+        }
+        // Cloned so the loop below can call `self.execute_order` (which
+        // needs `&mut self`) without holding an immutable borrow of
+        // `self.mis_square_off` across it.
+        let Some(manager) = self.mis_square_off.clone() else {
+            return;
+        };
+
+        // Collect first: `execute_order` below mutates `open_positions`, so
+        // this can't borrow it while iterating.
+        let open: Vec<(InstrumentId, Decimal)> = self
+            .open_positions
+            .iter()
+            .filter(|(_, qty)| **qty != Decimal::ZERO)
+            .map(|(id, qty)| (id.clone(), *qty))
+            .collect();
+
+        for (instrument, quantity) in open {
+            let Some(SquareOffResult::ForcedSquareOff { .. }) =
+                manager.check_square_off_time(&instrument, timestamp)
+            else {
+                continue;
+            };
+            let side = if quantity > Decimal::ZERO {
+                OrderSide::Sell
+            } else {
+                OrderSide::Buy
+            };
+            let closing_order = OrderRequest::new(
+                instrument,
+                side,
+                OrderType::Market,
+                Quantity(quantity.abs()),
+                "mis_square_off",
+            );
+            // Bypasses the strategy's own RiskEngine gate: this is the
+            // broker forcing the close, not the strategy choosing to trade.
+            self.execute_order(closing_order, timestamp);
         }
     }
 

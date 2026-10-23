@@ -226,11 +226,6 @@ impl OrderBook {
         self.bids.depth_at(price) + self.asks.depth_at(price)
     }
 
-    /// The configured network/broker propagation latency, in microseconds.
-    pub(crate) fn latency_us(&self) -> u64 {
-        self.latency_us
-    }
-
     /// The timestamp at which an order submitted at `submit_ts` becomes
     /// ready to execute, given this book's configured latency. Pure
     /// arithmetic on the caller-supplied timestamp — no clock is read here,
