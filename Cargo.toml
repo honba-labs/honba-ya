@@ -40,6 +40,7 @@ axum = { version = "0.7", features = ["ws"] }
 clap = { version = "4", features = ["derive"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "postgres", "chrono"] }
 schemars = { version = "0.8", features = ["derive"] }
+sha2 = "0.10"
 prometheus = "0.14"
 arrow = "53"
 parquet = { version = "53", features = ["arrow"] }
@@ -89,8 +90,20 @@ honba-analytics        = { package = "honba-nou-analytics", path = "../honba-nou
 
 honba-te-core          = { path = "../honba-te/crates/honba-te-core" }
 honba-te-router        = { path = "../honba-te/crates/honba-te-router" }
-sha2 = "0.10"
 honba-indicators = { package = "honba-me-indicators", path = "../honba-me/crates/honba-me-indicators" }
 honba-portfolio  = { package = "honba-kokoro-portfolio", path = "../honba-kokoro/crates/honba-kokoro-portfolio" }
 honba-tamashii-codegen = { path = "../honba-tamashii/crates/honba-tamashii-codegen" }
 honba-codegen          = { package = "honba-tamashii-codegen", path = "../honba-tamashii/crates/honba-tamashii-codegen" }
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+[profile.prod]
+inherits = "release"
+lto = true
+codegen-units = 1
