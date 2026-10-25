@@ -359,6 +359,41 @@ pub const ROUTE_SCOPES: &[(&str, &str, RouteScope)] = &[
     // WebSocket routes: public
     ("GET", "/ws", RouteScope::Public),
     ("GET", "/ws/market", RouteScope::Public),
+
+    // Additional research / run routes
+    ("GET", "/backtests", RouteScope::Required("research")),
+    ("GET", "/sweeps", RouteScope::Required("research")),
+
+    // Additional orders & positions & portfolio routes
+    ("GET", "/orders", RouteScope::Required("trade")),
+    ("GET", "/orders/{id}/fills", RouteScope::Required("read")),
+    ("GET", "/positions", RouteScope::Required("read")),
+    ("GET", "/positions/audit", RouteScope::Required("read")),
+    ("GET", "/trades", RouteScope::Required("read")),
+    ("GET", "/portfolio/chart", RouteScope::Required("read")),
+    ("GET", "/portfolio/concentration", RouteScope::Required("read")),
+    ("GET", "/portfolio/wac", RouteScope::Required("read")),
+    ("GET", "/ledger", RouteScope::Required("read")),
+    ("GET", "/tax/report", RouteScope::Required("read")),
+    ("GET", "/fees", RouteScope::Required("read")),
+
+    // Additional reports routes
+    ("GET", "/reports/ledger", RouteScope::Required("read")),
+    ("GET", "/reports/tax", RouteScope::Required("read")),
+    ("GET", "/reports/snapshots", RouteScope::Required("read")),
+    ("GET", "/reports/audit", RouteScope::Required("read")),
+    ("GET", "/reports/concentration", RouteScope::Required("read")),
+    ("GET", "/reports/wac", RouteScope::Required("read")),
+    ("GET", "/reports/fees", RouteScope::Required("read")),
+    ("GET", "/reports/equity-curve", RouteScope::Required("read")),
+    ("GET", "/reports/fills/{order_id}", RouteScope::Required("read")),
+
+    // Documentation / OpenAPI routes
+    ("GET", "/schema/openapi/v1.json", RouteScope::Public),
+    ("GET", "/schema/openapi/v2.json", RouteScope::Public),
+    ("GET", "/schema/openapi", RouteScope::Public),
+    ("GET", "/docs", RouteScope::Public),
+    ("GET", "/swagger-ui", RouteScope::Public),
 ];
 
 /// The scope required for a concrete request, or `None` when the route is not in
@@ -376,9 +411,13 @@ pub fn scope_for(method: &str, path: &str) -> Option<RouteScope> {
     } else {
         method
     };
+    let unversioned_path = path
+        .strip_prefix("/api/v1")
+        .or_else(|| path.strip_prefix("/api/v2"))
+        .unwrap_or(path);
     ROUTE_SCOPES
         .iter()
-        .find(|(m, pattern, _)| m.eq_ignore_ascii_case(method) && path_matches(pattern, path))
+        .find(|(m, pattern, _)| m.eq_ignore_ascii_case(method) && path_matches(pattern, unversioned_path))
         .map(|(_, _, scope)| *scope)
 }
 

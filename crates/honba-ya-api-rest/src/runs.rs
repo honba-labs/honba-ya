@@ -218,3 +218,40 @@ pub(crate) async fn get_sweep_by_id(
         .await,
     )
 }
+
+
+/// `GET /backtests`.
+pub(crate) async fn get_backtests(State(state): State<Arc<AppState>>) -> Response {
+    let Some(runs) = state.runs.clone() else {
+        return success(Vec::<honba_api::RunManifest>::new());
+    };
+    respond(
+        blocking(move || {
+            let all = runs.store().list();
+            let backtests: Vec<_> = all
+                .into_iter()
+                .filter(|m| m.kind == RunKind::Backtest)
+                .collect();
+            Ok(backtests)
+        })
+        .await,
+    )
+}
+
+/// `GET /sweeps`.
+pub(crate) async fn get_sweeps(State(state): State<Arc<AppState>>) -> Response {
+    let Some(runs) = state.runs.clone() else {
+        return success(Vec::<honba_api::RunManifest>::new());
+    };
+    respond(
+        blocking(move || {
+            let all = runs.store().list();
+            let sweeps: Vec<_> = all
+                .into_iter()
+                .filter(|m| m.kind == RunKind::Sweep)
+                .collect();
+            Ok(sweeps)
+        })
+        .await,
+    )
+}

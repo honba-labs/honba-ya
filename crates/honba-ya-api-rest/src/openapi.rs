@@ -4,6 +4,7 @@
 //! request/response schemas, authentication schemes, and error responses.
 //! Uses `schemars` for JSON Schema generation from Rust types.
 
+use axum::response::IntoResponse;
 use honba_core::{
     InstrumentId, OrderSide, OrderStatus, OrderType, Price, Quantity, TimeInForce,
 };
@@ -424,4 +425,127 @@ impl OpenApiDocument {
             ],
         }
     }
+
+    /// Generate the OpenAPI 3.1 document for v1 (legacy & supported).
+    pub fn generate_v1() -> Self {
+        let mut doc = Self::generate();
+        doc.info.title = "Honba REST API v1".to_string();
+        doc.info.version = "1.0.0".to_string();
+        doc.info.description = "Honba trading platform REST API v1 (Supported for legacy software)".to_string();
+        doc.servers = vec![
+            OpenApiServer {
+                url: "/api/v1".to_string(),
+                description: "Honba REST API v1 (Supported for legacy software)".to_string(),
+            },
+            OpenApiServer {
+                url: "/".to_string(),
+                description: "Legacy un-prefixed root (Deprecated)".to_string(),
+            },
+        ];
+        doc
+    }
+
+    /// Generate the OpenAPI 3.1 document for v2 (latest & recommended).
+    pub fn generate_v2() -> Self {
+        let mut doc = Self::generate();
+        doc.info.title = "Honba REST API v2".to_string();
+        doc.info.version = "2.0.0".to_string();
+        doc.info.description = "Honba trading platform REST API v2 (Latest & Recommended)".to_string();
+        doc.servers = vec![
+            OpenApiServer {
+                url: "/api/v2".to_string(),
+                description: "Honba REST API v2 (Latest & Recommended)".to_string(),
+            },
+        ];
+        doc
+    }
 }
+
+/// Handler for `GET /schema/openapi/v1.json`.
+pub async fn get_openapi_v1() -> axum::response::Response {
+    let doc = OpenApiDocument::generate_v1();
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        serde_json::to_string_pretty(&doc).unwrap_or_default(),
+    )
+        .into_response()
+}
+
+/// Handler for `GET /schema/openapi/v2.json`.
+pub async fn get_openapi_v2() -> axum::response::Response {
+    let doc = OpenApiDocument::generate_v2();
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        serde_json::to_string_pretty(&doc).unwrap_or_default(),
+    )
+        .into_response()
+}
+
+/// Handler for `GET /schema/openapi`.
+pub async fn get_openapi_index() -> axum::response::Response {
+    let index = serde_json::json!({
+        "openapi_versions": [
+            {
+                "version": "v1",
+                "status": "supported_legacy",
+                "url": "/schema/openapi/v1.json",
+                "description": "Honba REST API v1 (Supported for legacy software)"
+            },
+            {
+                "version": "v2",
+                "status": "latest_recommended",
+                "url": "/schema/openapi/v2.json",
+                "description": "Honba REST API v2 (Latest & Recommended)"
+            }
+        ],
+        "latest": "v2",
+        "documentation_url": "/docs"
+    });
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        serde_json::to_string_pretty(&index).unwrap_or_default(),
+    )
+        .into_response()
+}
+
+/// Handler for `GET /docs` and `GET /swagger-ui`.
+pub async fn get_swagger_ui() -> axum::response::Html<&'static str> {
+    axum::response::Html(SWAGGER_UI_HTML)
+}
+
+/// Swagger UI HTML page with multi-version selector.
+pub const SWAGGER_UI_HTML: &str = r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Honba REST API Documentation</title>
+  <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css" />
+  <style>
+    body { margin: 0; background: #fafafa; font-family: sans-serif; }
+    .topbar { display: block; }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+  <script>
+    window.onload = function() {
+      window.ui = SwaggerUIBundle({
+        urls: [
+          { url: "/schema/openapi/v2.json", name: "v2 (Latest & Recommended)" },
+          { url: "/schema/openapi/v1.json", name: "v1 (Supported / Legacy)" }
+        ],
+        "urls.primaryName": "v2 (Latest & Recommended)",
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIStandalonePreset
+        ],
+        layout: "StandaloneLayout"
+      });
+    };
+  </script>
+</body>
+</html>"#;

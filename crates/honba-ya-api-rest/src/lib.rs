@@ -4,25 +4,22 @@
 
 //! REST API server for Honba platform using axum.
 //!
-//! Provides read-only endpoints as specified in Phase 2 (E11-S3, E11-S4).
+//! Provides multi-version API routing (`/api/v1`, `/api/v2`, and root fallback)
+//! as specified in Phase 1 of the Versioning Design Plan.
 //! All responses are wrapped in the versioned envelope from `honba-api`.
 
 use crate::auth::AuthRouterExt;
-use axum::handler::Handler as _;
-use axum::http::{HeaderValue, Method};
+use axum::http::{HeaderName, HeaderValue, Method};
 use axum::{
-    Router, async_trait,
-    extract::{FromRequest, Path, Request, State, rejection::JsonRejection},
+    async_trait,
+    extract::{rejection::JsonRejection, FromRequest, Request},
     http::StatusCode,
     response::{IntoResponse, Json, Response},
-    routing::{delete, get, post, put},
+    routing::get,
+    Router,
 };
-use honba_api::{
-    ApiResponse, Capabilities, CapabilitiesResponse, CompiledStrategy, ErrorCode, ErrorDetail,
-    OrdersRequest, ResponseEnvelope, StrategiesResponse, SweepRequest, VerifyStrategyRequest,
-    VerifyStrategyResponse,
-};
-use std::sync::{Arc, PoisonError};
+use honba_api::{ApiResponse, ErrorCode, ErrorDetail};
+use std::sync::Arc;
 use tower_http::{
     compression::CompressionLayer,
     cors::{AllowOrigin, CorsLayer},
@@ -40,8 +37,8 @@ mod executor;
 mod ingest;
 mod journal;
 mod market;
-mod operator_journal;
 mod openapi;
+mod operator_journal;
 mod orders;
 mod portfolio;
 mod portfolio_store;
@@ -59,21 +56,18 @@ mod streams;
 mod trades;
 mod trading_state;
 mod user_doc;
+pub mod v1;
+pub mod v2;
 pub mod ws;
-
-use crate::reports::{
-    get_concentration_risk, get_equity_curve, get_fees_report, get_ledger, get_order_fills,
-    get_portfolio_snapshots, get_position_audit, get_tax_report, get_weighted_average_cost,
-};
 
 pub use approval::ApprovalQueue;
 pub use auth::{
-    AuthConfig, AuthLayer, FileTokenStore, ROUTE_SCOPES, RouteScope, TokenInfo, scope_for,
-    unscoped_routes,
+    scope_for, unscoped_routes, AuthConfig, AuthLayer, FileTokenStore, RouteScope, TokenInfo,
+    ROUTE_SCOPES,
 };
 pub use bar_pump::BarPumpReport;
-pub use catalog::{CATALOG_DIR, CatalogBars, CatalogLoadError, load_catalog};
-pub use dispatch::{DispatchError, build_target, dispatch, dispatch_stream};
+pub use catalog::{load_catalog, CatalogBars, CatalogLoadError, CATALOG_DIR};
+pub use dispatch::{build_target, dispatch, dispatch_stream, DispatchError};
 pub use exec::NextOpenSim;
 pub use executor::BacktestExecutor;
 pub use honba_api::JournalWriter;
@@ -86,14 +80,20 @@ pub use portfolio_store::{
 };
 pub use profile_store::{DEFAULT_USER_ID, Module, Profile, ProfileError, ProfileStore, Source};
 pub use registry::StrategyRegistry;
-pub use retention::{RetentionPolicy, evictions};
+pub use retention::{evictions, RetentionPolicy};
 pub use run_store::{OsEntropy, RecoveryReport, RunClock, RunEntropy, RunStore, SystemClock};
 pub use service::{
-    DEFAULT_MAX_QUEUED, DEFAULT_SHUTDOWN_GRACE, RunService, RunServiceConfig, ShutdownReport,
+    RunService, RunServiceConfig, ShutdownReport, DEFAULT_MAX_QUEUED, DEFAULT_SHUTDOWN_GRACE,
 };
 pub use state::AppState;
 pub use streams::get_backtest_events;
 pub use ws::ws_handler;
+
+pub use v1::{
+    delete_order, get_capabilities, get_health, get_orders, get_schema, get_strategies,
+    get_sweep_by_id, post_close_positions, post_orders, post_strategies, post_sweeps,
+    post_verify_strategy,
+};
 
 /// JSON body extractor whose rejections are the standard error envelope
 /// (`validation_invalid_request`) rather than axum's plain-text message.
@@ -133,10 +133,6 @@ where
 }
 
 /// Server configuration beyond the data: today only the CORS allow-list and auth.
-///
-/// The default sends no CORS headers at all, so browsers refuse cross-origin reads; origins
-/// are opt-in, one explicit entry each (never a wildcard).
-/// Auth is optional: when `tokens_file` is provided, Bearer token auth is enforced.
 #[derive(Clone, Debug, Default)]
 pub struct ApiConfig {
     cors_origins: Vec<HeaderValue>,
@@ -170,6 +166,71 @@ impl ApiConfig {
     }
 }
 
+/// Middleware providing RFC 8594 deprecation and canonical link headers for legacy un-prefixed requests.
+/// Supports content negotiation via `Accept: application/vnd.honba.v2+json` or `X-Honba-Version: 2`.
+pub async fn legacy_v1_deprecation_notice(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let path = req.uri().path().to_owned();
+    let wants_v2 = req
+        .headers()
+        .get("x-honba-version")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v == "2")
+        .unwrap_or(false)
+        || req
+            .headers()
+            .get(axum::http::header::ACCEPT)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.contains("application/vnd.honba.v2+json"))
+            .unwrap_or(false);
+
+    let res = next.run(req).await;
+    let (mut parts, body) = res.into_parts();
+
+    if wants_v2 {
+        parts.headers.insert(
+            HeaderName::from_static("x-honba-version"),
+            HeaderValue::from_static("2"),
+        );
+        let link = format!("</api/v2{path}>; rel=\"canonical\"");
+        if let Ok(val) = HeaderValue::from_str(&link) {
+            parts.headers.insert(axum::http::header::LINK, val);
+        }
+        let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+            Ok(b) => b,
+            Err(_) => return Response::from_parts(parts, axum::body::Body::empty()),
+        };
+        if let Ok(mut val) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+            if val.is_object() && val.get("api_version").is_some() {
+                val["api_version"] = serde_json::json!("v2");
+                let new_body = serde_json::to_vec(&val).unwrap_or_default();
+                parts.headers.insert(
+                    axum::http::header::CONTENT_LENGTH,
+                    HeaderValue::from(new_body.len()),
+                );
+                return Response::from_parts(parts, axum::body::Body::from(new_body));
+            }
+        }
+        Response::from_parts(parts, axum::body::Body::from(bytes))
+    } else {
+        parts.headers.insert(
+            HeaderName::from_static("deprecation"),
+            HeaderValue::from_static("true"),
+        );
+        parts.headers.insert(
+            HeaderName::from_static("x-honba-version"),
+            HeaderValue::from_static("1"),
+        );
+        let link = format!("</api/v1{path}>; rel=\"canonical\"");
+        if let Ok(val) = HeaderValue::from_str(&link) {
+            parts.headers.insert(axum::http::header::LINK, val);
+        }
+        Response::from_parts(parts, body)
+    }
+}
+
 /// Create the API router over an empty catalogue.
 pub fn api_router() -> Router {
     api_router_with(AppState::default())
@@ -183,67 +244,24 @@ pub fn api_router_with(state: AppState) -> Router {
 /// Create the API router serving `state` under `config`.
 pub fn api_router_with_config(state: AppState, config: &ApiConfig) -> Router {
     let state = Arc::new(state);
+
+    let v1_router = v1::router();
+    let v2_router = v2::router();
+
     let router = Router::new()
-        .route("/capabilities", get(get_capabilities))
-        .route("/health", get(get_health))
-        .route("/schema", get(get_schema))
-        .route("/instruments", get(market::get_instruments))
-        .route("/instruments/:id", get(market::get_instrument_by_id))
-        .route("/quotes", get(market::get_quotes))
-        .route("/bars/:id", get(market::get_bars))
-        .route("/depth/:id", get(market::get_depth))
-        .route("/bars", post(ingest::post_bars))
-        .route(
-            "/trading-state",
-            get(trading_state::get_trading_state).put(trading_state::put_trading_state),
+        .nest("/api/v1", v1_router.clone())
+        .nest("/api/v2", v2_router)
+        // Root fallback defaults to v1 for existing un-prefixed clients with deprecation warning
+        .nest(
+            "/",
+            v1_router.layer(axum::middleware::from_fn(legacy_v1_deprecation_notice)),
         )
-        .route(
-            "/profile",
-            get(profile::get_profile).put(profile::put_profile.layer(profile::body_limit())),
-        )
-        .route("/profile/layouts", get(profile::get_layouts))
-        .route(
-            "/profile/layouts/:name",
-            put(profile::put_layout.layer(profile::body_limit())).delete(profile::delete_layout),
-        )
-        .route("/profile/modules", get(profile::get_modules))
-        .route(
-            "/profile/modules/:id",
-            put(profile::put_module.layer(profile::body_limit())).delete(profile::delete_module),
-        )
-        .route("/portfolio", get(portfolio::get_portfolio))
-        .route("/portfolio/accounts", get(portfolio::get_accounts))
-        .route("/portfolio/positions", get(portfolio::get_positions))
-        .route("/portfolio/holdings", get(portfolio::get_holdings))
-        .route("/portfolio/trades", get(portfolio::get_trades))
-        .route("/reports/ledger", get(get_ledger))
-        .route("/reports/tax", get(get_tax_report))
-        .route("/reports/snapshots", get(get_portfolio_snapshots))
-        .route("/reports/audit", get(get_position_audit))
-        .route("/reports/concentration", get(get_concentration_risk))
-        .route("/reports/wac", get(get_weighted_average_cost))
-        .route("/reports/fees", get(get_fees_report))
-        .route("/reports/equity-curve", get(get_equity_curve))
-        .route("/reports/fills/:order_id", get(get_order_fills))
-        .route("/strategies", post(post_strategies).get(get_strategies))
-        .route("/strategies/verify", post(post_verify_strategy))
-        .route("/backtests", post(runs::post_backtests))
-        .route("/backtests/:id", get(runs::get_backtest_by_id))
-        .route("/backtests/:id/journal", get(runs::get_backtest_journal))
-        .route("/backtests/:id/events", get(get_backtest_events))
-        .route("/sweeps", post(post_sweeps))
-        .route("/sweeps/:id", get(get_sweep_by_id))
-        .route("/sweeps/:id/journal", get(runs::get_sweep_journal))
-        .route("/orders", post(post_orders).get(get_orders))
-        .route("/orders/:id", delete(delete_order))
-        .route("/positions/close", post(post_close_positions))
-        .route("/approval/queue", get(orders::get_approval_queue))
-        .route("/approval/approve", post(orders::post_approve_order))
-        .route("/approval/reject", post(orders::post_reject_order))
-        .route("/screener/scan", get(screener::get_screener_scan))
-        .route("/journals/:id", get(runs::get_journal_by_id))
-        .route("/ws", get(ws_handler))
-        .route("/ws/market", get(ws_handler))
+        // OpenAPI specifications per version
+        .route("/schema/openapi/v1.json", get(openapi::get_openapi_v1))
+        .route("/schema/openapi/v2.json", get(openapi::get_openapi_v2))
+        .route("/schema/openapi", get(openapi::get_openapi_index))
+        .route("/docs", get(openapi::get_swagger_ui))
+        .route("/swagger-ui", get(openapi::get_swagger_ui))
         .fallback(unknown_route)
         .method_not_allowed_fallback(unsupported_method)
         .with_state(state)
@@ -255,7 +273,8 @@ pub fn api_router_with_config(state: AppState, config: &ApiConfig) -> Router {
     if let Some(tokens_file) = &config.auth.tokens_file {
         let audit_log_path = config.auth.audit_log_path.clone();
         let store = FileTokenStore::new(tokens_file.clone()).expect("failed to load token file");
-        let auth_layer = Arc::new(AuthLayer::new(store, audit_log_path, config.auth.jwt_config.clone()));
+        let auth_layer =
+            Arc::new(AuthLayer::new(store, audit_log_path, config.auth.jwt_config.clone()));
         router.with_auth(auth_layer)
     } else {
         router
@@ -302,10 +321,6 @@ fn cors_layer(config: &ApiConfig) -> CorsLayer {
 }
 
 /// Serves [`api_router_with`]`(state)` on `listener` until `shutdown` completes.
-///
-/// In-flight requests finish before this returns. The caller owns the listener, so a test can
-/// bind `127.0.0.1:0` and read the chosen port; the future owns the stop signal (ctrl-c in the
-/// CLI, a channel in tests). Handlers read no wall clock.
 pub async fn serve(
     listener: tokio::net::TcpListener,
     state: AppState,
@@ -328,15 +343,6 @@ pub async fn serve_with_config(
 }
 
 /// Routes still answering 501 `not_implemented`.
-///
-/// ADR 0017 decision 7 shrinks the list to the trading rows once the sweeps
-/// (E4-S5) land; ADR 0018 decision 7 (E2-S2 r5b) risk-gates `POST /orders`,
-/// `DELETE /orders/{id}` and `POST /positions/close`, so those left the list.
-/// E11-S7 built the write ledger, so no route is left: the empty list is the
-/// honest signal that every registry endpoint answers for real.
-///
-/// Remove a row when its handler is built; `tests/capabilities.rs` probes the router and fails
-/// if this list and the real answers disagree.
 pub const NOT_IMPLEMENTED_ENDPOINTS: &[(&str, &str)] = &[];
 
 fn endpoint_key((method, path): &(&str, &str)) -> String {
@@ -359,105 +365,6 @@ pub(crate) fn capability_manifest() -> honba_api::CapabilityManifest {
         adapters: vec![],
         features: std::collections::BTreeMap::new(),
     }
-}
-
-/// Get API capabilities.
-async fn get_capabilities(
-    State(_state): State<Arc<AppState>>,
-) -> Json<ResponseEnvelope<CapabilitiesResponse>> {
-    Json(ApiResponse::success(Capabilities {
-        capabilities: capability_manifest(),
-    }))
-}
-
-/// Get health status.
-async fn get_health() -> Json<ResponseEnvelope<serde_json::Value>> {
-    Json(ApiResponse::success(serde_json::json!({"status": "ok"})))
-}
-
-/// Get schema bundle — full OpenAPI 3.1 document.
-async fn get_schema() -> Json<ResponseEnvelope<serde_json::Value>> {
-    let doc = openapi::OpenApiDocument::generate();
-    Json(ApiResponse::success(serde_json::to_value(&doc).unwrap()))
-}
-
-/// Lists the strategies compiled in this process, ordered by id.
-async fn get_strategies(
-    State(state): State<Arc<AppState>>,
-) -> Json<ResponseEnvelope<StrategiesResponse>> {
-    let catalog = state
-        .strategies
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
-    Json(ApiResponse::success(honba_api::list_strategies(&catalog)))
-}
-
-/// Compiles a manifest (the same step as verify) and keeps it in the session catalog.
-///
-/// The body is read as raw JSON first so a `code`/`source` field gets its own 422 reason; a
-/// manifest that does not verify, or a full catalog, is a 422 carrying the reason code.
-async fn post_strategies(
-    State(state): State<Arc<AppState>>,
-    ApiJson(body): ApiJson<serde_json::Value>,
-) -> (StatusCode, Json<ResponseEnvelope<CompiledStrategy>>) {
-    let compiled = honba_api::parse_compile_request(body).and_then(|req| {
-        let mut catalog = state
-            .strategies
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        honba_api::compile_strategy(&mut catalog, req.manifest)
-    });
-    match compiled {
-        Ok(strategy) => (StatusCode::OK, Json(ApiResponse::success(strategy))),
-        Err(detail) => (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(ApiResponse::error(detail)),
-        ),
-    }
-}
-
-/// Verifies a manifest and returns its IR; a manifest that does not verify is
-/// a 422 carrying `validation_invalid_request` and the reason code.
-async fn post_verify_strategy(
-    ApiJson(manifest): ApiJson<VerifyStrategyRequest>,
-) -> (StatusCode, Json<ResponseEnvelope<VerifyStrategyResponse>>) {
-    match honba_api::verify_strategy(manifest) {
-        Ok(ir) => (StatusCode::OK, Json(ApiResponse::success(ir))),
-        Err(detail) => (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(ApiResponse::error(detail)),
-        ),
-    }
-}
-
-async fn post_sweeps(
-    State(state): State<Arc<AppState>>,
-    ApiJson(request): ApiJson<SweepRequest>,
-) -> Response {
-    runs::post_sweeps(State(state), ApiJson(request)).await
-}
-
-async fn get_sweep_by_id(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    runs::get_sweep_by_id(State(state), Path(id)).await
-}
-
-async fn get_orders(
-    State(state): State<Arc<AppState>>,
-    query: ApiQuery<honba_api::OrdersQuery>,
-) -> Response {
-    orders::get_orders(State(state), query).await
-}
-
-async fn post_orders(State(state): State<Arc<AppState>>, req: ApiJson<OrdersRequest>) -> Response {
-    orders::post_orders(State(state), req, "rest".to_string()).await
-}
-
-async fn delete_order(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
-    orders::delete_order(State(state), Path(id)).await
-}
-
-async fn post_close_positions(State(state): State<Arc<AppState>>) -> Response {
-    orders::post_close_positions(State(state)).await
 }
 
 #[cfg(test)]

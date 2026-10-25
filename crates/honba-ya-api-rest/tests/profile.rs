@@ -368,7 +368,7 @@ async fn a_hostile_token_id_is_refused_and_touches_no_path() {
     ] {
         let (status, body) = send(&app, method.clone(), uri, Some(json!({})), Some("test")).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{method} {uri}: {body}");
-        assert_eq!(body["error"]["code"], json!("forbidden"));
+        assert_eq!(body["error"]["code"], json!("unauthorized"));
     }
     assert!(!dir.path().join("profiles").exists());
     assert!(!dir.path().join("evil.json").exists());
