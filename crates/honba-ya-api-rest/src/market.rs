@@ -181,23 +181,6 @@ pub(crate) async fn master_get(
         .map_err(|e| ErrorDetail::new(ErrorCode::InternalError, e.to_string()))
 }
 
-/// The close of the latest quote, via mid when a book exists; `None` when the
-/// reader holds nothing (a bar store derives bid = ask = close, so this is the
-/// close; a book quotes mid, else bid).
-pub(crate) async fn quote_last(state: &AppState, id: &honba_core::InstrumentId) -> Option<f64> {
-    match state.quotes.read_quote(id, None).await {
-        Ok(Some(quote)) => {
-            let mid = (quote.bid_price() + quote.ask_price()) / 2.0;
-            if mid.is_finite() {
-                Some(mid)
-            } else {
-                Some(quote.bid_price())
-            }
-        }
-        _ => None,
-    }
-}
-
 /// Maps a port failure to a status and an envelope code.
 ///
 /// `honba_feed::ports::PortError` has only three variants (`Unsupported`,
