@@ -1,6 +1,6 @@
 //! The `StrategyContext` port is object-safe and usable through `&mut dyn`.
 
-use honba_core::chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc};
 use honba_core::{Currency, Exchange, InstrumentId, Money, Price, Quantity};
 use honba_testing::fixtures::utc_nanos;
 use rust_decimal::Decimal;

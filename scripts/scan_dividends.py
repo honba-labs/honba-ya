@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import logging
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
@@ -15,6 +16,7 @@ from honba.markets.india.universes import NIFTY_50_SYMBOLS
 from rich.console import Console
 from rich.table import Table
 
+logger = logging.getLogger(__name__)
 
 def get_large_cap_symbols() -> list[str]:
     url = "https://nsearchives.nseindia.com/content/indices/ind_nifty100list.csv"
@@ -29,8 +31,8 @@ def get_large_cap_symbols() -> list[str]:
             ]
             if len(symbols) >= 50:
                 return sorted(set(symbols))
-    except Exception:
-        pass
+    except (urllib.error.URLError, csv.Error) as e:
+        logger.warning(f"Could not fetch online Nifty 100 list: {e}; using Nifty 50.")
     return sorted(set(NIFTY_50_SYMBOLS))
 
 
@@ -54,8 +56,8 @@ def fetch_symbol_dividend(sym: str) -> dict | None:
                 "dividend_yield": dy,
                 "dividend_rate": rate or 0.0,
             }
-    except Exception:
-        pass
+    except (yf.YFinanceException, KeyError, TypeError) as e:
+        logger.error(f"Error fetching dividend for {sym}: {e}")
     return None
 
 

@@ -1,12 +1,13 @@
 //! The Rust-registered strategy set.
 
-use honba_messages::{BarAggregation, ErrorCode, Exchange, InstrumentId};
-use honba_strategy::Universe;
+use honba_api::ErrorCode;
+use honba_core::{Exchange, InstrumentId};
+use honba_strategy::{BarAggregation, Universe};
 
 use crate::StrategyRegistry;
 
 fn tcs() -> InstrumentId {
-    InstrumentId::new("TCS", Exchange::new("NSE"))
+    InstrumentId::new(Exchange::Nse, "TCS")
 }
 
 #[test]

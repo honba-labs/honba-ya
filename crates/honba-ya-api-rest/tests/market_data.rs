@@ -14,9 +14,9 @@ use axum::http::{Request, StatusCode};
 use honba_api_rest::{AppState, api_router_with};
 use honba_feed::import::parquet_source::bar_schema;
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
-use honba_messages::{
-    BarAggregation, BarSpecification, Exchange, InstrumentId, PriceType, UnixNanos,
-};
+use honba_core::{Exchange, InstrumentId};
+use honba_feed::wire::{BarAggregation, BarSpecification, PriceType, UnixNanos};
+use std::str::FromStr;
 use parquet::arrow::ArrowWriter;
 use serde_json::{Value, json};
 use tower::util::ServiceExt;
@@ -28,7 +28,7 @@ const T0: u64 = 1_704_067_200_000_000_000;
 fn slice(symbol: &str, exchange: &str, count: u64) -> honba_feed::ColumnarSlice {
     let spec = BarSpecification::new(1, BarAggregation::Minute, PriceType::Last);
     let mut builder =
-        ColumnarSliceBuilder::new(InstrumentId::new(symbol, Exchange::new(exchange)), spec);
+        ColumnarSliceBuilder::new(InstrumentId::new(Exchange::from_str(exchange).unwrap(), symbol), spec);
     for i in 0..count {
         let px = 100.0 + i as f64;
         builder

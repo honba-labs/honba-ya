@@ -44,6 +44,7 @@ async fn test_sqlite_sebi_audit_ledger_lifecycle() {
         timestamp: Utc::now(),
         correlation_id: Some(correlation_id),
         client_id: Some(client_id.to_string()),
+        trace_context: None,
     };
     let ack_id = ledger.record_broker_ack(&req, &ack, 1250).await.unwrap();
     assert!(ack_id > refusal_id);
@@ -94,6 +95,7 @@ async fn test_sqlite_sebi_audit_ledger_lifecycle() {
         client_id: Some(client_id.to_string()),
         fee: Money::zero_inr(),
         fee_breakdown: None,
+        trace_context: None,
     };
     let fill_record_id = ledger.record_fill(&fill).await.unwrap();
     assert!(fill_record_id > cancel_id);

@@ -8,12 +8,19 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use chrono::Utc;
 use honba_api::{
-    ResolvedBacktest, ResolvedRequest, ResolvedSweep, RunKind, RunManifest, StrategyCatalog,
-    compile_strategy,
+    BacktestMetrics, BacktestRequest, ErrorDetail, Event, JournalWriter, Message,
+    ResolvedBacktest, ResolvedRequest, ResolvedSweep, RunExecutor, RunId, RunJob, RunKind,
+    RunManifest, RunOutcome, RunStatus, StrategyCatalog, compile_strategy,
 };
-use honba_api_rest::{RunClock, RunEntropy, RunStore};
-use honba_messages::{ErrorDetail, Event, Exchange, InstrumentId, Message, QuoteTick, UnixNanos};
+use honba_api_rest::{BacktestExecutor, RunClock, RunEntropy, RunService, RunServiceConfig, RunStore, StrategyRegistry};
+use honba_core::{Exchange, InstrumentId};
+use honba_api::wire::QuoteTick;
+use honba_feed::wire::{ BarAggregation, BarSpecification, PriceType, UnixNanos};
+use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
+use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
 use serde_json::json;
 
 /// 2026-10-08T00:00:00Z.
@@ -95,7 +102,7 @@ pub fn store(root: PathBuf, clock: &FakeClock) -> RunStore {
     )
 }
 
-fn compiled() -> honba_api::CompiledStrategy {
+pub fn compiled() -> honba_api::CompiledStrategy {
     let tcs = json!({"symbol": "TCS", "exchange": "NSE"});
     let manifest = json!({
         "api_version": "1.0.0",
@@ -117,14 +124,14 @@ pub fn backtest_request(seed: u64) -> ResolvedRequest {
     ResolvedRequest::Backtest(ResolvedBacktest {
         strategy: "sma".into(),
         universe: "nifty50".into(),
-        start: UnixNanos::from_u64(1),
-        end: UnixNanos::from_u64(2),
+        start: chrono::DateTime::from_timestamp_nanos(1_000_000_000),
+        end: chrono::DateTime::from_timestamp_nanos(2_000_000_000),
         bar_spec: "1d".into(),
-        initial_capital: 1_000_000.0,
+        initial_capital: dec!(1_000_000.0),
         seed,
         fill_model: None,
-        commission_per_fill: 0.0,
-        slippage_bps: 0.0,
+        commission_per_fill: dec!(0.0),
+        slippage_bps: dec!(0.0),
     })
 }
 
@@ -135,10 +142,10 @@ pub fn sweep_request(seed: u64) -> ResolvedRequest {
         trials: 2,
         seed,
         universe: "TCS.NSE".into(),
-        start: UnixNanos::from_u64(1),
-        end: UnixNanos::from_u64(2),
+        start: chrono::DateTime::from_timestamp_nanos(1_000_000_000),
+        end: chrono::DateTime::from_timestamp_nanos(2_000_000_000),
         bar_spec: "1d".into(),
-        initial_capital: 1_000_000.0,
+        initial_capital: dec!(1_000_000.0),
     })
 }
 
@@ -152,16 +159,17 @@ pub fn submit_backtest(store: &RunStore, seed: u64) -> RunManifest {
 }
 
 pub fn quote(n: u64) -> Message {
+    let now = Utc::now();
     let q = QuoteTick::new(
-        InstrumentId::new("TCS", Exchange::new("NSE")),
-        100.0 + n as f64,
-        101.0 + n as f64,
-        10.0,
-        20.0,
-        UnixNanos::from_u64(n),
-        UnixNanos::from_u64(n),
+        InstrumentId::new(Exchange::Nse, "TCS"),
+        Decimal::from(100 + n),
+        Decimal::from(101 + n),
+        Decimal::from(10),
+        Decimal::from(20),
+        now,
+        now,
     );
-    Message::new(Event::Quote(q), UnixNanos::from_u64(n + 1))
+    Message::new(Event::Quote(q), now)
 }
 
 pub fn run_dir(root: &Path, m: &RunManifest) -> PathBuf {
@@ -178,14 +186,6 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use honba_api::{
-    BacktestMetrics, BacktestRequest, JournalWriter, RunExecutor, RunId, RunJob, RunOutcome,
-    RunStatus,
-};
-use honba_api_rest::{BacktestExecutor, RunService, RunServiceConfig, StrategyRegistry};
-use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
-use honba_messages::{BarAggregation, BarSpecification, PriceType};
-
 /// 2024-01-01T00:00:00Z in nanoseconds.
 const BARS_FROM_NS: u64 = 1_704_067_200_000_000_000;
 const DAY_NS: u64 = 86_400_000_000_000;
@@ -194,7 +194,7 @@ const DAY_NS: u64 = 86_400_000_000_000;
 pub fn fixture_reader() -> Arc<DatasetReader> {
     let spec = BarSpecification::new(1, BarAggregation::Day, PriceType::Last);
     let mut builder =
-        ColumnarSliceBuilder::new(InstrumentId::new("TCS", Exchange::new("NSE")), spec);
+        ColumnarSliceBuilder::new(InstrumentId::new(Exchange::Nse, "TCS"), spec);
     for i in 0..80u64 {
         let c = 100.0 + 12.0 * (i as f64 * 0.35).sin() + i as f64 * 0.05;
         let ts = UnixNanos::from_u64(BARS_FROM_NS + i * DAY_NS);
@@ -213,7 +213,7 @@ pub fn sma_request(seed: u64) -> BacktestRequest {
         start: Some("2024-01-01".into()),
         end: Some("2024-06-01".into()),
         bar_spec: Some("1d".into()),
-        initial_capital: Some(1_000_000.0),
+        initial_capital: Some(dec!(1_000_000.0)),
         seed: Some(seed),
         fill_model: None,
         commission_per_fill: None,
@@ -221,9 +221,16 @@ pub fn sma_request(seed: u64) -> BacktestRequest {
     }
 }
 
+pub struct TestBarReader;
+impl honba_core::BarReader for TestBarReader {
+    fn read_bars(&self, _req: &honba_core::BarRequest) -> honba_core::PortResult<Vec<honba_core::Bar>> {
+        Ok(Vec::new())
+    }
+}
+
 pub fn real_executor() -> Arc<dyn RunExecutor> {
     Arc::new(BacktestExecutor::new(
-        fixture_reader(),
+        Arc::new(TestBarReader),
         StrategyRegistry::builtin(),
     ))
 }
@@ -333,7 +340,7 @@ impl RunExecutor for FailingExecutor {
             panic!("boom at /secret/path");
         }
         Err(
-            ErrorDetail::new(honba_messages::ErrorCode::MarketDataUnavailable, "no bars")
+            ErrorDetail::new(honba_api::ErrorCode::NotFound, "no bars")
                 .with_context(json!({"reason": "no_data"})),
         )
     }
@@ -344,9 +351,10 @@ pub fn run_status(store: &RunStore, id: &RunId) -> RunStatus {
 }
 
 /// The shared test manifest, renamed by the caller.
-pub fn tests_manifest(name: &str) -> honba_strategy::StrategyManifest {
-    use honba_strategy::{StrategyManifest, Subscriptions, TimeframeSpec, Universe};
-    let tcs = InstrumentId::new("TCS", Exchange::new("NSE"));
+pub fn tests_manifest(name: &str) -> honba_api::StrategyManifest {
+    use honba_api::{StrategyManifest, Subscriptions, TimeframeSpec, Universe};
+    use honba_api::wire::BarAggregation;
+    let tcs = InstrumentId::new(Exchange::Nse, "TCS");
     StrategyManifest::new(
         name,
         "sha256:abc",
@@ -355,7 +363,6 @@ pub fn tests_manifest(name: &str) -> honba_strategy::StrategyManifest {
     )
     .with_subscriptions(Subscriptions {
         instruments: vec![tcs],
-        quotes: false,
-        trades: false,
     })
 }
+

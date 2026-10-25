@@ -13,7 +13,9 @@ use std::sync::Arc;
 
 use honba_api::{JournalWriter, ResultCache, RunExecutor, RunJob, RunKind, RunOutcome, RunStatus};
 use honba_api_rest::{BacktestExecutor, StrategyRegistry};
-use honba_messages::{Exchange, InstrumentId, Message, UnixNanos};
+use honba_api::{ErrorDetail, Message};
+use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
 use support::*;
 
 /// A simple in-memory journal writer to verify record emission count.
@@ -23,21 +25,18 @@ struct TestJournal {
 }
 
 impl JournalWriter for TestJournal {
-    fn append(&mut self, record: &Message) -> Result<(), honba_messages::ErrorDetail> {
+    fn append(&mut self, record: &Message) -> Result<(), ErrorDetail> {
         self.records.push(record.clone());
         Ok(())
     }
 
-    fn flush(&mut self) -> Result<(), honba_messages::ErrorDetail> {
+    fn flush(&mut self) -> Result<(), ErrorDetail> {
         Ok(())
     }
 }
 
-fn job_with(strategy: &str, universe: &str, bar_spec: &str, seed: u64, capital: f64) -> RunJob {
-    let tcs = InstrumentId::new("TCS", Exchange::new("NSE"));
-    let ir = StrategyRegistry::builtin()
-        .ir_for(strategy, &tcs, "1d")
-        .unwrap();
+fn job_with(strategy: &str, universe: &str, bar_spec: &str, seed: u64, capital: Decimal) -> RunJob {
+        let ir = compiled().ir;
     RunJob {
         run_id: honba_api::RunIdGenerator::default()
             .next(1, [0; 10])
@@ -48,14 +47,14 @@ fn job_with(strategy: &str, universe: &str, bar_spec: &str, seed: u64, capital: 
         request: honba_api::ResolvedRequest::Backtest(honba_api::ResolvedBacktest {
             strategy: strategy.to_owned(),
             universe: universe.to_owned(),
-            start: UnixNanos::from_u64(1_704_067_200_000_000_000),
-            end: UnixNanos::from_u64(1_704_067_200_000_000_000 + 80 * 86_400_000_000_000),
+            start: chrono::DateTime::from_timestamp_nanos(1_704_067_200_000_000_000),
+            end: chrono::DateTime::from_timestamp_nanos(1_704_067_200_000_000_000 + 80 * 86_400_000_000_000),
             bar_spec: bar_spec.to_owned(),
             initial_capital: capital,
             seed,
             fill_model: None,
-            commission_per_fill: 0.0,
-            slippage_bps: 0.0,
+            commission_per_fill: dec!(0.0),
+            slippage_bps: dec!(0.0),
         }),
         seed,
     }
@@ -64,10 +63,10 @@ fn job_with(strategy: &str, universe: &str, bar_spec: &str, seed: u64, capital: 
 #[test]
 fn rerun_hits_cache() {
     let cache = ResultCache::in_memory();
-    let executor = BacktestExecutor::new(fixture_reader(), StrategyRegistry::builtin())
+    let executor = BacktestExecutor::new(Arc::new(TestBarReader), StrategyRegistry::builtin())
         .with_cache(cache.clone());
 
-    let job1 = job_with("sma_crossover", "TCS.NSE", "1d", 42, 1_000_000.0);
+    let job1 = job_with("sma_crossover", "TCS.NSE", "1d", 42, dec!(1_000_000.0));
     let mut journal1 = TestJournal::default();
 
     // Run 1: cache miss, executes kernel and populates cache
@@ -106,7 +105,7 @@ fn rerun_hits_cache() {
     );
 
     // Run 3: parameter change (different seed) -> cache MISS
-    let job3 = job_with("sma_crossover", "TCS.NSE", "1d", 99, 1_000_000.0);
+    let job3 = job_with("sma_crossover", "TCS.NSE", "1d", 99, dec!(1_000_000.0));
     let mut journal3 = TestJournal::default();
     let _outcome3 = executor
         .execute(job3, &mut journal3)
@@ -118,7 +117,7 @@ fn rerun_hits_cache() {
     assert_eq!(cache.len(), 2, "cache should now hold 2 results");
 
     // Run 4: parameter change (different capital) -> cache MISS
-    let job4 = job_with("sma_crossover", "TCS.NSE", "1d", 42, 500_000.0);
+    let job4 = job_with("sma_crossover", "TCS.NSE", "1d", 42, dec!(500_000.0));
     let mut journal4 = TestJournal::default();
     let outcome4 = executor
         .execute(job4, &mut journal4)
@@ -143,12 +142,12 @@ fn disk_cache_persistence_across_restarts() {
     let scratch = Scratch::new("disk-cache-test");
     let cache_dir = scratch.path().join("cache");
 
-    let job = job_with("sma_crossover", "TCS.NSE", "1d", 42, 1_000_000.0);
+    let job = job_with("sma_crossover", "TCS.NSE", "1d", 42, dec!(1_000_000.0));
 
     // Instance 1: write to disk cache
     let cache1 = ResultCache::with_disk_dir(&cache_dir);
     let executor1 =
-        BacktestExecutor::new(fixture_reader(), StrategyRegistry::builtin()).with_cache(cache1);
+        BacktestExecutor::new(Arc::new(TestBarReader), StrategyRegistry::builtin()).with_cache(cache1);
 
     let mut journal1 = TestJournal::default();
     let outcome1 = executor1.execute(job.clone(), &mut journal1).unwrap();
@@ -162,7 +161,7 @@ fn disk_cache_persistence_across_restarts() {
     let cache2 = ResultCache::with_disk_dir(&cache_dir);
     assert_eq!(cache2.len(), 1, "disk cache should recover cached item");
     let executor2 =
-        BacktestExecutor::new(fixture_reader(), StrategyRegistry::builtin()).with_cache(cache2);
+        BacktestExecutor::new(Arc::new(TestBarReader), StrategyRegistry::builtin()).with_cache(cache2);
 
     let mut journal2 = TestJournal::default();
     let outcome2 = executor2.execute(job, &mut journal2).unwrap();
@@ -186,7 +185,7 @@ fn rerun_hits_cache_end_to_end_service() {
     let store_arc = Arc::new(store(scratch.journals(), &clock));
     let cache = ResultCache::in_memory();
     let executor = Arc::new(
-        BacktestExecutor::new(fixture_reader(), StrategyRegistry::builtin())
+        BacktestExecutor::new(Arc::new(TestBarReader), StrategyRegistry::builtin())
             .with_cache(cache.clone()),
     );
     let service = start_service(store_arc, executor, config(2, 8, 1_000));

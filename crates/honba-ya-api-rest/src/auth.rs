@@ -19,7 +19,7 @@ use chrono::Utc;
 /// `honba-ya-persistence::decisions::sha256_hex` has the same helper, but this
 /// crate doesn't depend on `honba-ya-persistence`, so it's kept local here on
 /// top of the `sha2`/`hex` deps this crate already has.
-fn sha256_hex(s: &str) -> String {
+pub(crate) fn sha256_hex(s: &str) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(s.as_bytes());

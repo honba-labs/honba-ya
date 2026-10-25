@@ -757,6 +757,7 @@ impl<S: Strategy> BacktestEngine<S> {
             client_id: order.client_id.clone(),
             fee,
             fee_breakdown: Some(fee_breakdown),
+            trace_context: None,
         };
 
         // Research-live parity: feed the fill back through the strategy

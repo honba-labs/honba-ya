@@ -3,15 +3,17 @@
 use std::sync::Mutex;
 use std::time::Duration;
 
-use honba_api::{StrategyCatalog, compile_strategy};
-use honba_messages::{BarAggregation, ErrorCode, Exchange, InstrumentId};
-use honba_strategy::{StrategyManifest, Subscriptions, TimeframeSpec, Universe};
+use honba_api::{
+    ErrorCode, ErrorDetail, StrategyCatalog, StrategyIr, StrategyManifest,
+    Subscriptions, TimeframeSpec, Universe, compile_strategy,
+};
+use honba_core::{Exchange, InstrumentId};
 
 use crate::service::resolve_strategy;
 use crate::{DEFAULT_MAX_QUEUED, DEFAULT_SHUTDOWN_GRACE, RunServiceConfig, StrategyRegistry};
 
 fn tcs() -> InstrumentId {
-    InstrumentId::new("TCS", Exchange::new("NSE"))
+    InstrumentId::new(Exchange::Nse, "TCS")
 }
 
 fn catalog_with(name: &str) -> (Mutex<StrategyCatalog>, String) {
@@ -19,12 +21,10 @@ fn catalog_with(name: &str) -> (Mutex<StrategyCatalog>, String) {
         name,
         "sha256:abc",
         Universe::Explicit(vec![tcs()]),
-        TimeframeSpec::new(1, BarAggregation::Day),
+        TimeframeSpec::new(1, honba_api::wire::BarAggregation::Day),
     )
     .with_subscriptions(Subscriptions {
         instruments: vec![tcs()],
-        quotes: false,
-        trades: false,
     });
     let mut catalog = StrategyCatalog::default();
     let id = compile_strategy(&mut catalog, manifest).unwrap().id;
@@ -35,7 +35,7 @@ fn resolve(
     catalog: &Mutex<StrategyCatalog>,
     strategy: &str,
     universe: &str,
-) -> Result<(String, honba_strategy::StrategyIr), honba_messages::ErrorDetail> {
+) -> Result<(String, StrategyIr), ErrorDetail> {
     resolve_strategy(
         catalog,
         &StrategyRegistry::builtin(),
@@ -64,7 +64,7 @@ fn a_registered_name_resolves_to_itself_and_a_synthesised_ir() {
     let (id, ir) = resolve(&catalog, "sma_crossover", "TCS.NSE").unwrap();
     assert_eq!(id, "sma_crossover");
     assert_eq!(ir.manifest.name, "sma_crossover");
-    assert_eq!(ir.universe.instruments, vec![tcs()]);
+    assert_eq!(ir.manifest.universe, Universe::Explicit(vec![tcs()]));
 }
 
 #[test]

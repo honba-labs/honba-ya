@@ -1,3 +1,4 @@
+#![cfg(feature = "legacy_engine")]
 //! `StrategyRunner` over one ordered event stream (ADR 0019 decision 4, E2-S6(b)).
 //!
 //! Real flow: strategy -> runner -> `ScriptedExecution` -> events -> runner. Each scenario

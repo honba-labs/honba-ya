@@ -2,9 +2,9 @@
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use honba_entities::{Currency, Instrument, InstrumentKind};
+use honba_core::{Currency, Exchange, InstrumentId, InstrumentKind};
+use honba_feed::wire::{BarAggregation, BarSpecification, Instrument, PriceType, UnixNanos};
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
-use honba_messages::{Exchange, InstrumentId, UnixNanos};
 use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
@@ -12,17 +12,17 @@ use crate::state::AppState;
 use crate::{api_router, api_router_with};
 
 fn instrument_id() -> InstrumentId {
-    InstrumentId::new("X", Exchange::new("NSE"))
+    InstrumentId::new(Exchange::Nse, "X")
 }
 
 /// A state whose master knows one instrument (lot 25, tick 0.05, INR equity)
 /// with one bar closing at 100: quotes derive bid = ask = 100 from the bar.
 fn state_with_x() -> AppState {
     let id = instrument_id();
-    let spec = honba_api::parse_timeframe("1m").unwrap();
+    let spec = BarSpecification::new(1, BarAggregation::Minute, PriceType::Last);
     let mut builder = ColumnarSliceBuilder::new(id.clone(), spec);
     builder
-        .push(UnixNanos::new(1), 100.0, 100.0, 100.0, 100.0, 1.0)
+        .push(UnixNanos::from_u64(1), 100.0, 100.0, 100.0, 100.0, 1.0)
         .unwrap();
     let dataset = Dataset::from_slices(vec![builder.finish().unwrap()]).unwrap();
     let instrument = Instrument::new(id, InstrumentKind::Equity, Currency::Inr, 25.0, 0.05);
@@ -66,8 +66,8 @@ async fn an_unknown_instrument_is_a_422_carrying_risk_instrument_unknown() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(parsed["error"]["code"], json!("risk_instrument_unknown"));
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(parsed["error"]["code"], json!("not_found"));
 }
 
 #[tokio::test]

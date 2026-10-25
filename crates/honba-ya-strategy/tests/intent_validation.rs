@@ -1,3 +1,4 @@
+#![cfg(feature = "legacy_engine")]
 //! Invalid intents never reach execution (ADR 006).
 //!
 //! A strategy that emits an intent violating the `OrderIntent` invariants

@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use honba_actors::Strategy;
 use honba_core::Tick;
+use honba_strategy::Strategy;
 use rust_decimal::Decimal;
 
 /// Diagnostic report from strategy backtest, fed into the AI refinement loop.
@@ -58,8 +58,12 @@ pub fn refine_strategy_with_ai(diagnostic: &StrategyDiagnostic) -> Vec<String> {
         mutations.push("Implement stricter risk limits: max drawdown 5% per trade".to_string());
     }
 
-    if (diagnostic.winning_trades as f64) / (diagnostic.total_trades.max(1) as f64) < 0.4 {
-        mutations.push("Revise entry signal: add filter for trending market regime".to_string());
+    if diagnostic.total_trades > 0 {
+        let win_rate = diagnostic.winning_trades as f64 / diagnostic.total_trades as f64;
+        if win_rate < 0.4 {
+            mutations
+                .push("Revise entry signal: add filter for trending market regime".to_string());
+        }
     }
 
     if diagnostic.pbo.unwrap_or(0.0) > 0.5 {
@@ -121,6 +125,18 @@ pub fn run_closed_loop_refinement(
                 prev.max_drawdown_pct, diagnostic.max_drawdown_pct
             ));
         }
+
+        if diagnostic.total_trades > 0 && prev.total_trades > 0 {
+            let win_rate = diagnostic.winning_trades as f64 / diagnostic.total_trades as f64;
+            let prev_win_rate = prev.winning_trades as f64 / prev.total_trades as f64;
+            if win_rate < prev_win_rate - 0.05 {
+                mutations.push(format!(
+                    "Win rate declined from {:.1}% to {:.1}%; review entry criteria",
+                    prev_win_rate * 100.0,
+                    win_rate * 100.0
+                ));
+            }
+        }
     } else {
         // First evaluation: generate baseline mutations
         mutations = refine_strategy_with_ai(&diagnostic);
@@ -170,5 +186,87 @@ fn evaluate_strategy_diagnostic(strategy: &dyn Strategy, data: &[Tick]) -> Strat
         parameter_sensitivity,
         observed_regimes,
         suggested_prompt_mutations,
+    }
+}
+
+/// AI Refinement Configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AIRefinementConfig {
+    /// Enable AI-driven refinement.
+    pub enabled: bool,
+    /// Maximum refinement iterations.
+    pub max_iterations: usize,
+    /// Minimum improvement threshold to continue.
+    pub min_improvement: f64,
+    /// Whether to apply mutations automatically.
+    pub auto_apply: bool,
+}
+
+impl Default for AIRefinementConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_iterations: 5,
+            min_improvement: 0.05,
+            auto_apply: false,
+        }
+    }
+}
+
+/// Result of AI refinement cycle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AIRefinementResult {
+    /// Original diagnostic.
+    pub initial_diagnostic: StrategyDiagnostic,
+    /// Final diagnostic after refinements.
+    pub final_diagnostic: Option<StrategyDiagnostic>,
+    /// Mutations applied at each iteration.
+    pub mutations_per_iteration: Vec<Vec<String>>,
+    /// Whether refinement converged.
+    pub converged: bool,
+    /// Number of iterations performed.
+    pub iterations: usize,
+}
+
+/// Run full AI refinement loop with multiple iterations.
+pub fn run_ai_refinement_loop(
+    strategy: Box<dyn Strategy>,
+    held_out_data: &[Tick],
+    config: AIRefinementConfig,
+) -> AIRefinementResult {
+    let mut mutations_per_iteration = Vec::new();
+    let mut current_diagnostic = evaluate_strategy_diagnostic(&*strategy, held_out_data);
+    let initial_diagnostic = current_diagnostic.clone();
+    let mut converged = false;
+
+    for _iteration in 0..config.max_iterations {
+        let prev_diagnostic = Some(current_diagnostic.clone());
+        let mutations = run_closed_loop_refinement(&*strategy, held_out_data, &prev_diagnostic);
+        mutations_per_iteration.push(mutations.clone());
+
+        // Apply mutations if auto_apply is enabled
+        // In a real implementation, this would modify the strategy parameters
+        if config.auto_apply {
+            // apply_mutations_to_strategy(&mut strategy, &mutations);
+        }
+
+        // Re-evaluate
+        current_diagnostic = evaluate_strategy_diagnostic(&*strategy, held_out_data);
+
+        // Check convergence
+        let improvement = current_diagnostic.sharpe - prev_diagnostic.as_ref().unwrap().sharpe;
+        if improvement < config.min_improvement {
+            converged = true;
+            break;
+        }
+    }
+
+    let iterations = mutations_per_iteration.len();
+    AIRefinementResult {
+        initial_diagnostic,
+        final_diagnostic: Some(current_diagnostic),
+        mutations_per_iteration,
+        converged,
+        iterations,
     }
 }

@@ -1,3 +1,5 @@
+#[cfg(feature = "legacy_engine")]
+mod legacy {
 //! End-to-end demo: strategy -> engine -> paper execution -> analytics -> report.
 //!
 //! Run with:
@@ -95,3 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+}
+
+fn main() {}

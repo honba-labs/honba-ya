@@ -29,3 +29,6 @@ serde_json.workspace = true
 honba-ya-testing.workspace = true
 honba-me-feed.workspace = true
 honba-me-market.workspace = true
+
+[features]
+legacy_engine = []

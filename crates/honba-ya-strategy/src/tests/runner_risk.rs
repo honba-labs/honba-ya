@@ -87,8 +87,11 @@ fn holds_risk_engine_only_when_attached() {
 fn on_trading_state_is_tracked() {
     let mut r = runner(vec![]);
     assert_eq!(r.trading_state(), &TradingState::Active);
-    r.on_trading_state(TradingState::Reducing);
-    assert_eq!(r.trading_state(), &TradingState::Reducing);
+    let halted = TradingState::Halted {
+        reason: "circuit breaker".into(),
+    };
+    r.on_trading_state(halted.clone());
+    assert_eq!(r.trading_state(), &halted);
 }
 
 #[test]
@@ -120,7 +123,7 @@ fn max_notional_limit_refuses_excessive_limit_order() {
     let mut r = runner(vec![(1, vec![limit_buy(100.0, 10.0)])]).with_risk(stage(limits, true));
     bar(&mut r, 1, 10.0);
     assert_eq!(reasons(&r).len(), 1);
-    assert!(reasons(&r)[0].contains("Notional"));
+    assert!(reasons(&r)[0].to_lowercase().contains("notional"));
 }
 
 #[test]
@@ -135,10 +138,10 @@ fn order_rate_window_runs_on_event_time() {
     let plan = vec![
         (MS, vec![buy(1.0)]),
         (2 * MS, vec![buy(1.0)]),
-        (1001 * MS, vec![buy(1.0)]),
+        (1002 * MS, vec![buy(1.0)]),
     ];
     let mut r = runner(plan).with_risk(stage(limits, true));
-    for ts in [MS, 2 * MS, 1001 * MS] {
+    for ts in [MS, 2 * MS, 1002 * MS] {
         bar(&mut r, ts, 10.0);
     }
     // s-1 is refused; by 1001 ms the first order left the window.

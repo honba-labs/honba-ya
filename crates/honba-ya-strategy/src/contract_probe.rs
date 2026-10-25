@@ -1,6 +1,6 @@
 //! The conformance probe: a reference strategy that exercises the whole contract.
 
-use honba_core::chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc};
 use honba_core::{Bar, FillReport, InstrumentId, Money, OrderSide, Price, Quantity, Tick};
 use rust_decimal::Decimal;
 use serde::Serialize;

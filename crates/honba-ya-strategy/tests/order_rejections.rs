@@ -1,3 +1,4 @@
+#![cfg(feature = "legacy_engine")]
 //! Cross-language vectors for the execution reject/cancel path.
 //!
 //! Reads `schema/conformance/order_rejections.json`; the Python test

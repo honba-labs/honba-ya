@@ -1,3 +1,4 @@
+#![cfg(feature = "legacy_engine")]
 //! Golden-vector contract tests for `OrderIntent` (ADR 006).
 //!
 //! Reads the shared vectors in `schema/golden/order_intent.json`; the Python

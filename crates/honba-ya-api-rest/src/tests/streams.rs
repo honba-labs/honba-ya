@@ -1,21 +1,26 @@
 use std::io::Write;
 use std::path::Path;
 
-use honba_messages::{Event, Exchange, InstrumentId, Message, QuoteTick, UnixNanos};
+use chrono::Utc;
+use honba_api::{Event, Message};
+use honba_api::wire::QuoteTick;
+use honba_core::{Exchange, InstrumentId};
+use rust_decimal::Decimal;
 
 use crate::streams::read_journal_from;
 
 fn msg(n: u64) -> Message {
+    let now = Utc::now();
     let quote = QuoteTick::new(
-        InstrumentId::new("TCS", Exchange::new("NSE")),
-        100.0 + n as f64,
-        101.0 + n as f64,
-        10.0,
-        20.0,
-        UnixNanos::from_u64(n),
-        UnixNanos::from_u64(n),
+        InstrumentId::new(Exchange::Nse, "TCS"),
+        Decimal::from(100 + n),
+        Decimal::from(101 + n),
+        Decimal::from(10),
+        Decimal::from(20),
+        now,
+        now,
     );
-    Message::new(Event::Quote(quote), UnixNanos::from_u64(n + 1))
+    Message::new(Event::Quote(quote), now)
 }
 
 fn write_events(path: &Path, msgs: &[Message]) {

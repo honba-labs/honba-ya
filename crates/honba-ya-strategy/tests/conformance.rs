@@ -1,3 +1,4 @@
+#![cfg(feature = "legacy_engine")]
 //! Shared strategy conformance fixture, Rust side (ADR 008).
 //!
 //! Runs every scenario in `schema/conformance/strategy_contract.json` through

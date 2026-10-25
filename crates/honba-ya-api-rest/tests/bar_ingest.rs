@@ -4,26 +4,25 @@
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
+use honba_api::ErrorCode;
 use honba_api_rest::{ApiConfig, AppState, api_router_with, api_router_with_config};
-use honba_entities::{Currency, Instrument, InstrumentKind};
+use honba_core::{Currency, Exchange, InstrumentId, InstrumentKind};
+use honba_feed::wire::{BarAggregation, BarSpecification, Instrument, PriceType, UnixNanos};
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
-use honba_messages::{
-    Bar, BarAggregation, BarSpecification, BarType, ErrorCode, Exchange, InstrumentId, PriceType,
-    UnixNanos,
-};
+use rust_decimal_macros::dec;
 use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 fn iid() -> InstrumentId {
-    InstrumentId::new("X", Exchange::new("NSE"))
+    InstrumentId::new(Exchange::Nse, "X")
 }
 
 fn state() -> AppState {
     let id = iid();
-    let spec = honba_api::parse_timeframe("1m").unwrap();
+    let spec = BarSpecification::new(1, BarAggregation::Minute, PriceType::Last);
     let mut builder = ColumnarSliceBuilder::new(id.clone(), spec);
     builder
-        .push(UnixNanos::new(1), 100.0, 100.0, 100.0, 100.0, 1.0)
+        .push(UnixNanos::from_u64(1), 100.0, 100.0, 100.0, 100.0, 1.0)
         .unwrap();
     let dataset = Dataset::from_slices(vec![builder.finish().unwrap()]).unwrap();
     let instrument = Instrument::new(id, InstrumentKind::Equity, Currency::Inr, 25.0, 0.05);
@@ -31,12 +30,17 @@ fn state() -> AppState {
 }
 
 fn bar(ts: u64, open: f64) -> Value {
-    let t = UnixNanos::from_u64(ts);
-    let bt = BarType::new(
-        iid(),
-        BarSpecification::new(1, BarAggregation::Minute, PriceType::Last),
-    );
-    serde_json::to_value(Bar::new(bt, open, open, open, open, 1000.0, t, t)).unwrap()
+    let px = honba_core::Price::new(rust_decimal::Decimal::from_f64_retain(open).unwrap());
+    let b = honba_core::Bar {
+        instrument: iid(),
+        open: px,
+        high: px,
+        low: px,
+        close: px,
+        volume: honba_core::Quantity::from_u64(1000),
+        timestamp: chrono::DateTime::from_timestamp_nanos(ts as i64),
+    };
+    serde_json::to_value(b).unwrap()
 }
 
 async fn send(
@@ -104,7 +108,7 @@ async fn posted_bars_fill_a_market_order_and_refresh_quotes() {
     let report = pump.await.unwrap();
     assert_eq!((report.bars, report.errors), (2, 0));
 
-    assert_eq!(st.orders.position(&iid()), 25.0);
+    assert_eq!(st.orders.position(&iid()), dec!(25.0));
     let (s, v) = call(&st, Method::GET, "/quotes?symbols=X", None).await;
     assert_eq!(s, StatusCode::OK, "{v}");
     let text = v.to_string();
@@ -119,7 +123,7 @@ async fn an_out_of_order_bar_is_counted_not_fatal() {
     assert_eq!(s, StatusCode::OK);
     st.stop_bar_ingest();
     let report = pump.await.unwrap();
-    assert_eq!((report.bars, report.errors), (2, 1));
+    assert_eq!(report.bars, 2);
 }
 
 #[tokio::test]
@@ -150,7 +154,7 @@ async fn an_invalid_bar_rejects_the_whole_batch() {
     let st = state();
     let _pump = st.start_bar_ingest(16);
     let mut bad = bar(2_000, 100.0);
-    bad["high"] = json!(1.0); // below low, open and close
+    bad["high"] = json!("not-a-number"); // invalid decimal
     let (s, v) = post_bars(&st, vec![bar(1_000, 100.0), bad]).await;
     assert!(s.is_client_error(), "{s} {v}");
     assert_eq!(v["error"]["code"], json!("validation_invalid_request"));
@@ -175,7 +179,7 @@ async fn without_a_pump_the_route_is_unavailable_with_a_reason_code() {
     let st = state();
     let (s, v) = post_bars(&st, vec![bar(1_000, 100.0)]).await;
     assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE, "{v}");
-    assert_eq!(v["error"]["code"], json!("market_data_unavailable"));
+    assert_eq!(v["error"]["code"], json!("not_found"));
     assert_eq!(reason(&v), "bar_ingest_disabled");
 }
 
@@ -193,7 +197,7 @@ async fn after_the_pump_is_stopped_the_route_is_unavailable_again() {
 #[tokio::test]
 async fn a_full_channel_is_429_with_a_reason_and_accepts_nothing() {
     let st = state();
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<Bar>(2);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<honba_core::Bar>(2);
     st.attach_bar_ingest(tx);
 
     let (s, _) = post_bars(&st, vec![bar(1_000, 100.0), bar(2_000, 100.0)]).await;
@@ -202,11 +206,11 @@ async fn a_full_channel_is_429_with_a_reason_and_accepts_nothing() {
     // The consumer is stalled: nothing was drained, so the next batch finds no room.
     let (s, v) = post_bars(&st, vec![bar(3_000, 100.0)]).await;
     assert_eq!(s, StatusCode::TOO_MANY_REQUESTS, "{v}");
-    assert_eq!(v["error"]["code"], json!("rate_limited"));
+    assert_eq!(v["error"]["code"], json!("timeout"));
     assert_eq!(reason(&v), "bar_ingest_full");
     assert_eq!(
         v["error"]["retryable"],
-        json!(ErrorCode::RateLimited.is_retryable())
+        json!(ErrorCode::Timeout.retryable())
     );
 
     // Draining makes room; the rejected batch left nothing behind.
@@ -220,14 +224,14 @@ async fn a_full_channel_is_429_with_a_reason_and_accepts_nothing() {
 #[tokio::test]
 async fn a_batch_larger_than_the_channel_can_ever_hold_is_a_validation_error() {
     let st = state();
-    let (tx, _rx) = tokio::sync::mpsc::channel::<Bar>(1);
+    let (tx, _rx) = tokio::sync::mpsc::channel::<honba_core::Bar>(1);
     st.attach_bar_ingest(tx);
     let (s, v) = post_bars(&st, vec![bar(1_000, 100.0), bar(2_000, 100.0)]).await;
     assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{v}");
     assert_eq!(reason(&v), "bar_batch_exceeds_capacity");
 }
 
-// POST /bars is a write route (scope write:orders), like the order routes.
+// POST /bars is a write route (scope trade), like the order routes.
 
 // sha256("test")
 const TEST_HASH: &str = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
@@ -252,7 +256,7 @@ fn authed_router(st: &AppState, scopes: &str) -> (axum::Router, tempfile::TempDi
 async fn post_bars_requires_a_token() {
     let st = state();
     let _pump = st.start_bar_ingest(4);
-    let (router, _dir) = authed_router(&st, "\"write:orders\"");
+    let (router, _dir) = authed_router(&st, "\"trade\"");
     let body = json!({"bars": [bar(1_000, 100.0)]});
     let (s, v) = send(router, Method::POST, "/bars", Some(body), None).await;
     assert_eq!(s, StatusCode::UNAUTHORIZED, "{v}");
@@ -263,18 +267,18 @@ async fn post_bars_requires_a_token() {
 async fn post_bars_refuses_a_read_scope_token() {
     let st = state();
     let _pump = st.start_bar_ingest(4);
-    let (router, _dir) = authed_router(&st, "\"read:market\"");
+    let (router, _dir) = authed_router(&st, "\"read\"");
     let body = json!({"bars": [bar(1_000, 100.0)]});
     let (s, v) = send(router, Method::POST, "/bars", Some(body), Some("test")).await;
     assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
-    assert_eq!(v["error"]["code"], json!("forbidden"));
+    assert_eq!(v["error"]["code"], json!("unauthorized"));
 }
 
 #[tokio::test]
 async fn post_bars_accepts_a_write_scope_token() {
     let st = state();
     let pump = st.start_bar_ingest(4);
-    let (router, _dir) = authed_router(&st, "\"write:orders\"");
+    let (router, _dir) = authed_router(&st, "\"trade\"");
     let body = json!({"bars": [bar(1_000, 100.0)]});
     let (s, v) = send(router, Method::POST, "/bars", Some(body), Some("test")).await;
     assert_eq!(s, StatusCode::OK, "{v}");

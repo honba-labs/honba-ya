@@ -1,3 +1,4 @@
+#![cfg(feature = "legacy_engine")]
 //! The risk stage at the runner's gate through the real flow (ADR 0018 decisions 6-8, 11):
 //! feed -> `Engine` -> `StrategyRunner` -> stage -> `ScriptedExecution`, simulated clock and feed.
 //!

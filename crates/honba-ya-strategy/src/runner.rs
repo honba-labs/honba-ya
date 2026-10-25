@@ -17,7 +17,7 @@
 
 use std::collections::HashMap;
 
-use honba_core::chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc};
 use honba_core::{
     FillReport, InstrumentId, MarketEvent, OrderEvent, OrderRequest, OrderSide, Quantity,
     TradingState,

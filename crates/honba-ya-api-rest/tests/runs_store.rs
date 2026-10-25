@@ -4,7 +4,7 @@ mod support;
 
 use honba_api::{BacktestMetrics, RunKind, RunStatus};
 use honba_api_rest::JournalWriter;
-use honba_messages::{ErrorCode, SCHEMA_VERSION};
+use honba_api::{ErrorCode, SCHEMA_VERSION};
 use serde_json::json;
 use support::*;
 
@@ -299,7 +299,7 @@ fn a_journal_at_another_schema_version_is_unsupported() {
     let store = store(scratch.journals(), &clock);
     let m = submit_backtest(&store, 1);
     let mut line = serde_json::to_value(quote(1)).unwrap();
-    line["schema_version"] = json!(SCHEMA_VERSION - 1);
+    line["schema_version"] = json!("3");
     std::fs::write(
         run_dir(&scratch.journals(), &m).join("events.ndjson"),
         format!("{line}\n"),
@@ -308,10 +308,10 @@ fn a_journal_at_another_schema_version_is_unsupported() {
     let err = store
         .read_journal(m.run_id.as_str(), RunKind::Backtest)
         .unwrap_err();
-    assert_eq!(err.code, ErrorCode::Unsupported);
+    assert_eq!(err.code, ErrorCode::NotImplemented);
     assert_eq!(
         err.context.unwrap(),
-        json!({"found": SCHEMA_VERSION - 1, "expected": SCHEMA_VERSION})
+        json!({"reason": "unsupported_schema_version", "found": "3", "expected": SCHEMA_VERSION})
     );
 }
 
@@ -394,7 +394,7 @@ fn shutdown_cancels_every_non_terminal_run_and_stops_admitting() {
             shared.request.clone(),
         )
         .unwrap_err();
-    assert_eq!(err.code, ErrorCode::RateLimited);
+    assert_eq!(err.code, ErrorCode::Timeout);
     assert_eq!(err.context.unwrap()["reason"], "shutting_down");
     assert_eq!(
         std::fs::read_dir(scratch.journals()).unwrap().count(),

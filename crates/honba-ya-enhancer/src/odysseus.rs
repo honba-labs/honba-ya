@@ -15,6 +15,7 @@
 
 use honba_core::{InstrumentId, OrderSide, Price, Quantity, TimeInForce};
 use rand::Rng;
+use rand::seq::SliceRandom;
 use rayon::prelude::*;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
@@ -153,6 +154,7 @@ impl Default for OdysseusConfig {
 ///
 /// Evaluates a batch of genomes against L2 order book data in parallel,
 /// using all available CPU cores via Rayon data parallelism.
+#[derive(Debug)]
 pub struct OdysseusEvaluator {
     config: OdysseusConfig,
     /// Total genomes evaluated (across all runs).
@@ -180,7 +182,7 @@ impl OdysseusEvaluator {
     ///
     /// Walks the rule tree against each L2 snapshot, records signals,
     /// and computes fitness metrics.
-    fn evaluate_genome(&self, genome: &Genome, l2_snapshots: &[EvalContext]) -> GenomeFitness {
+    pub fn evaluate_genome(&self, genome: &Genome, l2_snapshots: &[EvalContext]) -> GenomeFitness {
         let mut trades: Vec<f64> = Vec::with_capacity(l2_snapshots.len());
         let mut _position: f64 = 0.0; // signed position
 
@@ -563,5 +565,128 @@ impl OdysseusEvaluator {
         } else {
             (self.total_eval_ns.load(Ordering::Relaxed) as f64 / n as f64) / 1000.0
         }
+    }
+
+    /// Run a full genetic evolution cycle.
+    ///
+    /// Creates initial population, runs generations of selection/crossover/mutation,
+    /// and returns the best genomes and Pareto frontier.
+    pub fn evolve(&self, l2_snapshots: &[EvalContext]) -> (Vec<Genome>, Vec<GenomeFitness>) {
+        let mut population: Vec<Genome> = (0..self.config.population_size)
+            .map(|i| self.random_genome(format!("genome_{}", i), 0, self.config.max_tree_depth))
+            .collect();
+
+        let mut best_genomes = Vec::new();
+
+        for generation in 0..self.config.generations {
+            // Evaluate population in parallel
+            let fitnesses = self.evaluate_batch(&population, l2_snapshots);
+
+            // Sort by fitness (descending)
+            let mut indexed: Vec<_> = population.into_iter().zip(fitnesses).collect();
+            indexed.sort_by(|a, b| {
+                b.1.score
+                    .partial_cmp(&a.1.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            // Track best
+            best_genomes.push(indexed[0].0.clone());
+
+            // Elitism
+            let elite: Vec<Genome> = indexed
+                .iter()
+                .take(self.config.elite_count)
+                .map(|(g, _)| g.clone())
+                .collect();
+
+            // Selection
+            let parents = self.tournament_selection(&indexed, &mut rand::thread_rng());
+
+            // Crossover
+            let mut offspring = Vec::new();
+            for i in (0..parents.len()).step_by(2) {
+                let p1 = &parents[i.min(parents.len() - 1)];
+                let p2 = &parents[(i + 1).min(parents.len() - 1)];
+                let child = self.crossover(p1, p2, format!("gen_{}_child_{}", generation, i));
+                offspring.push(child);
+                if offspring.len() >= self.config.population_size - self.config.elite_count {
+                    break;
+                }
+            }
+
+            // Mutation
+            for child in &mut offspring {
+                self.mutate(child);
+            }
+
+            // New population = elite + offspring
+            population = elite;
+            population.extend(offspring);
+
+            // Progress
+            if generation % 10 == 0 || generation == self.config.generations - 1 {
+                eprintln!(
+                    "Odysseus Gen {}: best_score={:.4}, pop={}, eval_rate={:.0}/sec",
+                    generation,
+                    indexed[0].1.score,
+                    population.len(),
+                    self.config.population_size as f64
+                        / (self.avg_eval_time_us() / 1_000_000.0).max(1e-6)
+                );
+            }
+        }
+
+        // Final evaluation
+        let final_fitnesses = self.evaluate_batch(&population, l2_snapshots);
+        let mut final_indexed: Vec<_> = population.into_iter().zip(final_fitnesses).collect();
+        final_indexed.sort_by(|a, b| {
+            b.1.score
+                .partial_cmp(&a.1.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let best_genomes: Vec<Genome> = final_indexed.iter().map(|(g, _)| g.clone()).collect();
+        let best_fitnesses: Vec<GenomeFitness> =
+            final_indexed.iter().map(|(_, f)| f.clone()).collect();
+
+        (best_genomes, best_fitnesses)
+    }
+
+    /// Tournament selection for parent selection.
+    fn tournament_selection(
+        &self,
+        indexed_population: &[(Genome, GenomeFitness)],
+        rng: &mut impl Rng,
+    ) -> Vec<Genome> {
+        let mut parents = Vec::with_capacity(self.config.population_size);
+        let tournament_size = 3usize.min(indexed_population.len());
+
+        for _ in 0..self.config.population_size {
+            let mut candidates: Vec<usize> = (0..indexed_population.len()).collect();
+            candidates.shuffle(rng);
+            candidates.truncate(tournament_size);
+
+            let best = candidates
+                .into_iter()
+                .max_by(|&a, &b| {
+                    indexed_population[a]
+                        .1
+                        .score
+                        .partial_cmp(&indexed_population[b].1.score)
+                        .unwrap()
+                })
+                .unwrap_or(0);
+
+            parents.push(indexed_population[best].0.clone());
+        }
+
+        parents
+    }
+}
+
+impl Default for OdysseusEvaluator {
+    fn default() -> Self {
+        Self::new()
     }
 }

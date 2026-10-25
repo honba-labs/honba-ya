@@ -92,6 +92,7 @@ async fn test_observability_tracing_and_prometheus_export() {
         timestamp: Utc::now(),
         correlation_id: Some(correlation_id),
         client_id: Some(client_id.to_string()),
+        trace_context: None,
     };
 
     let s_ack = span_broker_acked(&req, &ack, 1500);
@@ -113,6 +114,7 @@ async fn test_observability_tracing_and_prometheus_export() {
         client_id: Some(client_id.to_string()),
         fee: Money::zero_inr(),
         fee_breakdown: None,
+        trace_context: None,
     };
 
     let s_fill = span_filled(&fill);
@@ -282,6 +284,7 @@ async fn test_actor_runtime_with_observability_and_audit() {
         client_id: Some("default".to_string()),
         fee: Money::zero_inr(),
         fee_breakdown: None,
+        trace_context: None,
     };
     supervisor
         .risk_sender()

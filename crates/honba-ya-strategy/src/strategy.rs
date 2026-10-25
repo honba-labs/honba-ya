@@ -1,6 +1,6 @@
 //! The `Strategy` trait and its adapter for context-driven execution.
 
-use honba_core::chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc};
 use honba_core::{Bar, FillReport, MarketEvent, Tick};
 
 use crate::context::{LedgerContext, StrategyContext};

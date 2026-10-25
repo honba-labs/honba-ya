@@ -1,14 +1,14 @@
 //! Integration test for E4-S2: sweep space extraction and Cartesian parameter grid generation.
 
-use honba_messages::{BarAggregation, Exchange, InstrumentId};
+use honba_core::{Exchange, InstrumentId};
 use honba_strategy::{
-    ParameterSpec, StrategyManifest, Subscriptions, TimeframeSpec, Universe,
+    BarAggregation, ParameterSpec, StrategyManifest, Subscriptions, TimeframeSpec, Universe,
     parameter_grid_from_manifest, sweep_space_from_manifest,
 };
 use serde_json::json;
 
 fn tcs() -> InstrumentId {
-    InstrumentId::new("TCS", Exchange::new("NSE"))
+    InstrumentId::new(Exchange::Nse, "TCS")
 }
 
 #[test]

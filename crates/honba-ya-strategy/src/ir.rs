@@ -136,10 +136,11 @@ impl StrategyIr {
     /// Verifies `manifest` and resolves it into a runnable IR.
     ///
     /// ```
-    /// use honba_messages::{BarAggregation, Exchange, InstrumentId};
+    /// use honba_core::{Exchange, InstrumentId};
+    /// use honba_strategy::BarAggregation;
     /// use honba_strategy::{StrategyIr, StrategyManifest, Subscriptions, TimeframeSpec, Universe};
     ///
-    /// let tcs = InstrumentId::new("TCS", Exchange::new("NSE"));
+    /// let tcs = InstrumentId::new(Exchange::Nse, "TCS");
     /// let manifest = StrategyManifest::new(
     ///     "sma",
     ///     "sha256:abc",

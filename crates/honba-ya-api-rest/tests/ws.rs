@@ -64,15 +64,15 @@ async fn ws_market_endpoint_responds_with_101_switching_protocols() {
 async fn ws_streams_ticks_to_client() {
     use futures::StreamExt;
     use honba_api_rest::ws::WsTick;
-    use honba_entities::{Currency, Instrument, InstrumentKind};
+    use honba_core::{Currency, Exchange, InstrumentId, InstrumentKind};
+    use honba_feed::wire::{BarAggregation, BarSpecification, Instrument, PriceType, UnixNanos};
     use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
-    use honba_messages::{Exchange, InstrumentId, UnixNanos};
 
-    let id = InstrumentId::new("RELIANCE", Exchange::new("NSE"));
-    let spec = honba_api::parse_timeframe("1m").unwrap();
+    let id = InstrumentId::new(Exchange::Nse, "RELIANCE");
+    let spec = BarSpecification::new(1, BarAggregation::Minute, PriceType::Last);
     let mut builder = ColumnarSliceBuilder::new(id.clone(), spec);
     builder
-        .push(UnixNanos::new(1), 2500.0, 2500.0, 2500.0, 2500.0, 100.0)
+        .push(UnixNanos::from_u64(1), 2500.0, 2500.0, 2500.0, 2500.0, 100.0)
         .unwrap();
     let dataset = Dataset::from_slices(vec![builder.finish().unwrap()]).unwrap();
     let instrument = Instrument::new(id, InstrumentKind::Equity, Currency::Inr, 1.0, 0.05);

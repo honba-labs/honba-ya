@@ -143,6 +143,12 @@ impl AppState {
         self.live.as_ref()
     }
 
+    /// Replaces the strategy catalog.
+    pub fn with_strategies(mut self, strategies: StrategyCatalog) -> Self {
+        self.strategies = Arc::new(Mutex::new(strategies));
+        self
+    }
+
     /// Enables the approval queue for order placements (E5-S4).
     ///
     /// When enabled, `POST /orders` is held in the queue until approved by an operator.

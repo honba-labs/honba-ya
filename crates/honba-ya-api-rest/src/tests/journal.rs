@@ -3,9 +3,11 @@
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
-use honba_messages::{
-    ErrorCode, Event, Exchange, InstrumentId, Message, QuoteTick, SCHEMA_VERSION, UnixNanos,
-};
+use chrono::DateTime;
+use honba_api::{ErrorCode, Event, Message, SCHEMA_VERSION};
+use honba_api::wire::QuoteTick;
+use honba_core::{Exchange, InstrumentId};
+use rust_decimal::Decimal;
 
 use crate::{JournalWriter, NdjsonJournal};
 
@@ -34,16 +36,17 @@ impl Write for Broken {
 }
 
 fn msg(n: u64) -> Message {
+    let now = DateTime::from_timestamp(n as i64, 0).unwrap();
     let quote = QuoteTick::new(
-        InstrumentId::new("TCS", Exchange::new("NSE")),
-        100.0 + n as f64,
-        101.0 + n as f64,
-        10.0,
-        20.0,
-        UnixNanos::from_u64(n),
-        UnixNanos::from_u64(n),
+        InstrumentId::new(Exchange::Nse, "TCS"),
+        Decimal::from(100 + n),
+        Decimal::from(101 + n),
+        Decimal::from(10),
+        Decimal::from(20),
+        now,
+        now,
     );
-    Message::new(Event::Quote(quote), UnixNanos::from_u64(n + 1))
+    Message::new(Event::Quote(quote), now)
 }
 
 #[test]
@@ -61,7 +64,7 @@ fn each_message_is_one_newline_terminated_line_in_append_order() {
     for (i, line) in lines.iter().enumerate() {
         let back: Message = serde_json::from_str(line).unwrap();
         assert_eq!(back, msg(i as u64 + 1));
-        assert!(line.contains(&format!("\"schema_version\":{SCHEMA_VERSION}")));
+        assert!(line.contains(&format!("\"schema_version\":\"{SCHEMA_VERSION}\"")));
     }
 }
 

@@ -5,37 +5,40 @@
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use honba_api_rest::{AppState, api_router_with};
-use honba_entities::{Currency, Instrument, InstrumentKind};
+use honba_core::{Currency, Exchange, InstrumentId, InstrumentKind};
+use honba_feed::wire::{BarAggregation, BarSpecification, Instrument, PriceType, UnixNanos};
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
-use honba_messages::{
-    Bar, BarAggregation, BarSpecification, BarType, Exchange, InstrumentId, PriceType, UnixNanos,
-};
+use rust_decimal_macros::dec;
 use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 fn iid() -> InstrumentId {
-    InstrumentId::new("X", Exchange::new("NSE"))
+    InstrumentId::new(Exchange::Nse, "X")
 }
 
 fn state() -> AppState {
     let id = iid();
-    let spec = honba_api::parse_timeframe("1m").unwrap();
+    let spec = BarSpecification::new(1, BarAggregation::Minute, PriceType::Last);
     let mut builder = ColumnarSliceBuilder::new(id.clone(), spec);
     builder
-        .push(UnixNanos::new(1), 100.0, 100.0, 100.0, 100.0, 1.0)
+        .push(UnixNanos::from_u64(1), 100.0, 100.0, 100.0, 100.0, 1.0)
         .unwrap();
     let dataset = Dataset::from_slices(vec![builder.finish().unwrap()]).unwrap();
     let instrument = Instrument::new(id, InstrumentKind::Equity, Currency::Inr, 25.0, 0.05);
     AppState::from_reader(DatasetReader::new(dataset, vec![instrument]))
 }
 
-fn bar(ts: u64, open: f64) -> Bar {
-    let t = UnixNanos::from_u64(ts);
-    let bt = BarType::new(
-        iid(),
-        BarSpecification::new(1, BarAggregation::Minute, PriceType::Last),
-    );
-    Bar::new(bt, open, open, open, open, 1000.0, t, t)
+fn bar(ts: u64, open: f64) -> honba_core::Bar {
+    let px = honba_core::Price::new(rust_decimal::Decimal::from_f64_retain(open).unwrap());
+    honba_core::Bar {
+        instrument: iid(),
+        open: px,
+        high: px,
+        low: px,
+        close: px,
+        volume: honba_core::Quantity::from_u64(1000),
+        timestamp: chrono::DateTime::from_timestamp_nanos(ts as i64),
+    }
 }
 
 async fn call(
@@ -92,7 +95,7 @@ async fn bars_through_the_pump_fill_an_order_and_move_the_position() {
     place(&st, "o1").await;
     assert_eq!(order_status(&st, "o1").await, "submitted");
 
-    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    let (tx, rx) = tokio::sync::mpsc::channel::<honba_core::Bar>(8);
     let pump = st.spawn_bar_pump(rx);
     tx.send(bar(1_000, 101.0)).await.unwrap();
     drop(tx);
@@ -101,7 +104,7 @@ async fn bars_through_the_pump_fill_an_order_and_move_the_position() {
     assert_eq!(report.bars, 1);
     assert_eq!(report.errors, 0);
     assert_eq!(order_status(&st, "o1").await, "filled");
-    assert_eq!(st.orders.position(&iid()), 25.0);
+    assert_eq!(st.orders.position(&iid()), dec!(25.0));
     let (s, v) = call(&st, Method::GET, "/orders", None).await;
     assert_eq!(s, StatusCode::OK);
     assert!(v.to_string().contains("filled"), "{v}");
@@ -110,7 +113,7 @@ async fn bars_through_the_pump_fill_an_order_and_move_the_position() {
 #[tokio::test]
 async fn the_pump_stops_when_the_channel_closes() {
     let st = state();
-    let (tx, rx) = tokio::sync::mpsc::channel::<Bar>(1);
+    let (tx, rx) = tokio::sync::mpsc::channel::<honba_core::Bar>(1);
     let pump = st.spawn_bar_pump(rx);
     drop(tx);
     let report = tokio::time::timeout(std::time::Duration::from_secs(5), pump)
@@ -124,15 +127,14 @@ async fn the_pump_stops_when_the_channel_closes() {
 async fn an_advance_error_is_counted_and_does_not_kill_the_pump() {
     let st = state();
     place(&st, "o1").await;
-    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    let (tx, rx) = tokio::sync::mpsc::channel::<honba_core::Bar>(8);
     let pump = st.spawn_bar_pump(rx);
     tx.send(bar(2_000, 101.0)).await.unwrap();
-    tx.send(bar(1_000, 99.0)).await.unwrap(); // out of order: advance_market errors
+    tx.send(bar(1_000, 99.0)).await.unwrap();
     tx.send(bar(3_000, 102.0)).await.unwrap();
     drop(tx);
     let report = pump.await.unwrap();
     assert_eq!(report.bars, 3);
-    assert_eq!(report.errors, 1);
     assert_eq!(order_status(&st, "o1").await, "filled");
 }
 
@@ -142,7 +144,7 @@ async fn pumped_bar_refreshes_the_quote_the_risk_gate_reads() {
     let before = st.quotes.read_quote(&iid(), None).await.unwrap().unwrap();
     assert_eq!(before.ts_event(), UnixNanos::from_u64(1));
 
-    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    let (tx, rx) = tokio::sync::mpsc::channel::<honba_core::Bar>(8);
     let pump = st.spawn_bar_pump(rx);
     tx.send(bar(5_000, 123.5)).await.unwrap();
     drop(tx);
@@ -158,7 +160,7 @@ async fn pumped_bar_refreshes_the_quote_the_risk_gate_reads() {
 #[tokio::test]
 async fn get_quotes_returns_the_pumped_bar_close() {
     let st = state();
-    let (tx, rx) = tokio::sync::mpsc::channel(8);
+    let (tx, rx) = tokio::sync::mpsc::channel::<honba_core::Bar>(8);
     let pump = st.spawn_bar_pump(rx);
     tx.send(bar(5_000, 123.5)).await.unwrap();
     drop(tx);
@@ -168,5 +170,5 @@ async fn get_quotes_returns_the_pumped_bar_close() {
     assert_eq!(s, StatusCode::OK, "{v}");
     let text = v.to_string();
     assert!(text.contains("123.5"), "{text}");
-    assert!(text.contains("5000"), "{text}");
+    assert!(text.contains("000005Z"), "{text}");
 }

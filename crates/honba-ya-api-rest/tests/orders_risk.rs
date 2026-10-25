@@ -8,24 +8,28 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use honba_api_rest::{AppState, api_router_with};
-use honba_entities::{Currency, Instrument, InstrumentKind};
+use honba_core::{Currency, Exchange, InstrumentId, InstrumentKind, OrderSide, TimeInForce, };
+use honba_api::TradingState;
+use honba_feed::wire::{Bar, BarAggregation, BarSpecification, BarType, Instrument, PriceType, QuoteTick, UnixNanos};
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
-use honba_messages::{Exchange, InstrumentId, TradingState, UnixNanos};
+use honba_api_rest::orders::{Order, OrderStatus, OrderType};
+use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
 use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 fn instrument_id() -> InstrumentId {
-    InstrumentId::new("X", Exchange::new("NSE"))
+    InstrumentId::new(Exchange::Nse, "X")
 }
 
 /// One instrument `X.NSE` (INR equity, lot 25, tick 0.05) with one bar closing at
 /// 100; the bar store derives bid = ask = 100, so `reference_price` is 100.
 fn state() -> AppState {
     let id = instrument_id();
-    let spec = honba_api::parse_timeframe("1m").unwrap();
+    let spec = BarSpecification::new(1, BarAggregation::Minute, PriceType::Last);
     let mut builder = ColumnarSliceBuilder::new(id.clone(), spec);
     builder
-        .push(UnixNanos::new(1), 100.0, 100.0, 100.0, 100.0, 1.0)
+        .push(UnixNanos::from_u64(1), 100.0, 100.0, 100.0, 100.0, 1.0)
         .unwrap();
     let dataset = Dataset::from_slices(vec![builder.finish().unwrap()]).unwrap();
     let instrument = Instrument::new(id, InstrumentKind::Equity, Currency::Inr, 25.0, 0.05);
@@ -367,18 +371,17 @@ async fn approval_queue_full_returns_429() {
 fn reducing_state_with_long_25() -> AppState {
     let state = state();
     state.orders.record(
-        honba_messages::Order::new(
-            honba_messages::OrderId::new("seed-1"),
+        Order::new(
+            "seed-1",
             instrument_id(),
-            honba_messages::OrderSide::Buy,
-            honba_messages::OrderType::Market,
-            25.0,
+            OrderSide::Buy,
+            OrderType::Market,
+            dec!(25.0),
             None,
-            honba_messages::TimeInForce::Day,
-            UnixNanos::new(0),
-            UnixNanos::new(0),
+            TimeInForce::Day,
+            chrono::Utc::now(),
         )
-        .with_status(honba_messages::OrderStatus::Submitted),
+        .with_status(OrderStatus::Submitted),
     );
     state.with_trading_state(TradingState::Reducing)
 }
@@ -432,37 +435,36 @@ async fn flat_ledger_refuses_everything_when_reducing() {
 }
 
 /// Seeds one submitted market order of `qty` on `X.NSE` with the given side.
-fn seed(state: &AppState, id: &str, side: honba_messages::OrderSide, qty: f64) {
+fn seed(state: &AppState, id: &str, side: OrderSide, qty: f64) {
     state.orders.record(
-        honba_messages::Order::new(
-            honba_messages::OrderId::new(id),
+        Order::new(
+            id,
             instrument_id(),
             side,
-            honba_messages::OrderType::Market,
-            qty,
+            OrderType::Market,
+            Decimal::from_f64_retain(qty).unwrap_or(dec!(0)),
             None,
-            honba_messages::TimeInForce::Day,
-            UnixNanos::new(0),
-            UnixNanos::new(0),
+            TimeInForce::Day,
+            chrono::Utc::now(),
         )
-        .with_status(honba_messages::OrderStatus::Submitted),
+        .with_status(OrderStatus::Submitted),
     );
 }
 
 /// The ledger rows other than the seeded ones.
-fn close_orders(state: &AppState) -> Vec<honba_messages::Order> {
+fn close_orders(state: &AppState) -> Vec<Order> {
     state
         .orders
         .list()
         .into_iter()
-        .filter(|o| !o.order_id().as_str().starts_with("seed"))
+        .filter(|o| !o.order_id().starts_with("seed"))
         .collect()
 }
 
 #[tokio::test]
 async fn close_of_a_long_position_sells_the_full_quantity() {
     let st = state();
-    seed(&st, "seed-1", honba_messages::OrderSide::Buy, 50.0);
+    seed(&st, "seed-1", OrderSide::Buy, 50.0);
     let (status, body) = call(
         api_router_with(st.clone()),
         Method::POST,
@@ -474,16 +476,16 @@ async fn close_of_a_long_position_sells_the_full_quantity() {
     assert_eq!(body["data"]["status"], json!("closing"));
     let rows = close_orders(&st);
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].side(), honba_messages::OrderSide::Sell);
-    assert_eq!(rows[0].quantity(), 50.0);
-    assert_eq!(rows[0].order_type(), honba_messages::OrderType::Market);
-    assert_eq!(st.orders.position(&instrument_id()), 0.0);
+    assert_eq!(rows[0].side(), OrderSide::Sell);
+    assert_eq!(rows[0].quantity(), dec!(50.0));
+    assert_eq!(rows[0].order_type(), OrderType::Market);
+    assert_eq!(st.orders.position(&instrument_id()), dec!(0.0));
 }
 
 #[tokio::test]
 async fn close_of_a_short_position_buys_the_full_quantity() {
     let st = state();
-    seed(&st, "seed-1", honba_messages::OrderSide::Sell, 25.0);
+    seed(&st, "seed-1", OrderSide::Sell, 25.0);
     let (status, _) = call(
         api_router_with(st.clone()),
         Method::POST,
@@ -494,16 +496,16 @@ async fn close_of_a_short_position_buys_the_full_quantity() {
     assert_eq!(status, StatusCode::OK);
     let rows = close_orders(&st);
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].side(), honba_messages::OrderSide::Buy);
-    assert_eq!(rows[0].quantity(), 25.0);
-    assert_eq!(st.orders.position(&instrument_id()), 0.0);
+    assert_eq!(rows[0].side(), OrderSide::Buy);
+    assert_eq!(rows[0].quantity(), dec!(25.0));
+    assert_eq!(st.orders.position(&instrument_id()), dec!(0.0));
 }
 
 #[tokio::test]
 async fn close_of_a_flat_ledger_generates_no_orders() {
     let st = state();
-    seed(&st, "seed-1", honba_messages::OrderSide::Buy, 25.0);
-    seed(&st, "seed-2", honba_messages::OrderSide::Sell, 25.0);
+    seed(&st, "seed-1", OrderSide::Buy, 25.0);
+    seed(&st, "seed-2", OrderSide::Sell, 25.0);
     let (status, body) = call(
         api_router_with(st.clone()),
         Method::POST,
@@ -530,14 +532,14 @@ async fn close_passes_the_reduce_only_gate_when_reducing() {
     assert_eq!(status, StatusCode::OK, "{body}");
     let rows = close_orders(&st);
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].side(), honba_messages::OrderSide::Sell);
-    assert_eq!(rows[0].quantity(), 25.0);
+    assert_eq!(rows[0].side(), OrderSide::Sell);
+    assert_eq!(rows[0].quantity(), dec!(25.0));
 }
 
 #[tokio::test]
 async fn close_with_a_position_is_refused_when_halted() {
     let st = state().with_trading_state(TradingState::Halted);
-    seed(&st, "seed-1", honba_messages::OrderSide::Buy, 25.0);
+    seed(&st, "seed-1", OrderSide::Buy, 25.0);
     let (status, body) = call(
         api_router_with(st.clone()),
         Method::POST,
@@ -553,7 +555,7 @@ async fn close_with_a_position_is_refused_when_halted() {
 #[tokio::test]
 async fn close_goes_through_the_approval_queue_when_enabled() {
     let st = state().with_approval_queue(10);
-    seed(&st, "seed-1", honba_messages::OrderSide::Buy, 25.0);
+    seed(&st, "seed-1", OrderSide::Buy, 25.0);
     let app = api_router_with(st.clone());
     let (status, body) = call(app.clone(), Method::POST, "/positions/close", None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -565,16 +567,15 @@ async fn close_goes_through_the_approval_queue_when_enabled() {
     assert_eq!(status, StatusCode::OK);
     let rows = close_orders(&st);
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].side(), honba_messages::OrderSide::Sell);
-    assert_eq!(rows[0].quantity(), 25.0);
+    assert_eq!(rows[0].side(), OrderSide::Sell);
+    assert_eq!(rows[0].quantity(), dec!(25.0));
 }
 
 /// Price collar (ADR 0018 addendum): a pumped bar sets the reference, a wide live quote
 /// sets the touch, and a market order whose touch is outside the collar is refused.
 mod collar {
     use super::*;
-    use honba_messages::{Bar, BarAggregation, BarSpecification, BarType, PriceType, QuoteTick};
-    use honba_risk::RiskLimits;
+    use honba_mon::RiskLimits;
 
     fn limits(bps: u32) -> RiskLimits {
         RiskLimits {
@@ -722,7 +723,7 @@ async fn a_refused_row_adds_no_exposure() {
     let mut refused = order("X", "NSE", "buy", 30.0, Some(100.0));
     refused["client_order_id"] = json!("refused-2");
     call(app, Method::POST, "/orders", Some(refused)).await;
-    assert_eq!(st.orders.position(&instrument_id()), 0.0);
+    assert_eq!(st.orders.position(&instrument_id()), dec!(0.0));
 }
 
 /// `POST /positions/close` closes what a cancelled partial actually filled (it was exposure
@@ -730,17 +731,17 @@ async fn a_refused_row_adds_no_exposure() {
 #[tokio::test]
 async fn close_covers_the_filled_part_of_a_cancelled_partial() {
     let st = state();
-    seed(&st, "seed-1", honba_messages::OrderSide::Buy, 75.0);
+    seed(&st, "seed-1", OrderSide::Buy, 75.0);
     assert!(st.orders.apply_fill(
         "seed-1",
-        25.0,
-        100.0,
-        25.0,
-        UnixNanos::new(1),
-        honba_messages::OrderStatus::PartiallyFilled
+        dec!(25.0),
+        dec!(100.0),
+        dec!(25.0),
+        chrono::Utc::now(),
+        OrderStatus::PartiallyFilled
     ));
     st.orders.cancel("seed-1");
-    assert_eq!(st.orders.position(&instrument_id()), 25.0);
+    assert_eq!(st.orders.position(&instrument_id()), dec!(25.0));
     let (status, body) = call(
         api_router_with(st.clone()),
         Method::POST,
@@ -751,6 +752,6 @@ async fn close_covers_the_filled_part_of_a_cancelled_partial() {
     assert_eq!(status, StatusCode::OK, "{body}");
     let rows = close_orders(&st);
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].side(), honba_messages::OrderSide::Sell);
-    assert_eq!(rows[0].quantity(), 25.0);
+    assert_eq!(rows[0].side(), OrderSide::Sell);
+    assert_eq!(rows[0].quantity(), dec!(25.0));
 }

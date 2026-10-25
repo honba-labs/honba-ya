@@ -58,7 +58,7 @@ async fn a_valid_submit_without_a_journals_root_is_unsupported_not_a_fake_succes
     });
     let (status, body) = call("POST", "/backtests", Some(request)).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
-    assert_eq!(body["error"]["code"], "unsupported");
+    assert_eq!(body["error"]["code"], "not_implemented");
     assert_eq!(body["error"]["context"]["reason"], "no_journals_dir");
     assert!(body["data"].is_null());
 }

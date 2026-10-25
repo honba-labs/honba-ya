@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use honba_api::RunKind;
-use honba_messages::ErrorCode;
+use honba_api::ErrorCode;
 
 use crate::{OsEntropy, RunClock, RunEntropy, RunStore, SystemClock};
 

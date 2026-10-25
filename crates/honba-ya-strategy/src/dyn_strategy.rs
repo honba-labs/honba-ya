@@ -24,11 +24,11 @@ use crate::strategy::Strategy;
 ///
 /// ```
 /// use honba_strategy::{BuyAndHold, DynStrategy, Strategy};
-/// use honba_messages::{Exchange, InstrumentId};
+/// use honba_core::{Exchange, InstrumentId, Quantity};
 ///
 /// let strategy = DynStrategy::new(Box::new(BuyAndHold::new(
-///     InstrumentId::new("NIFTY50", Exchange::new("NSE")),
-///     75.0,
+///     InstrumentId::new(Exchange::Nse, "NIFTY50"),
+///     Quantity::from_u64(75),
 /// )));
 /// assert_eq!(strategy.name(), "buy_and_hold");
 /// ```
@@ -77,5 +77,13 @@ impl Strategy for DynStrategy {
 
     fn on_stop(&mut self, ctx: &mut dyn StrategyContext) -> Result<()> {
         self.0.on_stop(ctx)
+    }
+}
+
+impl std::fmt::Debug for DynStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DynStrategy")
+            .field("name", &self.0.name())
+            .finish()
     }
 }

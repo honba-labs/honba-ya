@@ -39,7 +39,7 @@ mod journal;
 mod market;
 mod openapi;
 mod operator_journal;
-mod orders;
+pub mod orders;
 mod portfolio;
 mod portfolio_store;
 mod profile;

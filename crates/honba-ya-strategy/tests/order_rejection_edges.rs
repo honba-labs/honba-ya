@@ -1,3 +1,4 @@
+#![cfg(feature = "legacy_engine")]
 //! Edge cases of the rejection queue through the real runner flow
 //! (strategy -> runner -> scripted engine -> fills / rejections -> context).
 //!

@@ -3,8 +3,9 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use honba_api::ENDPOINTS;
+use honba_core::{Exchange, InstrumentId};
 use honba_feed::DatasetReader;
-use honba_ports::BarRequest;
+use honba_feed::ports::{BarRequest, PortError};
 use serde_json::Value;
 use tower::util::ServiceExt;
 
@@ -52,8 +53,12 @@ async fn a_state_built_from_a_reader_shares_it_between_both_ports() {
             .unwrap()
             .is_empty()
     );
-    let id = honba_messages::InstrumentId::new("X", honba_messages::Exchange::new("NSE"));
-    let spec = honba_api::parse_timeframe("1m").unwrap();
+    let id = InstrumentId::new(Exchange::Nse, "X");
+    let spec = honba_feed::wire::BarSpecification::new(
+        1,
+        honba_feed::wire::BarAggregation::Minute,
+        honba_feed::wire::PriceType::Last,
+    );
     let request = BarRequest::new(id, spec, None, None).unwrap();
     assert!(state.bars.read_bars(&request).await.unwrap().is_empty());
 }
@@ -99,11 +104,11 @@ async fn an_unknown_query_parameter_is_a_422_envelope() {
 #[tokio::test]
 async fn a_reader_state_serves_quotes_and_reports_no_depth_from_the_same_reader() {
     let state = AppState::from_reader(DatasetReader::from_dataset(Default::default()));
-    let id = honba_messages::InstrumentId::new("X", honba_messages::Exchange::new("NSE"));
+    let id = InstrumentId::new(Exchange::Nse, "X");
     assert_eq!(state.quotes.read_quote(&id, None).await.unwrap(), None);
     assert!(matches!(
         state.depth.read_depth(&id, 5).await,
-        Err(honba_ports::PortError::Unsupported(_))
+        Err(PortError::Unsupported(_))
     ));
 }
 
@@ -117,7 +122,6 @@ fn cloned_states_share_one_strategy_catalog() {
 
 #[test]
 fn the_strategy_catalog_capacity_can_be_replaced() {
-    let state =
-        AppState::default().with_strategy_catalog(honba_api::StrategyCatalog::with_limit(3));
-    assert_eq!(state.strategies.lock().unwrap().limit(), 3);
+    let state = AppState::default().with_strategies(honba_api::StrategyCatalog::with_limit(7));
+    assert_eq!(state.strategies.lock().unwrap().limit(), 7);
 }

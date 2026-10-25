@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use honba_core::chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc};
 use honba_core::{Currency, FillReport, InstrumentId, Money, OrderSide, Price, Quantity};
 use rust_decimal::Decimal;
 

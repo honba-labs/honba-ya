@@ -49,11 +49,11 @@ fn a_rejection_is_recorded_and_releases_the_instrument() {
     bar(&mut r, 1);
     r.on_order_event(&OrderEvent::Rejected {
         order_id: first_order_id(),
-        reason: RejectReason::InsufficientFunds,
+        reason: RejectReason::InsufficientMargin,
     })
     .unwrap();
     assert_eq!(r.order_rejections().len(), 1);
-    assert!(r.order_rejections()[0].reason.contains("InsufficientFunds"));
+    assert!(r.order_rejections()[0].reason.contains("InsufficientMargin"));
     assert!(!r.context().busy(&any_instrument()));
 }
 

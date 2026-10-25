@@ -4,7 +4,7 @@ mod support;
 
 use honba_api::{BacktestMetrics, RunKind, RunStatus};
 use honba_api_rest::RetentionPolicy;
-use honba_messages::ErrorCode;
+use honba_api::ErrorCode;
 use serde_json::json;
 use support::*;
 

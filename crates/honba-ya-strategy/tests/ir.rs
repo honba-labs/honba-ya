@@ -3,26 +3,9 @@
 
 use std::path::PathBuf;
 
-use honba_engine::{ExecutionEngine, Result};
-use honba_entities::Trade;
-use honba_messages::{Order, SCHEMA_VERSION};
+use honba_core::{Quantity, SCHEMA_VERSION};
 use honba_strategy::{BuyAndHold, StrategyIr, StrategyManifest, StrategyRunner};
 use serde_json::Value;
-
-/// Accepts every order, never fills.
-struct NeverFills;
-
-impl ExecutionEngine for NeverFills {
-    fn submit(&mut self, _order: Order) -> Result<()> {
-        Ok(())
-    }
-    fn cancel(&mut self, _order_id: &str, _now: honba_messages::UnixNanos) -> Result<()> {
-        Ok(())
-    }
-    fn drain_fills(&mut self) -> Result<Vec<Trade>> {
-        Ok(Vec::new())
-    }
-}
 
 fn manifest_vectors() -> Value {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -81,7 +64,7 @@ fn the_compiled_ir_crosses_json_and_configures_the_runner() {
     assert_eq!(back, ir);
 
     let first = back.subscriptions.bars[0].clone();
-    let runner = StrategyRunner::new(BuyAndHold::new(first, 1.0), NeverFills)
+    let runner = StrategyRunner::new(BuyAndHold::new(first, Quantity::from_u64(1)))
         .with_warmup_bars(back.warmup_bars);
     assert!(runner.warming_up());
 }

@@ -38,7 +38,7 @@ use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use honba_api_rest::{AppState, api_router_with};
 use honba_core::{Currency, InstrumentKind};
-use honba_feed::wire::{Instrument, UnixNanos};
+use honba_feed::wire::{BarAggregation, BarSpecification, Instrument, PriceType, UnixNanos};
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
 use honba_testing::fixtures::{any_instrument, flat_bar};
 use serde_json::{Value, json};
@@ -46,7 +46,7 @@ use tower::util::ServiceExt;
 
 fn state() -> AppState {
     let id = any_instrument();
-    let spec = honba_api::parse_timeframe("1m").unwrap();
+    let spec = BarSpecification::new(1, BarAggregation::Minute, PriceType::Last);
     let mut builder = ColumnarSliceBuilder::new(id.clone(), spec);
     builder
         .push(UnixNanos::from_u64(1), 100.0, 100.0, 100.0, 100.0, 1.0)

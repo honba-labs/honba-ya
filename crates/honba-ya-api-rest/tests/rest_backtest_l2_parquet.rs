@@ -14,7 +14,8 @@ use axum::http::{Request, StatusCode};
 use honba_api_rest::{AppState, RunServiceConfig, api_router_with};
 use honba_config::{ExecutionConfig, FillModel};
 use honba_feed::{ParquetTickStore, TICK_DIR, write_tick_file};
-use honba_messages::{Exchange, InstrumentId, QuoteTick, UnixNanos};
+use honba_core::{Exchange, InstrumentId};
+use honba_feed::wire::{QuoteTick, UnixNanos};
 use serde_json::Value;
 use support::*;
 use tower::util::ServiceExt;
@@ -31,7 +32,7 @@ fn l2() -> ExecutionConfig {
 
 /// Writes a store directory holding one quote per fixture bar, then reopens it.
 fn parquet_store(root: &Path) -> ParquetTickStore {
-    let tcs = InstrumentId::new("TCS", Exchange::new("NSE"));
+    let tcs = InstrumentId::new(Exchange::Nse, "TCS");
     let quotes: Vec<QuoteTick> = (0..80u64)
         .map(|i| {
             let t = UnixNanos::from_u64(BARS_FROM_NS + i * DAY_NS);

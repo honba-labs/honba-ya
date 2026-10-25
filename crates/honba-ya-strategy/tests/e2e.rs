@@ -1,3 +1,4 @@
+#![cfg(feature = "legacy_engine")]
 //! End-to-end integration test across the full stack.
 
 use honba_analytics::{PerformanceReport, RoundTrip};

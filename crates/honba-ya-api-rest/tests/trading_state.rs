@@ -6,22 +6,24 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use honba_api_rest::{ApiConfig, AppState, api_router_with, api_router_with_config};
-use honba_entities::{Currency, Instrument, InstrumentKind};
+use honba_api::TradingState;
+use honba_core::{Currency, Exchange, InstrumentId, InstrumentKind};
+use honba_feed::wire::{BarAggregation, BarSpecification, Instrument, PriceType, UnixNanos};
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
-use honba_messages::{Exchange, InstrumentId, TradingState, UnixNanos};
+use rust_decimal_macros::dec;
 use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 fn iid() -> InstrumentId {
-    InstrumentId::new("X", Exchange::new("NSE"))
+    InstrumentId::new(Exchange::Nse, "X")
 }
 
 fn state() -> AppState {
     let id = iid();
-    let spec = honba_api::parse_timeframe("1m").unwrap();
+    let spec = BarSpecification::new(1, BarAggregation::Minute, PriceType::Last);
     let mut builder = ColumnarSliceBuilder::new(id.clone(), spec);
     builder
-        .push(UnixNanos::new(1), 100.0, 100.0, 100.0, 100.0, 1.0)
+        .push(UnixNanos::from_u64(1), 100.0, 100.0, 100.0, 100.0, 1.0)
         .unwrap();
     let dataset = Dataset::from_slices(vec![builder.finish().unwrap()]).unwrap();
     let instrument = Instrument::new(id, InstrumentKind::Equity, Currency::Inr, 25.0, 0.05);
@@ -175,12 +177,12 @@ async fn close_is_allowed_when_reducing() {
     let app = api_router_with(st.clone());
     let (status, _) = call(&app, Method::POST, "/orders", Some(order("buy", "o5"))).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(st.orders.position(&iid()), 25.0);
+    assert_eq!(st.orders.position(&iid()), dec!(25.0));
 
     put_state(&app, json!({"state": "reducing"})).await;
     let (status, body) = call(&app, Method::POST, "/positions/close", None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(st.orders.position(&iid()), 0.0);
+    assert_eq!(st.orders.position(&iid()), dec!(0.0));
 }
 
 #[tokio::test]

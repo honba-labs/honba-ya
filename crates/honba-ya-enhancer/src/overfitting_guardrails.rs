@@ -1,5 +1,7 @@
 //! Overfitting Guardrails: DSR and PBO computation.
 
+use statrs::distribution::{ContinuousCDF, Normal as StatrsNormal};
+
 /// Deflated Sharpe Ratio (DSR) per López de Prado.
 ///
 /// Adjusts the Sharpe ratio for the number of training trials, return
@@ -25,19 +27,18 @@ impl DSRCalculator {
     /// Compute DSR given Sharpe ratio, number of trials, and return moments.
     pub fn compute(&self, sharpe: f64, returns: &[f64]) -> f64 {
         if returns.len() < 30 {
-            // Need minimum sample size
+            // Need minimum sample size for reliable moment estimation
             return sharpe;
         }
 
         // Compute return moments
-        let mean = returns.iter().sum::<f64>() / returns.len() as f64;
-        let variance =
-            returns.iter().map(|&r| (r - mean).powi(2)).sum::<f64>() / (returns.len() - 1) as f64;
-        let std_dev = variance.sqrt();
-
-        // Skewness and kurtosis
         let n = returns.len() as f64;
-        let skewness: f64 = returns
+        let mean = returns.iter().sum::<f64>() / n;
+        let variance = returns.iter().map(|&r| (r - mean).powi(2)).sum::<f64>() / (n - 1.0);
+        let std_dev = variance.sqrt().max(1e-10);
+
+        // Skewness (adjusted Fisher-Pearson coefficient)
+        let skewness = returns
             .iter()
             .map(|&r| ((r - mean) / std_dev).powi(3))
             .sum::<f64>()
@@ -46,7 +47,8 @@ impl DSRCalculator {
             / (n - 1.0)
             / (n - 2.0);
 
-        let kurtosis: f64 = returns
+        // Kurtosis (excess kurtosis)
+        let kurtosis = returns
             .iter()
             .map(|&r| {
                 let z = (r - mean) / std_dev;
@@ -56,32 +58,46 @@ impl DSRCalculator {
             / n
             * n
             * (n + 1.0)
-            / ((n - 1.0) * (n - 2.0) * (n - 3.0));
+            / ((n - 1.0) * (n - 2.0) * (n - 3.0))
+            - 3.0;
 
-        // DSR formula from López de Prado
-        // DSR = Sharpe / (1 + 2.5 * sqrt(2 / n) * (1 + gamma_1^2)^(1/4) * (1 + kappa^2)^(1/4))
-        // where gamma_1 = skewness, kappa = excess kurtosis
+        // DSR formula from López de Prado (2014):
+        // DSR = Sharpe * sqrt(1 - 2*γ*(1 - φ(z)) - 2*γ*z*φ(z)) / (1 + 2*γ*(1 - φ(z)))
+        // where γ = 0.5772... (Euler-Mascheroni), z = Sharpe * sqrt(n), φ = standard normal CDF
+        //
+        // Simplified practical formula:
+        // DSR = Sharpe / (1 + sqrt(2/log(n_trials)) * (1 + skew^2/4) * (1 + kurtosis/4))
 
-        let gamma1 = skewness;
-        let kappa = kurtosis - 3.0; // excess kurtosis
+        let gamma = 0.5772156649; // Euler-Mascheroni constant
+        let z = sharpe * n.sqrt();
 
-        let numerator = sharpe;
-        let denominator = 1.0
-            + 2.5f64
-                * (2.0 / n).sqrt()
-                * (1.0 + gamma1.powi(2)).powf(0.25)
-                * (1.0 + kappa.powi(2)).powf(0.25);
+        // Standard normal CDF at z
+        let normal = StatrsNormal::new(0.0, 1.0).unwrap();
+        let phi_z = normal.cdf(z);
 
-        let dsr = numerator / denominator.max(1e-10);
-        dsr
+        // Adjusted formula with skewness and kurtosis correction
+        let skew_adj = 1.0 + skewness.powi(2) / 4.0;
+        let kurt_adj = 1.0 + kurtosis / 4.0;
+
+        let denominator = 1.0 + (2.0 * gamma * (1.0 - phi_z)).sqrt() * skew_adj * kurt_adj;
+
+        sharpe / denominator.max(1e-10)
+    }
+
+    /// Compute DSR with explicit trial count (for multiple backtest runs).
+    pub fn compute_with_trials(&self, sharpe: f64, returns: &[f64], n_trials: usize) -> f64 {
+        let mut calc = self.clone();
+        calc.n_trials = n_trials;
+        calc.compute(sharpe, returns)
     }
 }
 
 /// Probability of Backtest Overfitting (PBO) via Combinatorially Symmetric Cross-Validation (CSCV).
-
+///
 /// Partitions a backtest period into k symmetric folds, alternating
 /// in-sample/out-of-sample segments, and computes the distribution of
 /// fitness differences to estimate overfitting probability.
+#[derive(Debug, Clone)]
 pub struct PBOCalculator {
     /// Number of CSCV folds.
     pub n_folds: usize,
@@ -128,6 +144,23 @@ impl PBOCalculator {
         // but return the raw proportion for the caller to decide
         pbo
     }
+
+    /// Compute PBO with log-rank test for more statistical rigor.
+    pub fn compute_log_rank(&self, is_fitness: &[f64], oos_fitness: &[f64]) -> f64 {
+        let pbo = self.compute(is_fitness, oos_fitness);
+
+        // Log-rank style adjustment: weight by magnitude of overfitting
+        let diffs: Vec<f64> = is_fitness
+            .iter()
+            .zip(oos_fitness.iter())
+            .map(|(is, oos)| (oos - is).abs())
+            .collect();
+
+        let avg_diff = diffs.iter().sum::<f64>() / diffs.len() as f64;
+        let weighted_pbo = pbo * (1.0 + avg_diff.min(1.0));
+
+        weighted_pbo.min(1.0)
+    }
 }
 
 /// Comprehensive overfitting assessment combining DSR and PBO.
@@ -141,24 +174,76 @@ pub struct OverfittingAssessment {
     pub passes_guards: bool,
     /// Recommendation message.
     pub recommendation: String,
+    /// Additional diagnostic details.
+    pub diagnostics: OverfittingDiagnostics,
+}
+
+/// Detailed diagnostics for overfitting assessment.
+#[derive(Debug, Clone)]
+pub struct OverfittingDiagnostics {
+    /// Original Sharpe ratio.
+    pub sharpe: f64,
+    /// Return skewness.
+    pub skewness: f64,
+    /// Return excess kurtosis.
+    pub kurtosis: f64,
+    /// Number of trials used.
+    pub n_trials: usize,
+    /// Number of CSCV folds.
+    pub n_folds: usize,
+    /// In-sample fitness values.
+    pub is_fitness: Vec<f64>,
+    /// Out-of-sample fitness values.
+    pub oos_fitness: Vec<f64>,
 }
 
 impl OverfittingAssessment {
     /// Assess overfitting given strategy performance data.
-    pub fn assess(sharpe: f64, returns: &[f64], is_fitness: &[f64], oos_fitness: &[f64]) -> Self {
-        let dsr_calc = DSRCalculator::new(100);
+    pub fn assess(
+        sharpe: f64,
+        returns: &[f64],
+        is_fitness: &[f64],
+        oos_fitness: &[f64],
+        n_trials: usize,
+        n_folds: usize,
+    ) -> Self {
+        let dsr_calc = DSRCalculator::new(n_trials);
         let dsr = dsr_calc.compute(sharpe, returns);
 
-        let pbo_calc = PBOCalculator::new(5);
+        let pbo_calc = PBOCalculator::new(n_folds);
         let pbo = pbo_calc.compute(is_fitness, oos_fitness);
 
+        // Compute return moments for diagnostics
+        let n = returns.len() as f64;
+        let mean = returns.iter().sum::<f64>() / n;
+        let variance =
+            returns.iter().map(|&r| (r - mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0);
+        let std_dev = variance.sqrt().max(1e-10);
+
+        let skewness = returns
+            .iter()
+            .map(|&r| ((r - mean) / std_dev).powi(3))
+            .sum::<f64>()
+            / n;
+
+        let kurtosis = returns
+            .iter()
+            .map(|&r| ((r - mean) / std_dev).powi(4))
+            .sum::<f64>()
+            / n
+            - 3.0;
+
         let passes_guards = dsr >= 3.0 && pbo < 0.5;
+
         let recommendation = if passes_guards {
-            "Strategy passes overfitting guards. Consider live deployment.".to_string()
+            "Strategy passes overfitting guards. Consider live deployment with position limits."
+                .to_string()
         } else if dsr < 1.5 {
-            "Low DSR suggests overfitting. Consider parameter reduction or more data.".to_string()
+            "Low DSR (<1.5) suggests significant overfitting. Reduce parameter space, increase data, or simplify strategy.".to_string()
+        } else if pbo >= 0.5 {
+            "High PBO (>=0.5) suggests overfitting. Increase out-of-sample period, use more folds, or regularize.".to_string()
         } else {
-            "High PBO suggests overfitting. Re-train with more data or different regime."
+            "Marginal overfitting metrics. Consider additional validation before deployment."
                 .to_string()
         };
 
@@ -167,6 +252,55 @@ impl OverfittingAssessment {
             pbo,
             passes_guards,
             recommendation,
+            diagnostics: OverfittingDiagnostics {
+                sharpe,
+                skewness,
+                kurtosis,
+                n_trials,
+                n_folds,
+                is_fitness: is_fitness.to_vec(),
+                oos_fitness: oos_fitness.to_vec(),
+            },
         }
+    }
+
+    /// Generate a human-readable report.
+    pub fn report(&self) -> String {
+        format!(
+            "=== Overfitting Assessment Report ===\n\
+            DSR: {:.3} {}\n\
+            PBO: {:.3} {}\n\
+            Passes Guards: {}\n\
+            \n\
+            Diagnostics:\n\
+            - Sharpe: {:.3}\n\
+            - Skewness: {:.3}\n\
+            - Excess Kurtosis: {:.3}\n\
+            - Trials: {}\n\
+            - CSCV Folds: {}\n\
+            - IS Fitness: {:?}\n\
+            - OOS Fitness: {:?}\n\
+            \n\
+            Recommendation: {}\n",
+            self.dsr,
+            if self.dsr >= 3.0 {
+                "✓"
+            } else if self.dsr >= 1.5 {
+                "~"
+            } else {
+                "✗"
+            },
+            self.pbo,
+            if self.pbo < 0.5 { "✓" } else { "✗" },
+            if self.passes_guards { "YES" } else { "NO" },
+            self.diagnostics.sharpe,
+            self.diagnostics.skewness,
+            self.diagnostics.kurtosis,
+            self.diagnostics.n_trials,
+            self.diagnostics.n_folds,
+            self.diagnostics.is_fitness,
+            self.diagnostics.oos_fitness,
+            self.recommendation
+        )
     }
 }

@@ -6,14 +6,11 @@
 
 use std::path::PathBuf;
 
-use honba_engine::{ExecutionEngine, Handler, Result};
-use honba_entities::Trade;
-use honba_messages::{Bar, Event, InstrumentId, Order, UnixNanos};
+use honba_core::{Bar, InstrumentId, MarketEvent, Price, Quantity, Tick};
 use honba_strategy::{
-    ManifestError, OrderIntent, Strategy, StrategyContext, StrategyManifest, StrategyRunner,
+    ManifestError, OrderIntent, Result, Strategy, StrategyContext, StrategyManifest, StrategyRunner,
 };
-use honba_testing::VecFeed;
-use honba_testing::fixtures::instrument;
+use honba_testing::fixtures::{instrument, utc_nanos};
 use serde_json::Value;
 
 fn fixture(name: &str) -> Value {
@@ -34,37 +31,42 @@ impl Strategy for WarmupProbe {
         &self.name
     }
     fn on_start(&mut self, ctx: &mut dyn StrategyContext) -> Result<()> {
-        ctx.submit(OrderIntent::market_buy(self.first.clone(), 1.0));
+        ctx.submit(OrderIntent::market_buy(self.first.clone(), Quantity::from_u64(1)));
         Ok(())
     }
     fn on_bar(&mut self, ctx: &mut dyn StrategyContext, bar: &Bar) -> Result<()> {
         ctx.submit(OrderIntent::market_buy(
-            bar.bar_type().instrument_id().clone(),
-            1.0,
+            bar.instrument.clone(),
+            Quantity::from_u64(1),
         ));
         Ok(())
     }
 }
 
-/// Accepts every order, never fills.
-struct NeverFills;
-
-impl ExecutionEngine for NeverFills {
-    fn submit(&mut self, _order: Order) -> Result<()> {
-        Ok(())
-    }
-    fn cancel(&mut self, _order_id: &str, _now: honba_messages::UnixNanos) -> Result<()> {
-        Ok(())
-    }
-    fn drain_fills(&mut self) -> Result<Vec<Trade>> {
-        Ok(Vec::new())
-    }
-}
-
-fn event(kind: &str, symbol: &str, ts: u64) -> Event {
+fn event(kind: &str, symbol: &str, ts: u64) -> MarketEvent {
+    let inst = instrument(symbol);
+    let time = utc_nanos(ts);
     match kind {
-        "bar" => VecFeed::bar(symbol, 1.0, ts).event().clone(),
-        "quote" => VecFeed::quote(symbol, 1.0, 1.1, ts).event().clone(),
+        "bar" => MarketEvent::Bar(Bar {
+            instrument: inst,
+            open: Price::from_rupees("1.00").unwrap(),
+            high: Price::from_rupees("1.00").unwrap(),
+            low: Price::from_rupees("1.00").unwrap(),
+            close: Price::from_rupees("1.00").unwrap(),
+            volume: Quantity::from_u64(100),
+            timestamp: time,
+        }),
+        "quote" => MarketEvent::Tick(Tick::Quote {
+            instrument: inst,
+            bid: Price::from_rupees("1.00").unwrap(),
+            ask: Price::from_rupees("1.10").unwrap(),
+            bid_qty: Quantity::from_u64(10),
+            ask_qty: Quantity::from_u64(10),
+            last_price: None,
+            exchange_ts: time,
+            receive_ts: time,
+            band: None,
+        }),
         other => panic!("unknown event kind {other}"),
     }
 }
@@ -82,7 +84,7 @@ fn warmup_gate_vectors() {
             name: name.clone(),
             first,
         };
-        let mut runner = StrategyRunner::new(strategy, NeverFills).with_warmup_bars(warmup);
+        let mut runner = StrategyRunner::new(strategy).with_warmup_bars(warmup);
         runner.on_start().unwrap();
         for e in events {
             let (kind, symbol, ts) = (
@@ -91,7 +93,7 @@ fn warmup_gate_vectors() {
                 e[2].as_u64().unwrap(),
             );
             runner
-                .on_event(&event(kind, symbol, ts), UnixNanos::from_u64(ts))
+                .on_event(&event(kind, symbol, ts), utc_nanos(ts))
                 .unwrap();
         }
         runner.on_stop().unwrap();
@@ -99,7 +101,7 @@ fn warmup_gate_vectors() {
         let suppressed: Vec<Value> = runner
             .suppressed()
             .iter()
-            .map(|s| serde_json::json!([s.ts_init.as_u64(), s.intent.instrument_id.symbol()]))
+            .map(|s| serde_json::json!([s.ts_init.timestamp_nanos_opt().unwrap_or(0), s.intent.instrument_id.symbol]))
             .collect();
         assert_eq!(
             Value::Array(suppressed),
@@ -111,9 +113,9 @@ fn warmup_gate_vectors() {
             .iter()
             .map(|s| {
                 serde_json::json!([
-                    s.ts_init.as_u64(),
-                    s.order_id.as_str(),
-                    s.intent.instrument_id.symbol()
+                    s.ts_init.timestamp_nanos_opt().unwrap_or(0),
+                    s.request.tag.as_deref().unwrap_or(""),
+                    s.intent.instrument_id.symbol
                 ])
             })
             .collect();

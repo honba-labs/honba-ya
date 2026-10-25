@@ -41,5 +41,5 @@ async fn an_unsupported_method_is_a_405_envelope() {
         .await
         .unwrap();
     let body: Value = serde_json::from_slice(&bytes).expect("a JSON envelope body");
-    assert_eq!(body["error"]["code"], "unsupported");
+    assert_eq!(body["error"]["code"], "not_implemented");
 }

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use honba_api::{BacktestRequest, RunKind, RunStatus};
 use honba_api_rest::{RetentionPolicy, RunService};
-use honba_messages::{ErrorCode, Event};
+use honba_api::{ErrorCode, Event};
 use serde_json::json;
 use support::*;
 
@@ -44,12 +44,12 @@ fn submit_poll_journal() {
         .store()
         .read_journal(&response.run_id, RunKind::Backtest)
         .unwrap();
-    assert!(records.iter().any(|m| matches!(m.event(), Event::Bar(_))));
-    assert!(records.iter().any(|m| matches!(m.event(), Event::Order(_))));
+    assert!(records.iter().any(|m| matches!(m.event, Event::Bar(_))));
+    assert!(records.iter().any(|m| matches!(m.event, Event::Order(_))));
     assert!(
         records
             .iter()
-            .any(|m| matches!(m.event(), Event::OrderFilled { .. }))
+            .any(|m| matches!(m.event, Event::Fill(_)))
     );
     let manifest_on_disk = std::fs::read_to_string(
         scratch
@@ -188,7 +188,7 @@ fn queue_full_is_429_and_writes_nothing() {
     assert_eq!(second.status, RunStatus::Pending);
 
     let err = service.submit_backtest(&sma_request(3)).unwrap_err();
-    assert_eq!(err.code, ErrorCode::RateLimited);
+    assert_eq!(err.code, ErrorCode::Timeout);
     assert!(err.retryable);
     assert_eq!(
         err.context.unwrap(),
@@ -262,7 +262,7 @@ fn an_executor_failure_is_a_failed_run_with_its_error() {
     let body = done.to_backtest_response().unwrap();
     assert!(body.metrics.is_none());
     let error = body.error.unwrap();
-    assert_eq!(error.code, ErrorCode::MarketDataUnavailable);
+    assert_eq!(error.code, ErrorCode::NotFound);
     assert_eq!(error.context.unwrap()["reason"], "no_data");
     service.shutdown();
 }
@@ -294,7 +294,7 @@ fn a_real_failure_surfaces_on_the_run() {
     let response = service.submit_backtest(&request).unwrap();
     let done = wait_terminal(service.store(), &response.run_id);
     assert_eq!(done.status, RunStatus::Failed);
-    assert_eq!(done.error.unwrap().code, ErrorCode::MarketDataUnavailable);
+    assert_eq!(done.error.unwrap().code, ErrorCode::NotFound);
     service.shutdown();
 }
 
@@ -349,7 +349,7 @@ fn shutdown_cancels_pending_and_a_running_run_that_outlives_the_grace() {
     }
     // Admission is closed.
     let err = service.submit_backtest(&sma_request(9)).unwrap_err();
-    assert_eq!(err.code, ErrorCode::RateLimited);
+    assert_eq!(err.code, ErrorCode::Timeout);
     assert_eq!(err.context.unwrap()["reason"], "shutting_down");
     // Idempotent.
     assert_eq!(service.shutdown(), Default::default());

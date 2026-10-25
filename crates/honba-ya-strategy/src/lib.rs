@@ -20,6 +20,7 @@ pub mod context;
 pub mod contract_probe;
 pub mod dyn_strategy;
 pub mod error;
+pub mod factory;
 pub mod intent;
 pub mod ir;
 pub mod manifest;
@@ -34,6 +35,7 @@ pub use context::{LedgerContext, StrategyContext};
 pub use contract_probe::{ContractProbe, Observation};
 pub use dyn_strategy::DynStrategy;
 pub use error::{Result, StrategyError};
+pub use factory::{StrategyFactory, StrategyFactoryRegistry, BuiltinStrategyFactory};
 pub use intent::{IntentError, OrderIntent};
 pub use ir::{IrError, IrSubscriptions, IrUniverse, StrategyIr};
 pub use manifest::{

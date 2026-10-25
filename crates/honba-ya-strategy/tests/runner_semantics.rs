@@ -1,3 +1,4 @@
+#![cfg(feature = "legacy_engine")]
 //! `StrategyRunner` semantics shared with Python (ADR 008, decision 5).
 //! Mirrors `python/tests/unit/test_strategy_runner.py`.
 

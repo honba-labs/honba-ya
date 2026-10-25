@@ -6,10 +6,13 @@ use crate::{ROUTE_SCOPES, RouteScope, scope_for, unscoped_routes};
 
 /// The scopes ADR 0023 §2 defines; no route may name any other.
 const SCOPES: &[&str] = &[
+    "read",
+    "trade",
+    "admin",
+    "research",
     "read:market",
     "read:account",
     "write:orders",
-    "research",
     "operator",
 ];
 
@@ -48,15 +51,15 @@ fn route_scopes_have_no_duplicate_keys() {
 fn known_route_needs_its_scope_and_unknown_is_unmapped() {
     assert_eq!(
         scope_for("GET", "/instruments"),
-        Some(RouteScope::Required("read:market"))
+        Some(RouteScope::Required("read"))
     );
     assert_eq!(
         scope_for("GET", "/bars/ABC"),
-        Some(RouteScope::Required("read:market"))
+        Some(RouteScope::Required("read"))
     );
     assert_eq!(
         scope_for("POST", "/orders"),
-        Some(RouteScope::Required("write:orders"))
+        Some(RouteScope::Required("trade"))
     );
     assert_eq!(scope_for("GET", "/capabilities"), Some(RouteScope::Public));
     assert_eq!(scope_for("GET", "/brand/new"), None);
@@ -67,7 +70,7 @@ fn trading_state_routes_need_the_operator_scope() {
     for method in ["GET", "PUT"] {
         assert_eq!(
             scope_for(method, "/trading-state"),
-            Some(RouteScope::Required("operator"))
+            Some(RouteScope::Required("admin"))
         );
     }
 }
@@ -102,7 +105,7 @@ fn head_is_scoped_like_get() {
         ));
     }
     // HEAD is not a way into a route that has no GET row.
-    assert_eq!(scope_for("HEAD", "/sweeps"), None);
+    assert_eq!(scope_for("HEAD", "/nonexistent"), None);
 }
 
 #[tokio::test]

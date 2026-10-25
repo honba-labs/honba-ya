@@ -1,7 +1,7 @@
 //! `LedgerContext`: the reference `StrategyContext` (ADR 008). Mirrors
 //! `python/tests/unit/test_ledger_context.py`.
 
-use honba_core::chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc};
 use honba_core::uuid::Uuid;
 use honba_core::{Currency, Exchange, FillReport, InstrumentId, Money, OrderSide, Price, Quantity};
 use honba_testing::fixtures::{exact_decimal, utc_nanos};
@@ -44,7 +44,7 @@ fn fill(
         "test",
         utc_nanos(1),
     )
-    .with_fee(Money::new(exact_decimal(costs), Currency::Inr), None)
+    .with_fee(Money::new(exact_decimal(costs), Currency::Inr))
 }
 
 #[test]
@@ -190,7 +190,7 @@ fn a_fill_whose_costs_are_in_another_currency_is_refused_whole() {
         "test",
         utc_nanos(1),
     )
-    .with_fee(Money::new(Decimal::from(150), Currency::Usd), None);
+    .with_fee(Money::new(Decimal::from(150), Currency::Usd));
     assert!(ctx.apply_fill(&usd_costs).is_err());
     assert_eq!(
         ctx.cash(),

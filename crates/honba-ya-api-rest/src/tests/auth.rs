@@ -11,19 +11,19 @@ fn test_required_scope() {
     assert_eq!(AuthLayer::required_scope("GET", "/capabilities"), None);
     assert_eq!(
         AuthLayer::required_scope("GET", "/instruments"),
-        Some("read:market")
+        Some("read")
     );
     assert_eq!(
         AuthLayer::required_scope("GET", "/bars/ABC"),
-        Some("read:market")
+        Some("read")
     );
     assert_eq!(
         AuthLayer::required_scope("POST", "/orders"),
-        Some("write:orders")
+        Some("trade")
     );
     assert_eq!(
         AuthLayer::required_scope("PUT", "/trading-state"),
-        Some("operator")
+        Some("admin")
     );
     assert_eq!(AuthLayer::required_scope("GET", "/unknown"), None);
 }

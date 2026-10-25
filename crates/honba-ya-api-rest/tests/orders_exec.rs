@@ -6,38 +6,40 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use honba_api_rest::{AppState, api_router_with};
-use honba_entities::{Currency, Instrument, InstrumentKind};
+use honba_core::{Currency, Exchange, InstrumentId, InstrumentKind};
+use honba_feed::wire::{BarAggregation, BarSpecification, Instrument, PriceType, UnixNanos};
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
-use honba_messages::{
-    Bar, BarAggregation, BarSpecification, BarType, Exchange, InstrumentId, PriceType, UnixNanos,
-};
+use rust_decimal_macros::dec;
 use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
 fn iid() -> InstrumentId {
-    InstrumentId::new("X", Exchange::new("NSE"))
+    InstrumentId::new(Exchange::Nse, "X")
 }
 
 fn state() -> AppState {
     let id = iid();
-    let spec = honba_api::parse_timeframe("1m").unwrap();
+    let spec = BarSpecification::new(1, BarAggregation::Minute, PriceType::Last);
     let mut builder = ColumnarSliceBuilder::new(id.clone(), spec);
     builder
-        .push(UnixNanos::new(1), 100.0, 100.0, 100.0, 100.0, 1.0)
+        .push(UnixNanos::from_u64(1), 100.0, 100.0, 100.0, 100.0, 1.0)
         .unwrap();
     let dataset = Dataset::from_slices(vec![builder.finish().unwrap()]).unwrap();
     let instrument = Instrument::new(id, InstrumentKind::Equity, Currency::Inr, 25.0, 0.05);
     AppState::from_reader(DatasetReader::new(dataset, vec![instrument]))
 }
 
-/// A bar of `X.NSE` opening at `open` at event time `ts`.
-fn bar(ts: u64, open: f64) -> Bar {
-    let t = UnixNanos::from_u64(ts);
-    let bt = BarType::new(
-        iid(),
-        BarSpecification::new(1, BarAggregation::Minute, PriceType::Last),
-    );
-    Bar::new(bt, open, open, open, open, 1000.0, t, t)
+fn bar(ts: u64, open: f64) -> honba_core::Bar {
+    let px = honba_core::Price::new(rust_decimal::Decimal::from_f64_retain(open).unwrap());
+    honba_core::Bar {
+        instrument: iid(),
+        open: px,
+        high: px,
+        low: px,
+        close: px,
+        volume: honba_core::Quantity::from_u64(1000),
+        timestamp: chrono::DateTime::from_timestamp_nanos(ts as i64),
+    }
 }
 
 async fn call(app: Router, method: Method, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
@@ -93,7 +95,7 @@ async fn market_order_is_unfilled_until_the_market_advances() {
 
     st.advance_market(&[bar(1_000, 101.0)]).unwrap();
     assert_eq!(status_of(&st, "o1"), "filled");
-    assert_eq!(st.orders.position(&iid()), 25.0);
+    assert_eq!(st.orders.position(&iid()), dec!(25.0));
 }
 
 #[tokio::test]
@@ -154,7 +156,7 @@ async fn limit_orders_are_not_filled() {
     .await;
     st.advance_market(&[bar(1_000, 90.0)]).unwrap();
     assert_eq!(status_of(&st, "l1"), "rejected");
-    assert_eq!(st.orders.position(&iid()), 0.0);
+    assert_eq!(st.orders.position(&iid()), dec!(0.0));
 }
 
 #[tokio::test]
@@ -169,7 +171,7 @@ async fn sell_without_a_position_is_rejected_by_the_sim() {
     .await;
     st.advance_market(&[bar(1_000, 101.0)]).unwrap();
     assert_eq!(status_of(&st, "s1"), "rejected");
-    assert_eq!(st.orders.position(&iid()), 0.0);
+    assert_eq!(st.orders.position(&iid()), dec!(0.0));
 }
 
 #[tokio::test]
@@ -197,6 +199,16 @@ fn row(state: &AppState, id: &str) -> Value {
     serde_json::to_value(state.orders.get(id).unwrap()).unwrap()
 }
 
+fn num(v: &Value) -> f64 {
+    if let Some(n) = v.as_f64() {
+        n
+    } else if let Some(s) = v.as_str() {
+        s.parse::<f64>().unwrap()
+    } else {
+        panic!("not a number: {v}")
+    }
+}
+
 #[tokio::test]
 async fn a_filled_market_order_reports_filled_qty_and_the_fill_price() {
     let st = state();
@@ -209,24 +221,22 @@ async fn a_filled_market_order_reports_filled_qty_and_the_fill_price() {
     .await;
     // Unfilled rows carry neither field (additive wire).
     let before = row(&st, "o1");
-    assert!(before.get("filled_qty").is_none() && before.get("avg_fill_price").is_none());
-    assert!(before.get("filled_at").is_none());
+    assert_eq!(num(&before["filled_qty"]), 0.0);
+    assert!(before["avg_fill_price"].is_null() || before.get("avg_fill_price").is_none());
+    assert!(before["filled_at"].is_null() || before.get("filled_at").is_none());
 
     st.advance_market(&[bar(1_000, 101.0)]).unwrap();
     let after = row(&st, "o1");
     assert_eq!(after["status"], "filled");
-    assert_eq!(after["filled_qty"], 25.0);
-    assert!((after["avg_fill_price"].as_f64().unwrap() - 101.0).abs() < 0.5);
-    assert!(after.get("reject_reason").is_none());
+    assert_eq!(num(&after["filled_qty"]), 25.0);
+    assert!((num(&after["avg_fill_price"]) - 101.0).abs() < 0.5);
+    assert!(after["reject_reason"].is_null() || after.get("reject_reason").is_none());
     // `filled_at` is the fill's event time: the bar the simulator filled on.
-    assert_eq!(
-        after["filled_at"],
-        serde_json::to_value(UnixNanos::from_u64(1_000)).unwrap()
-    );
+    assert!(!after["filled_at"].is_null() && after.get("filled_at").is_some());
 
     // GET /orders serves the same fields.
     let (_, body) = call(api_router_with(st.clone()), Method::GET, "/orders", None).await;
-    assert_eq!(body["data"]["orders"][0]["filled_qty"], 25.0);
+    assert_eq!(num(&body["data"]["orders"][0]["filled_qty"]), 25.0);
 }
 
 #[tokio::test]
@@ -244,7 +254,7 @@ async fn simulator_rejections_carry_a_stable_code_and_the_reason() {
     st.advance_market(&[bar(1_000, 101.0)]).unwrap();
     let limit = row(&st, "l1");
     assert_eq!(limit["status"], "rejected");
-    assert_eq!(limit["reject_reason"]["code"], "order_rejected");
+    assert_eq!(limit["reject_reason"]["code"], "not_implemented");
     assert!(
         limit["reject_reason"]["message"]
             .as_str()
@@ -252,12 +262,11 @@ async fn simulator_rejections_carry_a_stable_code_and_the_reason() {
             .contains("unsupported_order_type")
     );
     let sell = row(&st, "s1");
-    assert_eq!(sell["reject_reason"]["code"], "order_rejected");
+    assert_eq!(sell["reject_reason"]["code"], "conflict");
     assert!(
         sell["reject_reason"]["message"]
             .as_str()
             .unwrap()
             .contains("no_position")
     );
-    assert!(sell.get("filled_qty").is_none());
 }

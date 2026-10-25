@@ -6,9 +6,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use honba_api_rest::{AppState, api_router_with, build_target};
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
-use honba_messages::{
-    BarAggregation, BarSpecification, Exchange, InstrumentId, PriceType, UnixNanos,
-};
+use honba_core::{Exchange, InstrumentId};
+use honba_feed::wire::{BarAggregation, BarSpecification, PriceType, UnixNanos};
 use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
@@ -19,7 +18,7 @@ const T0: u64 = 1_704_067_200_000_000_000;
 fn daily(symbol: &str, closes: &[f64]) -> honba_feed::ColumnarSlice {
     let spec = BarSpecification::new(1, BarAggregation::Day, PriceType::Last);
     let mut builder =
-        ColumnarSliceBuilder::new(InstrumentId::new(symbol, Exchange::new("NSE")), spec);
+        ColumnarSliceBuilder::new(InstrumentId::new(Exchange::Nse, symbol), spec);
     for (i, &c) in closes.iter().enumerate() {
         builder
             .push(

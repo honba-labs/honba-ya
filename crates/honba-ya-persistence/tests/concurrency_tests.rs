@@ -98,6 +98,7 @@ async fn test_concurrent_persistence_transactions_under_load() {
                 client_id: Some(client_id.clone()),
                 fee: Money::zero_inr(),
                 fee_breakdown: None,
+                trace_context: None,
             };
             fill_repo.insert(&fill, "{}", now).await.expect("fill insert");
 
