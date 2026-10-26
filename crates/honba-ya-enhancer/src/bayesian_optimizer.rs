@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use honba_backtest::NseTradingCalendar;
+use honba_backtest::{BacktestConfig, BacktestEngine, MarketEvent, TradingCalendar};
 use honba_core::{InstrumentId, Quantity, Tick};
 use honba_mon::RiskEngine;
 use honba_strategy::{
@@ -14,6 +14,13 @@ use honba_strategy::{
     factory::{StrategyFactoryRegistry, manifest_to_parameter_grid},
 };
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
+
+/// Default multi-objective fitness weights `(sharpe, sortino, profit_factor,
+/// max_drawdown)` — kept byte-for-byte aligned with the GA optimizer's
+/// [`GaConfig::fitness_weights`] default so both optimizers rank candidates
+/// identically.
+const FITNESS_WEIGHTS: (f64, f64, f64, f64) = (0.5, 0.3, 0.15, 0.05);
 
 /// Configuration for Bayesian optimization (TPE algorithm).
 #[derive(Debug, Clone)]
@@ -138,7 +145,7 @@ impl BayesianOptimizer {
         instrument: InstrumentId,
         quantity: Quantity,
         risk_engine: RiskEngine,
-        calendar: NseTradingCalendar,
+        calendar: Arc<dyn TradingCalendar>,
     ) -> Result<BayesOptimizationResult, BayesError> {
         let start = Instant::now();
         let strategy_name = manifest.name.clone();
@@ -172,23 +179,24 @@ impl BayesianOptimizer {
                 )
                 .map_err(|e| BayesError::FactoryError(e.to_string()))?;
 
-            let fitness = self.evaluate_fitness(
-                &strategy,
-                data,
-                instrument.clone(),
-                quantity,
-                initial_cash,
-                risk_engine.clone(),
-                &calendar,
-            );
+            let (fitness, sharpe, sortino, profit_factor, max_drawdown_pct) = self
+                .evaluate_fitness(
+                    strategy,
+                    data,
+                    instrument.clone(),
+                    quantity,
+                    initial_cash,
+                    risk_engine.clone(),
+                    &calendar,
+                );
 
             let evaluated = EvaluatedPoint {
                 params: params.clone(),
                 fitness,
-                sharpe: 0.0,
-                sortino: 0.0,
-                profit_factor: 0.0,
-                max_drawdown_pct: 0.0,
+                sharpe,
+                sortino,
+                profit_factor,
+                max_drawdown_pct,
             };
 
             self.evaluated.push(evaluated);
@@ -217,23 +225,24 @@ impl BayesianOptimizer {
                 )
                 .map_err(|e| BayesError::FactoryError(e.to_string()))?;
 
-            let fitness = self.evaluate_fitness(
-                &strategy,
-                data,
-                instrument.clone(),
-                quantity,
-                initial_cash,
-                risk_engine.clone(),
-                &calendar,
-            );
+            let (fitness, sharpe, sortino, profit_factor, max_drawdown_pct) = self
+                .evaluate_fitness(
+                    strategy,
+                    data,
+                    instrument.clone(),
+                    quantity,
+                    initial_cash,
+                    risk_engine.clone(),
+                    &calendar,
+                );
 
             let evaluated = EvaluatedPoint {
                 params: next_point.clone(),
                 fitness,
-                sharpe: 0.0,
-                sortino: 0.0,
-                profit_factor: 0.0,
-                max_drawdown_pct: 0.0,
+                sharpe,
+                sortino,
+                profit_factor,
+                max_drawdown_pct,
             };
 
             self.evaluated.push(evaluated);
@@ -290,38 +299,127 @@ impl BayesianOptimizer {
         params
     }
 
-    /// Convert continuous params to grid point for factory.
+    /// Convert continuous params to grid point for factory. Integral-valued
+    /// f64s (e.g. a period of 14.0) are emitted as JSON integers so factories
+    /// that read them with `as_u64()` succeed; plain
+    /// `serde_json::json!(14.0_f64)` stores an F64 that `as_u64()` rejects.
     fn params_to_grid_point(
         &self,
         params: &BTreeMap<String, f64>,
     ) -> BTreeMap<String, serde_json::Value> {
         params
             .iter()
-            .map(|(k, v)| (k.clone(), serde_json::json!(v)))
+            .map(|(k, v)| {
+                let val = if v.fract() == 0.0 {
+                    serde_json::json!(*v as i64)
+                } else {
+                    serde_json::json!(v)
+                };
+                (k.clone(), val)
+            })
             .collect()
     }
 
-    /// Evaluate fitness of a strategy by running a backtest.
+    /// Evaluate fitness of a strategy by running a real backtest through
+    /// [`BacktestEngine`] over the supplied tick history.
+    ///
+    /// The strategy handed in is the concrete [`DynStrategy`] already built
+    /// from the [`StrategyFactoryRegistry`] with the candidate parameters, so
+    /// the engine evaluates exactly the parameter set under test.
+    ///
+    /// Returns `(fitness, sharpe, sortino, profit_factor, max_drawdown_pct)`.
     #[allow(clippy::too_many_arguments)] // sweep context is explicit: manifest, data, instrument, quantity, risk gate, calendar
     fn evaluate_fitness(
         &self,
-        _strategy: &DynStrategy,
-        _data: &[Tick],
+        strategy: DynStrategy,
+        data: &[Tick],
         _instrument: InstrumentId,
         _quantity: Quantity,
-        _initial_cash: Decimal,
-        _risk_engine: RiskEngine,
-        _calendar: &NseTradingCalendar,
+        initial_cash: Decimal,
+        risk_engine: RiskEngine,
+        calendar: &Arc<dyn TradingCalendar>,
+    ) -> (f64, f64, f64, f64, f64) {
+        let config = BacktestConfig {
+            starting_cash: initial_cash,
+            ..Default::default()
+        };
+        let mut engine = BacktestEngine::new(strategy, risk_engine, config, calendar.clone());
+        let market_events: Vec<MarketEvent> =
+            data.iter().map(|t| MarketEvent::Tick(t.clone())).collect();
+        let result = engine.run_events(market_events);
+
+        let net_pnl = result.net_pnl.to_f64().unwrap_or(0.0);
+        let gross_pnl = result.gross_pnl.to_f64().unwrap_or(0.0);
+        let total_fees = result.total_fees.total().to_f64().unwrap_or(0.0);
+        let max_drawdown_pct = result.max_drawdown_pct.to_f64().unwrap_or(0.0);
+        let total_trades = result.total_trades;
+
+        let fitness = self.compute_multi_objective_fitness(
+            net_pnl,
+            gross_pnl,
+            total_fees,
+            max_drawdown_pct,
+            total_trades,
+        );
+
+        // Component metrics approximated from the real backtest result.
+        let sharpe = if max_drawdown_pct > 0.0 {
+            (net_pnl / max_drawdown_pct).clamp(-10.0, 10.0)
+        } else {
+            0.0
+        };
+        let sortino = sharpe * 0.9;
+        let profit_factor = if total_fees > 0.0 && gross_pnl > 0.0 {
+            (gross_pnl / total_fees).min(10.0)
+        } else {
+            1.0
+        };
+
+        (fitness, sharpe, sortino, profit_factor, max_drawdown_pct)
+    }
+
+    /// Compute multi-objective fitness from backtest results.
+    ///
+    /// Mirrors `GaOptimizer::compute_multi_objective_fitness` so TPE and the
+    /// genetic algorithm score an identical backtest identically.
+    fn compute_multi_objective_fitness(
+        &self,
+        net_pnl: f64,
+        gross_pnl: f64,
+        total_fees: f64,
+        max_drawdown_pct: f64,
+        total_trades: usize,
     ) -> f64 {
-        // Placeholder - in a real implementation, this would run the backtest
-        // For now, return a dummy value based on parameter norm
-        let mut rng = rand::thread_rng();
-        let norm: f64 = self
-            .evaluated
-            .last()
-            .map(|e| e.params.values().map(|&v| v.abs()).sum::<f64>())
-            .unwrap_or(0.0);
-        -norm + rng.gen_range(-0.1..0.1)
+        let (w_sharpe, w_sortino, w_pf, w_dd) = FITNESS_WEIGHTS;
+
+        // Approximate Sharpe from net PnL and drawdown
+        let sharpe = if max_drawdown_pct > 0.0 {
+            (net_pnl / max_drawdown_pct).clamp(-10.0, 10.0)
+        } else {
+            0.0
+        };
+
+        // Approximate Sortino (same as Sharpe for now)
+        let sortino = sharpe * 0.9;
+
+        // Profit factor approximation
+        let profit_factor = if total_fees > 0.0 && gross_pnl > 0.0 {
+            (gross_pnl / total_fees).min(10.0)
+        } else {
+            1.0
+        };
+
+        // Drawdown penalty (lower is better)
+        let dd_score = 1.0 / (1.0 + max_drawdown_pct / 10.0);
+
+        // Trade count penalty (discourage overtrading)
+        let trade_penalty = 1.0 / (1.0 + (total_trades as f64 / 1000.0));
+
+        (sharpe * w_sharpe)
+            + (sortino * w_sortino)
+            + (profit_factor * w_pf)
+            + (dd_score * w_dd)
+            + (trade_penalty * 0.01)
     }
 
     /// Sample next point using TPE algorithm.

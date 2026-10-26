@@ -8,8 +8,8 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use honba_api::{BacktestRequest, RunKind, RunStatus};
-use honba_api_rest::{RetentionPolicy, RunService};
 use honba_api::{ErrorCode, Event};
+use honba_api_rest::{RetentionPolicy, RunService};
 use serde_json::json;
 use support::*;
 
@@ -46,11 +46,7 @@ fn submit_poll_journal() {
         .unwrap();
     assert!(records.iter().any(|m| matches!(m.event, Event::Bar(_))));
     assert!(records.iter().any(|m| matches!(m.event, Event::Order(_))));
-    assert!(
-        records
-            .iter()
-            .any(|m| matches!(m.event, Event::Fill(_)))
-    );
+    assert!(records.iter().any(|m| matches!(m.event, Event::Fill(_))));
     let manifest_on_disk = std::fs::read_to_string(
         scratch
             .journals()

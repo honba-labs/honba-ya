@@ -95,7 +95,10 @@ async fn delete_order_withdraws_it_from_the_simulators_working_set() {
     );
     assert_eq!(status_of(&st, "o1"), "submitted");
 
-    assert_eq!(call(&st, Method::DELETE, "/orders/o1", None).await, StatusCode::OK);
+    assert_eq!(
+        call(&st, Method::DELETE, "/orders/o1", None).await,
+        StatusCode::OK
+    );
     assert_eq!(status_of(&st, "o1"), "cancelled");
 
     // If the cancel only flipped the ledger's label and left the order working in the

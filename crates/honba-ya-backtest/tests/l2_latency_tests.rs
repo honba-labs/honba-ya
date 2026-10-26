@@ -14,6 +14,7 @@ use honba_backtest::{NseTradingCalendar, ProductType};
 use honba_core::{Bar, Exchange, InstrumentId, Price, Quantity};
 use honba_mon::{OtrConfig, RiskEngine, RiskLimits};
 use honba_strategy::{OrderIntent, Strategy, StrategyContext};
+use std::sync::Arc;
 
 fn bar(inst: &InstrumentId, close: &str, ts: DateTime<Utc>) -> Bar {
     let price = Price::from_rupees(close).unwrap();
@@ -71,10 +72,15 @@ fn make_engine(instrument: &InstrumentId, latency_us: u64) -> BacktestEngine<Onc
         ProductType::Delivery,
         latency,
         SlippageModel::new(),
-        MisSquareOffManager::new(NseTradingCalendar::new()),
+        MisSquareOffManager::new(Arc::new(NseTradingCalendar::new())),
     );
 
-    BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new())
+    BacktestEngine::new(
+        strategy,
+        risk_engine,
+        config,
+        Arc::new(NseTradingCalendar::new()),
+    )
 }
 
 #[test]

@@ -240,7 +240,11 @@ impl SweepRequest {
         let universe = required("universe", &self.universe)?.to_owned();
         let start = required("start", &self.start)?.to_owned();
         let end = required("end", &self.end)?.to_owned();
-        let bar_spec = self.bar_spec.as_deref().map_or(DEFAULT_BAR_SPEC, str::trim).to_owned();
+        let bar_spec = self
+            .bar_spec
+            .as_deref()
+            .map_or(DEFAULT_BAR_SPEC, str::trim)
+            .to_owned();
         let initial_capital = self.initial_capital.unwrap_or(DEFAULT_INITIAL_CAPITAL);
 
         let params = match &self.params {

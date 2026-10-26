@@ -1,5 +1,5 @@
 use chrono::Utc;
-use honba_persistence::{migrate, Database, PersistedTrader, TraderRepository, TraderStore};
+use honba_persistence::{Database, PersistedTrader, TraderRepository, TraderStore, migrate};
 use rust_decimal::Decimal;
 use std::str::FromStr;
 

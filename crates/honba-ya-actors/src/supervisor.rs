@@ -261,7 +261,10 @@ impl Supervisor {
                     "execution" => self.exec_handle = new_handle,
                     _ => {}
                 }
-                info!("Supervisor: restarted {} under OneForOne strategy", actor_name);
+                info!(
+                    "Supervisor: restarted {} under OneForOne strategy",
+                    actor_name
+                );
             }
             RestartStrategy::AllForOne => {
                 match actor_name {
@@ -292,7 +295,12 @@ impl Supervisor {
 
     /// Get per-actor restart counts for monitoring.
     pub fn restart_counts(&self) -> (usize, usize, usize, usize) {
-        (self.md_restarts, self.strat_restarts, self.risk_restarts, self.exec_restarts)
+        (
+            self.md_restarts,
+            self.strat_restarts,
+            self.risk_restarts,
+            self.exec_restarts,
+        )
     }
 
     /// Increment restart counter for a specific actor.

@@ -19,8 +19,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use honba_core::{
-    Currency, FillReport as Trade, Money, PortfolioGreeks, PortfolioMode, PortfolioPosition as Position,
-    PortfolioSource,
+    Currency, FillReport as Trade, Money, PortfolioGreeks, PortfolioMode,
+    PortfolioPosition as Position, PortfolioSource,
 };
 use honba_portfolio::Product;
 use serde::{Deserialize, Serialize};

@@ -11,9 +11,9 @@ mod support;
 
 use std::sync::Arc;
 
+use honba_api::{ErrorDetail, Message};
 use honba_api::{JournalWriter, ResultCache, RunExecutor, RunJob, RunKind, RunOutcome, RunStatus};
 use honba_api_rest::{BacktestExecutor, StrategyRegistry};
-use honba_api::{ErrorDetail, Message};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use support::*;
@@ -36,7 +36,7 @@ impl JournalWriter for TestJournal {
 }
 
 fn job_with(strategy: &str, universe: &str, bar_spec: &str, seed: u64, capital: Decimal) -> RunJob {
-        let ir = compiled().ir;
+    let ir = compiled().ir;
     RunJob {
         run_id: honba_api::RunIdGenerator::default()
             .next(1, [0; 10])
@@ -48,7 +48,9 @@ fn job_with(strategy: &str, universe: &str, bar_spec: &str, seed: u64, capital: 
             strategy: strategy.to_owned(),
             universe: universe.to_owned(),
             start: chrono::DateTime::from_timestamp_nanos(1_704_067_200_000_000_000),
-            end: chrono::DateTime::from_timestamp_nanos(1_704_067_200_000_000_000 + 80 * 86_400_000_000_000),
+            end: chrono::DateTime::from_timestamp_nanos(
+                1_704_067_200_000_000_000 + 80 * 86_400_000_000_000,
+            ),
             bar_spec: bar_spec.to_owned(),
             initial_capital: capital,
             seed,
@@ -146,8 +148,8 @@ fn disk_cache_persistence_across_restarts() {
 
     // Instance 1: write to disk cache
     let cache1 = ResultCache::with_disk_dir(&cache_dir);
-    let executor1 =
-        BacktestExecutor::new(Arc::new(TestBarReader), StrategyRegistry::builtin()).with_cache(cache1);
+    let executor1 = BacktestExecutor::new(Arc::new(TestBarReader), StrategyRegistry::builtin())
+        .with_cache(cache1);
 
     let mut journal1 = TestJournal::default();
     let outcome1 = executor1.execute(job.clone(), &mut journal1).unwrap();
@@ -160,8 +162,8 @@ fn disk_cache_persistence_across_restarts() {
     // Instance 2: simulated restart, fresh ResultCache pointing at same disk dir
     let cache2 = ResultCache::with_disk_dir(&cache_dir);
     assert_eq!(cache2.len(), 1, "disk cache should recover cached item");
-    let executor2 =
-        BacktestExecutor::new(Arc::new(TestBarReader), StrategyRegistry::builtin()).with_cache(cache2);
+    let executor2 = BacktestExecutor::new(Arc::new(TestBarReader), StrategyRegistry::builtin())
+        .with_cache(cache2);
 
     let mut journal2 = TestJournal::default();
     let outcome2 = executor2.execute(job, &mut journal2).unwrap();

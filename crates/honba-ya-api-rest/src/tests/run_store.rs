@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 
-use honba_api::RunKind;
 use honba_api::ErrorCode;
+use honba_api::RunKind;
 
 use crate::{OsEntropy, RunClock, RunEntropy, RunStore, SystemClock};
 

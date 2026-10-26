@@ -19,12 +19,17 @@ serde                 = { workspace = true, features = ["derive"] }
 serde_json            = { workspace = true }
 toml                  = { workspace = true }
 anyhow                = { workspace = true }
+chrono                = { workspace = true }
+rust_decimal          = { workspace = true }
+rust_decimal_macros   = { workspace = true }
 
 # Workspace crates
 honba-config.workspace = true
 honba-ya-actors.workspace = true
 honba-ya-backtest.workspace = true
 honba-ya-api-rest.workspace = true
+honba-ya-enhancer.workspace = true
+honba-ya-persistence.workspace = true
 
 # Cross-workspace crates
 honba-api.workspace = true

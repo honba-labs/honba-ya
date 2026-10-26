@@ -1,15 +1,22 @@
-use std::collections::VecDeque;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
-use anyhow::Context;
+use anyhow::{Context, Result, bail};
+use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
+use rust_decimal::prelude::*;
+use rust_decimal_macros::dec;
 use serde::Deserialize;
 
 use honba_analytics::{PerformanceReport, RoundTrip};
-use honba_core::chrono::{DateTime, Utc};
-use honba_core::rust_decimal::prelude::*;
-use honba_core::{Exchange, FillReport, InstrumentId, OrderSide, Price, Quantity};
+use honba_backtest::calendar::NseTradingCalendar;
+use honba_backtest::{BacktestConfig as EngineConfig, BacktestEngine, MarketEvent, ProductType};
+use honba_core::{Exchange, FillReport, InstrumentId, Price, Quantity};
 use honba_feed::{MarkdownReportWriter, ReportWriter};
+use honba_strategy::DynStrategy;
+use honba_strategy::factory::StrategyFactoryRegistry;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct BacktestConfig {
@@ -43,38 +50,6 @@ pub(crate) struct StrategyConfig {
     pub(crate) trade_size: f64,
 }
 
-/// A minimal incremental simple moving average, local to this file so the
-/// CLI's synthetic demo backtest doesn't need the full `honba_indicators`
-/// crate (or any other new dependency) just to detect SMA crossovers.
-struct Sma {
-    period: usize,
-    buf: VecDeque<f64>,
-    sum: f64,
-}
-
-impl Sma {
-    fn new(period: usize) -> Self {
-        Self {
-            period,
-            buf: VecDeque::with_capacity(period),
-            sum: 0.0,
-        }
-    }
-
-    fn update(&mut self, value: f64) -> Option<f64> {
-        self.buf.push_back(value);
-        self.sum += value;
-        if self.buf.len() > self.period {
-            self.sum -= self.buf.pop_front().unwrap_or(0.0);
-        }
-        if self.buf.len() == self.period {
-            Some(self.sum / self.period as f64)
-        } else {
-            None
-        }
-    }
-}
-
 /// Builds a UTC timestamp from `nanos` nanoseconds since the Unix epoch.
 fn ts_from_nanos(nanos: u64) -> DateTime<Utc> {
     let nanos = nanos as i64;
@@ -105,7 +80,13 @@ pub(crate) fn equity_curve(starting: f64, trips: &[RoundTrip]) -> Vec<f64> {
     equity
 }
 
-pub fn run(config_path: &Path, output: Option<&Path>) -> anyhow::Result<()> {
+pub fn run(
+    config_path: &Path,
+    output: Option<&Path>,
+    from: Option<&str>,
+    to: Option<&str>,
+    data_dir: Option<&Path>,
+) -> Result<()> {
     let text = fs::read_to_string(config_path)
         .with_context(|| format!("reading config {}", config_path.display()))?;
     let cfg: BacktestConfig = toml::from_str(&text)?;
@@ -137,50 +118,74 @@ pub fn run(config_path: &Path, output: Option<&Path>) -> anyhow::Result<()> {
             };
             (fast, slow, size)
         }
-        other => anyhow::bail!("unknown strategy: {other}"),
+        other => bail!("unknown strategy: {other}"),
     };
+
     let quantity = Quantity::new(Decimal::from_f64_retain(trade_size).unwrap_or(Decimal::ONE));
 
-    // Synthetic series — same shape as the end-to-end example.
-    let closes: Vec<f64> = vec![
-        100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 104.0, 103.0, 102.0, 101.0, 100.0, 101.0, 102.0,
-        103.0, 104.0, 105.0, 106.0, 107.0, 106.0, 105.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0,
-        110.0, 111.0, 110.0, 109.0, 108.0,
-    ];
+    // Construct the strategy dynamically from the registry
+    let registry = StrategyFactoryRegistry::new();
+    let mut params = BTreeMap::new();
+    params.insert("fast".to_string(), serde_json::json!(fast_period));
+    params.insert("slow".to_string(), serde_json::json!(slow_period));
+    let strategy: DynStrategy = registry
+        .create(&cfg.strategy.name, &params, instrument.clone(), quantity)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let mut fast = Sma::new(fast_period);
-    let mut slow = Sma::new(slow_period);
-    let mut prev_above: Option<bool> = None;
-    let mut fills: Vec<FillReport> = Vec::new();
+    let engine_cfg = EngineConfig {
+        starting_cash: Decimal::from_f64_retain(cfg.starting_equity).unwrap_or(dec!(1_000_000.00)),
+        product_type: ProductType::Delivery,
+        l2_simulation: false,
+        latency: None,
+        slippage: None,
+        adverse_fill: None,
+        mis_square_off: None,
+        warmup_bars: 0,
+        iccl_margin_holdback_pct: dec!(0.20),
+    };
 
-    for (i, &close) in closes.iter().enumerate() {
-        let (Some(f), Some(s)) = (fast.update(close), slow.update(close)) else {
-            continue;
-        };
-        let above = f > s;
-        let crossed = matches!(prev_above, Some(prev) if prev != above);
-        prev_above = Some(above);
-        if !crossed {
-            continue;
-        }
+    let mut risk_engine = honba_mon::RiskEngine::default();
+    risk_engine.register_algo(&cfg.strategy.name);
+    let calendar = Arc::new(NseTradingCalendar::default());
 
-        let side = if above { OrderSide::Buy } else { OrderSide::Sell };
-        let price = Price::new(Decimal::from_f64_retain(close).unwrap_or(Decimal::ZERO));
-        let timestamp = ts_from_nanos((i as u64 + 1) * 1_000_000_000);
-        fills.push(FillReport::new(
-            format!("F-{i}"),
-            format!("O-{i}"),
-            honba_core::uuid::Uuid::new_v4(),
-            instrument.clone(),
-            side,
-            price,
-            quantity,
-            "cli-backtest-sma-crossover",
-            timestamp,
-        ));
-    }
+    // Phase 7.1: Re-wire directly to honba_ya_backtest::BacktestEngine
+    let mut engine = BacktestEngine::new(strategy, risk_engine, engine_cfg, calendar);
 
-    let trips = pair_fills(&fills);
+    // If data directory with catalog is supplied, load real parquet bars;
+    // otherwise use the canonical synthetic series.
+    let result = if let Some(dir) = data_dir {
+        let loader = honba_backtest::catalog::CatalogLoader::new(dir);
+        let from_ts = from.and_then(|s| DateTime::parse_from_rfc3339(s).ok().map(|d| d.to_utc()));
+        let to_ts = to.and_then(|s| DateTime::parse_from_rfc3339(s).ok().map(|d| d.to_utc()));
+        engine.run_catalog(&loader, &[instrument], "1d", from_ts, to_ts)?
+    } else {
+        // Synthetic series — same shape as the end-to-end example.
+        let closes: Vec<f64> = vec![
+            100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 104.0, 103.0, 102.0, 101.0, 100.0, 101.0,
+            102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 106.0, 105.0, 104.0, 105.0, 106.0, 107.0,
+            108.0, 109.0, 110.0, 111.0, 110.0, 109.0, 108.0,
+        ];
+        let events: Vec<MarketEvent> = closes
+            .iter()
+            .enumerate()
+            .map(|(i, &close)| {
+                let px = Price::new(Decimal::from_f64_retain(close).unwrap_or(Decimal::ZERO));
+                let ts = ts_from_nanos((i as u64 + 1) * 1_000_000_000);
+                MarketEvent::Bar(honba_core::Bar {
+                    instrument: instrument.clone(),
+                    open: px,
+                    high: px,
+                    low: px,
+                    close: px,
+                    volume: Quantity::from_u64(100),
+                    timestamp: ts,
+                })
+            })
+            .collect();
+        engine.run_events(events)
+    };
+
+    let trips = pair_fills(&result.fills);
     if trips.is_empty() {
         eprintln!("strategy={} produced no round trips", cfg.strategy.name);
         return Ok(());

@@ -7,11 +7,13 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use honba_backtest::{BacktestResult, CatalogError, NseTradingCalendar};
+use honba_backtest::{
+    BacktestConfig, BacktestEngine, BacktestResult, CatalogError, MarketEvent, TradingCalendar,
+};
 use honba_core::{InstrumentId, Tick};
 use honba_mon::RiskEngine;
 use honba_strategy::{
-    DynStrategy, Strategy, StrategyManifest,
+    DynStrategy, StrategyManifest,
     factory::{StrategyFactoryRegistry, manifest_to_parameter_grid},
 };
 use rust_decimal::Decimal;
@@ -53,12 +55,18 @@ impl Default for GaConfig {
     }
 }
 
-/// An individual in the GA population: a strategy instance with its parameters and fitness.
+/// An individual in the GA population: a parameter set with its fitness metrics.
+///
+/// The strategy itself is *not* stored here (it is recreated from the
+/// [`StrategyFactoryRegistry`] using `params` whenever evaluation is needed),
+/// which keeps `Individual` cheap to clone and avoids the non-`Clone`
+/// `DynStrategy` type-erasure wrapper.
+#[derive(Debug, Clone)]
 pub struct Individual {
-    /// The strategy instance.
-    pub strategy: DynStrategy,
     /// Parameter values used to create this individual.
     pub params: BTreeMap<String, serde_json::Value>,
+    /// Strategy name used to recreate the strategy from the factory.
+    pub strategy_name: String,
     /// Fitness score.
     pub fitness: f64,
     /// Component fitness metrics for multi-objective analysis.
@@ -68,35 +76,21 @@ pub struct Individual {
     pub max_drawdown_pct: f64,
 }
 
-impl Clone for Individual {
-    fn clone(&self) -> Self {
-        // Note: DynStrategy doesn't implement Clone directly because it wraps Box<dyn Strategy>.
-        // For GA operations, we recreate strategies from the factory using stored params.
-        // This clone is used for elitism where we keep the exact same strategy instance.
-        // We'll panic if actually cloned since we can't clone the strategy.
-        // The GA code uses indices for elitism instead.
-        panic!("Individual::clone() not supported - use indices for elitism")
-    }
-}
-
-impl std::fmt::Debug for Individual {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Individual")
-            .field("strategy_name", &self.strategy.name())
-            .field("params", &self.params)
-            .field("fitness", &self.fitness)
-            .field("sharpe", &self.sharpe)
-            .field("sortino", &self.sortino)
-            .field("profit_factor", &self.profit_factor)
-            .field("max_drawdown_pct", &self.max_drawdown_pct)
-            .finish()
-    }
-}
-
 impl Individual {
     /// Returns the strategy name.
     pub fn strategy_name(&self) -> &str {
-        self.strategy.name()
+        &self.strategy_name
+    }
+
+    /// Recreate the strategy from the factory registry using this individual's
+    /// stored parameters.
+    pub fn create_strategy(
+        &self,
+        factory: &StrategyFactoryRegistry,
+        instrument: InstrumentId,
+        quantity: honba_core::Quantity,
+    ) -> Result<DynStrategy, honba_strategy::error::StrategyError> {
+        factory.create(&self.strategy_name, &self.params, instrument, quantity)
     }
 }
 
@@ -153,7 +147,7 @@ impl GaOptimizer {
         instrument: InstrumentId,
         quantity: honba_core::Quantity,
         risk_engine: RiskEngine,
-        calendar: NseTradingCalendar,
+        calendar: Arc<dyn TradingCalendar>,
     ) -> Result<GaOptimizationResult, GaError> {
         let instrument_arc = std::sync::Arc::new(instrument.clone());
         let start = Instant::now();
@@ -167,7 +161,7 @@ impl GaOptimizer {
         let strategy_name = manifest.name.clone();
         let initial_cash = Decimal::from(1_000_000); // Default 10L INR
 
-        // Create initial population
+        // Create initial population by evaluating random parameter samples
         let mut population = self.initialize_population(
             &strategy_name,
             &param_grid,
@@ -189,10 +183,11 @@ impl GaOptimizer {
         let mut rng = rand::thread_rng();
 
         for generation in 0..self.config.generations {
-            // Evaluate fitness for entire population in parallel
+            // Evaluate fitness for entire population in parallel (real backtest)
             population.par_iter_mut().for_each(|ind| {
-                ind.fitness = self.evaluate_fitness(
-                    &ind.strategy,
+                let (fitness, sharpe, sortino, profit_factor, max_dd) = self.evaluate_individual(
+                    &ind.params,
+                    &strategy_name,
                     data,
                     (*instrument_arc).clone(),
                     quantity,
@@ -200,32 +195,11 @@ impl GaOptimizer {
                     risk_engine.clone(),
                     &calendar,
                 );
-                // Update component metrics
-                let result = self.run_backtest(
-                    &ind.strategy,
-                    data,
-                    (*instrument_arc).clone(),
-                    quantity,
-                    initial_cash,
-                    risk_engine.clone(),
-                    &calendar,
-                );
-                if let Ok(bt_result) = result {
-                    ind.sharpe = bt_result.net_pnl.to_f64().unwrap_or(0.0)
-                        / bt_result
-                            .total_fees
-                            .total()
-                            .to_f64()
-                            .unwrap_or(1.0)
-                            .max(1e-10);
-                    ind.sortino = ind.sharpe * 0.8; // Approximation
-                    ind.profit_factor = if bt_result.gross_pnl > Decimal::ZERO {
-                        1.5
-                    } else {
-                        0.5
-                    };
-                    ind.max_drawdown_pct = bt_result.max_drawdown_pct.to_f64().unwrap_or(0.0);
-                }
+                ind.fitness = fitness;
+                ind.sharpe = sharpe;
+                ind.sortino = sortino;
+                ind.profit_factor = profit_factor;
+                ind.max_drawdown_pct = max_dd;
             });
 
             // Sort by fitness (descending)
@@ -269,12 +243,12 @@ impl GaOptimizer {
                 }
             }
 
-            // Selection, crossover, mutation
+            // Selection, crossover, mutation (work on params only — no DynStrategy clone)
             let parents = self.tournament_selection(&population, &mut rng);
             let offspring = self.crossover(&parents, &mut rng);
-            let mut new_population = self.mutate(&offspring, (*instrument_arc).clone(), quantity);
+            let mut new_population = self.mutate(&offspring);
 
-            // Elitism
+            // Elitism: carry forward the best individuals unchanged
             if self.config.elitism && self.config.elite_count > 0 {
                 let elite: Vec<Individual> = population
                     .into_iter()
@@ -306,14 +280,15 @@ impl GaOptimizer {
             .map_err(|e| GaError::FactoryError(e.to_string()))?;
 
         let best_individual = Individual {
-            strategy: best_strategy,
             params: best_params,
+            strategy_name: manifest.name.clone(),
             fitness: best_fitness,
             sharpe: best_sharpe,
             sortino: best_sortino,
             profit_factor: best_profit_factor,
             max_drawdown_pct: best_max_drawdown_pct,
         };
+        let _ = best_strategy; // kept for interface symmetry; result carries params
 
         Ok(GaOptimizationResult {
             best_individual,
@@ -325,7 +300,8 @@ impl GaOptimizer {
         })
     }
 
-    /// Initialize population with varied parameter sets from the grid.
+    /// Initialize population with varied parameter sets from the grid, each
+    /// evaluated with a real backtest.
     #[allow(clippy::too_many_arguments)] // sweep context is explicit: manifest, data, instrument, quantity, risk gate, calendar
     fn initialize_population(
         &self,
@@ -335,7 +311,7 @@ impl GaOptimizer {
         quantity: honba_core::Quantity,
         initial_cash: Decimal,
         risk_engine: RiskEngine,
-        calendar: &NseTradingCalendar,
+        calendar: &Arc<dyn TradingCalendar>,
     ) -> Result<Vec<Individual>, GaError> {
         let mut population = Vec::with_capacity(self.config.population_size);
         let mut rng = rand::thread_rng();
@@ -344,16 +320,10 @@ impl GaOptimizer {
             // Randomly sample from parameter grid
             let params = param_grid.choose(&mut rng).cloned().unwrap_or_default();
 
-            let strategy = self.factory_registry.create(
-                strategy_name,
+            let (fitness, sharpe, sortino, profit_factor, max_dd) = self.evaluate_individual(
                 &params,
-                instrument.clone(),
-                quantity,
-            )?;
-
-            let fitness = self.evaluate_fitness(
-                &strategy,
-                &[], // Will be evaluated properly in first generation
+                strategy_name,
+                &[],
                 instrument.clone(),
                 quantity,
                 initial_cash,
@@ -362,32 +332,48 @@ impl GaOptimizer {
             );
 
             population.push(Individual {
-                strategy,
                 params,
+                strategy_name: strategy_name.to_string(),
                 fitness,
-                sharpe: 0.0,
-                sortino: 0.0,
-                profit_factor: 0.0,
-                max_drawdown_pct: 0.0,
+                sharpe,
+                sortino,
+                profit_factor,
+                max_drawdown_pct: max_dd,
             });
         }
 
         Ok(population)
     }
 
-    /// Evaluate fitness of a strategy by running a backtest.
-    #[allow(clippy::too_many_arguments)] // sweep context is explicit: manifest, data, instrument, quantity, risk gate, calendar
-    fn evaluate_fitness(
+    /// Evaluate a single parameter set by running a real backtest through
+    /// [`BacktestEngine`].
+    ///
+    /// Returns `(fitness, sharpe, sortino, profit_factor, max_drawdown_pct)`.
+    #[allow(clippy::too_many_arguments)] // sweep context is explicit
+    fn evaluate_individual(
         &self,
-        strategy: &DynStrategy,
+        params: &BTreeMap<String, serde_json::Value>,
+        strategy_name: &str,
         data: &[Tick],
         instrument: InstrumentId,
         quantity: honba_core::Quantity,
         initial_cash: Decimal,
         risk_engine: RiskEngine,
-        calendar: &NseTradingCalendar,
-    ) -> f64 {
-        let result = self.run_backtest(
+        calendar: &Arc<dyn TradingCalendar>,
+    ) -> (f64, f64, f64, f64, f64) {
+        // Recreate the concrete strategy from the factory using stored params.
+        let strategy =
+            match self
+                .factory_registry
+                .create(strategy_name, params, instrument.clone(), quantity)
+            {
+                Ok(s) => s,
+                Err(_) => {
+                    return (f64::NEG_INFINITY, 0.0, 0.0, 0.0, 0.0);
+                }
+            };
+
+        let result = match self.run_backtest(
             strategy,
             data,
             instrument,
@@ -395,45 +381,64 @@ impl GaOptimizer {
             initial_cash,
             risk_engine,
             calendar,
+        ) {
+            Ok(r) => r,
+            Err(_) => {
+                return (f64::NEG_INFINITY, 0.0, 0.0, 0.0, 0.0);
+            }
+        };
+
+        let net_pnl = result.net_pnl.to_f64().unwrap_or(0.0);
+        let gross_pnl = result.gross_pnl.to_f64().unwrap_or(0.0);
+        let total_fees = result.total_fees.total().to_f64().unwrap_or(0.0);
+        let max_drawdown_pct = result.max_drawdown_pct.to_f64().unwrap_or(0.0);
+        let total_trades = result.total_trades;
+
+        let fitness = self.compute_multi_objective_fitness(
+            net_pnl,
+            gross_pnl,
+            total_fees,
+            max_drawdown_pct,
+            total_trades,
         );
 
-        match result {
-            Ok(bt_result) => self.compute_multi_objective_fitness(
-                bt_result.net_pnl.to_f64().unwrap_or(0.0),
-                bt_result.gross_pnl.to_f64().unwrap_or(0.0),
-                bt_result.total_fees.total().to_f64().unwrap_or(0.0),
-                bt_result.max_drawdown_pct.to_f64().unwrap_or(0.0),
-                bt_result.total_trades,
-            ),
-            Err(_) => f64::NEG_INFINITY,
-        }
+        // Component metrics approximated from the real backtest result.
+        let sharpe = if max_drawdown_pct > 0.0 {
+            (net_pnl / max_drawdown_pct).clamp(-10.0, 10.0)
+        } else {
+            0.0
+        };
+        let sortino = sharpe * 0.9;
+        let profit_factor = if total_fees > 0.0 && gross_pnl > 0.0 {
+            (gross_pnl / total_fees).min(10.0)
+        } else {
+            1.0
+        };
+
+        (fitness, sharpe, sortino, profit_factor, max_drawdown_pct)
     }
 
-    /// Run a backtest for a single strategy evaluation.
-    #[allow(clippy::too_many_arguments)] // sweep context is explicit: manifest, data, instrument, quantity, risk gate, calendar
+    /// Run a real backtest for a single strategy evaluation through
+    /// [`BacktestEngine`] using the canonical event loop.
+    #[allow(clippy::too_many_arguments)] // sweep context is explicit
     fn run_backtest(
         &self,
-        _strategy: &DynStrategy,
-        _data: &[Tick],
+        strategy: DynStrategy,
+        data: &[Tick],
         _instrument: InstrumentId,
         _quantity: honba_core::Quantity,
-        _initial_cash: Decimal,
-        _risk_engine: RiskEngine,
-        _calendar: &NseTradingCalendar,
+        initial_cash: Decimal,
+        risk_engine: RiskEngine,
+        calendar: &Arc<dyn TradingCalendar>,
     ) -> Result<BacktestResult, CatalogError> {
-        // We need to clone the strategy for the runner
-        // Since DynStrategy wraps Box<dyn Strategy>, we can't easily clone it.
-        // Instead, recreate from params - but we don't have params here.
-        // For now, use a simplified approach with the backtest engine directly.
-
-        // This is a limitation - we need a way to clone strategies for parallel evaluation
-        // For now, return a placeholder
-        Err(CatalogError::Io {
-            path: std::path::PathBuf::from("backtest"),
-            source: std::io::Error::other(
-                "Strategy cloning not implemented for parallel evaluation",
-            ),
-        })
+        let config = BacktestConfig {
+            starting_cash: initial_cash,
+            ..Default::default()
+        };
+        let mut engine = BacktestEngine::new(strategy, risk_engine, config, calendar.clone());
+        let market_events: Vec<MarketEvent> =
+            data.iter().map(|t| MarketEvent::Tick(t.clone())).collect();
+        Ok(engine.run_events(market_events))
     }
 
     /// Compute multi-objective fitness from backtest results.
@@ -507,7 +512,7 @@ impl GaOptimizer {
         parents
     }
 
-    /// Crossover to create offspring.
+    /// Crossover to create offspring (parameter-only, no strategy cloning).
     fn crossover(&self, parents: &[Individual], rng: &mut impl Rng) -> Vec<Individual> {
         let mut offspring = Vec::new();
 
@@ -531,11 +536,15 @@ impl GaOptimizer {
                     }
                 }
 
-                // We can't easily recreate the strategy here without the factory
-                // For now, just clone one parent and mutate
-                let mut child = p1.clone();
-                child.params = child_params;
-                offspring.push(child);
+                offspring.push(Individual {
+                    params: child_params,
+                    strategy_name: p1.strategy_name.clone(),
+                    fitness: 0.0,
+                    sharpe: 0.0,
+                    sortino: 0.0,
+                    profit_factor: 0.0,
+                    max_drawdown_pct: 0.0,
+                });
             } else {
                 offspring.push(p1.clone());
             }
@@ -548,18 +557,12 @@ impl GaOptimizer {
         offspring
     }
 
-    /// Apply Gaussian mutation to parameters.
-    fn mutate(
-        &self,
-        individuals: &[Individual],
-        _instrument: InstrumentId,
-        _quantity: honba_core::Quantity,
-    ) -> Vec<Individual> {
+    /// Apply Gaussian mutation to parameters (parameter-only, no strategy cloning).
+    fn mutate(&self, individuals: &[Individual]) -> Vec<Individual> {
         let mut result = Vec::with_capacity(individuals.len());
         let mut rng = rand::thread_rng();
 
         for individual in individuals {
-            let mut mutated = individual.clone();
             let mut mutated_params = individual.params.clone();
 
             for value in mutated_params.values_mut() {
@@ -578,11 +581,15 @@ impl GaOptimizer {
                 }
             }
 
-            // Note: We can't easily recreate the strategy with new params here
-            // without the factory. For a full implementation, we'd need to pass
-            // the factory or recreate the strategy.
-            mutated.params = mutated_params;
-            result.push(mutated);
+            result.push(Individual {
+                params: mutated_params,
+                strategy_name: individual.strategy_name.clone(),
+                fitness: 0.0,
+                sharpe: 0.0,
+                sortino: 0.0,
+                profit_factor: 0.0,
+                max_drawdown_pct: 0.0,
+            });
         }
 
         result
@@ -643,7 +650,8 @@ impl Default for GaOptimizer {
 /// Result of GA optimization.
 #[derive(Debug, Clone)]
 pub struct GaOptimizationResult {
-    /// Best individual found.
+    /// Best individual found (parameters + metrics; strategy can be recreated
+    /// via the factory registry).
     pub best_individual: Individual,
     /// Pareto-optimal frontier.
     pub pareto_frontier: Vec<Individual>,

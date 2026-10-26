@@ -154,9 +154,7 @@ fn strategy_runs_through_runner() {
 fn intent_into_order_preserves_fields() {
     let id = any_instrument();
     let intent = OrderIntent::market_buy(id.clone(), Quantity::from_u64(75));
-    let order = intent
-        .into_order("algo-1")
-        .unwrap();
+    let order = intent.into_order("algo-1").unwrap();
 
     assert_eq!(order.instrument, id);
     assert_eq!(order.side, OrderSide::Buy);

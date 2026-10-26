@@ -417,7 +417,7 @@ fn parse_sma(key: &str) -> Option<u32> {
 }
 
 fn validate_metric_key(key: &str) -> Result<(), ScreenerError> {
-    if BASE_METRICS.contains(&key) || parse_sma(key).is_some() {
+    if BASE_METRICS.contains(&key) || parse_sma(key).is_some() || key == "RSI" {
         Ok(())
     } else {
         Err(ScreenerError::UnsupportedMetric(key.to_owned()))
@@ -438,14 +438,11 @@ fn validate_operand(value: &Value) -> Result<(), ScreenerError> {
     match value {
         Value::Number(_) => Ok(()),
         Value::Object(map) => {
-            let key = map
-                .get("key")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    ScreenerError::InvalidFilter(
-                        "a metric reference must be {\"key\": \"<metric>\"}".to_owned(),
-                    )
-                })?;
+            let key = map.get("key").and_then(Value::as_str).ok_or_else(|| {
+                ScreenerError::InvalidFilter(
+                    "a metric reference must be {\"key\": \"<metric>\"}".to_owned(),
+                )
+            })?;
             validate_metric_key(key)
         }
         other => Err(ScreenerError::InvalidFilter(format!(
@@ -566,6 +563,31 @@ pub(crate) fn metric_value(key: &str, bars: &[Bar]) -> Option<Decimal> {
         // Exact decimal mean: the sum over the period, at the period's scale.
         return Some(sum / Decimal::from(period as u32));
     }
+    if key == "RSI" {
+        if bars.len() < 15 {
+            return None;
+        }
+        let period = 14;
+        let window = &bars[bars.len() - (period + 1)..];
+        let mut gains = Decimal::ZERO;
+        let mut losses = Decimal::ZERO;
+        for i in 1..=period {
+            let diff = window[i].close.0 - window[i - 1].close.0;
+            if diff > Decimal::ZERO {
+                gains += diff;
+            } else {
+                losses -= diff;
+            }
+        }
+        if losses == Decimal::ZERO {
+            return Some(Decimal::from(100));
+        }
+        if gains == Decimal::ZERO {
+            return Some(Decimal::ZERO);
+        }
+        let rs = gains / losses;
+        return Some(Decimal::from(100) - (Decimal::from(100) / (Decimal::ONE + rs)));
+    }
     let last = bars.last()?;
     match key {
         "open" => Some(last.open.0),
@@ -613,7 +635,9 @@ fn evaluate_item(item: &ScreenerFilterItem, bars: &[Bar]) -> Result<bool, Screen
                 "lt" => left < right,
                 "lte" => left <= right,
                 other => {
-                    return Err(ScreenerError::InvalidFilter(format!("unknown op {other:?}")));
+                    return Err(ScreenerError::InvalidFilter(format!(
+                        "unknown op {other:?}"
+                    )));
                 }
             })
         }
@@ -625,14 +649,11 @@ fn operand_value(value: &Value, bars: &[Bar]) -> Result<Option<Decimal>, Screene
     match value {
         Value::Number(number) => to_decimal(number).map(Some),
         Value::Object(_) => {
-            let key = value
-                .get("key")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    ScreenerError::InvalidFilter(
-                        "a metric reference must be {\"key\": \"<metric>\"}".to_owned(),
-                    )
-                })?;
+            let key = value.get("key").and_then(Value::as_str).ok_or_else(|| {
+                ScreenerError::InvalidFilter(
+                    "a metric reference must be {\"key\": \"<metric>\"}".to_owned(),
+                )
+            })?;
             Ok(metric_value(key, bars))
         }
         other => Err(ScreenerError::InvalidFilter(format!(

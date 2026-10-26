@@ -7,11 +7,11 @@
 //! partial FIFO consumption cannot drift.
 
 use crate::orders::parse_side;
-use crate::{with_executor, Database};
-use sqlx::Row;
+use crate::{Database, with_executor};
 use chrono::{DateTime, Utc};
 use honba_core::{InstrumentId, OrderSide};
 use rust_decimal::Decimal;
+use sqlx::Row;
 use thiserror::Error;
 
 /// Position store errors.
@@ -24,7 +24,9 @@ pub enum PositionStoreError {
     #[error("position not found: {0}")]
     NotFound(String),
     /// A long-only position cannot satisfy the requested sell quantity.
-    #[error("insufficient open position for {instrument} (client {client_id}): requested {requested}, open {open}")]
+    #[error(
+        "insufficient open position for {instrument} (client {client_id}): requested {requested}, open {open}"
+    )]
     InsufficientPosition {
         /// Canonical instrument string.
         instrument: String,
@@ -391,11 +393,11 @@ impl PositionStore {
             let row = sqlx::query(&format!(
                 "{SELECT_POSITIONS} WHERE client_id = $1 AND exchange = $2 AND symbol = $3"
             ))
-                .bind(client_id)
-                .bind(&exchange)
-                .bind(&symbol)
-                .fetch_one(&mut *tx)
-                .await?;
+            .bind(client_id)
+            .bind(&exchange)
+            .bind(&symbol)
+            .fetch_one(&mut *tx)
+            .await?;
             let persisted = PersistedPosition::from_row(&row)?;
             tx.commit().await?;
             Ok(persisted)

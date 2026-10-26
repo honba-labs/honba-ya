@@ -9,20 +9,14 @@ use crate::trading_state::state_command;
 fn set_spellings_map_to_trading_state() {
     for (raw, expected) in [
         ("active", TradingState::Active),
-        (
-            "reducing",
-            TradingState::Paused { resume_at: None },
-        ),
+        ("reducing", TradingState::Paused { resume_at: None }),
         (
             "halted",
             TradingState::Halted {
                 reason: "operator halt via `honba trading-state set`".to_string(),
             },
         ),
-        (
-            "REDUCING",
-            TradingState::Paused { resume_at: None },
-        ),
+        ("REDUCING", TradingState::Paused { resume_at: None }),
     ] {
         assert_eq!(state_command(raw).unwrap(), expected, "{raw}");
     }

@@ -7,7 +7,7 @@
 //! - OpenAPI endpoints and Swagger UI version selector
 
 use axum::body::Body;
-use axum::http::{header, Request, StatusCode};
+use axum::http::{Request, StatusCode, header};
 use honba_api_rest::api_router;
 use serde_json::Value;
 use tower::util::ServiceExt;
@@ -135,7 +135,10 @@ async fn openapi_endpoints_serve_versioned_schemas_and_index() {
         .unwrap();
     let (status_v1, headers_v1, body_v1) = call_req(req_v1).await;
     assert_eq!(status_v1, StatusCode::OK);
-    assert_eq!(headers_v1.get(header::CONTENT_TYPE).unwrap(), "application/json");
+    assert_eq!(
+        headers_v1.get(header::CONTENT_TYPE).unwrap(),
+        "application/json"
+    );
     assert_eq!(body_v1["openapi"], "3.1.0");
     assert_eq!(body_v1["info"]["version"], "1.0.0");
     assert_eq!(body_v1["servers"][0]["url"], "/api/v1");
@@ -148,7 +151,10 @@ async fn openapi_endpoints_serve_versioned_schemas_and_index() {
         .unwrap();
     let (status_v2, headers_v2, body_v2) = call_req(req_v2).await;
     assert_eq!(status_v2, StatusCode::OK);
-    assert_eq!(headers_v2.get(header::CONTENT_TYPE).unwrap(), "application/json");
+    assert_eq!(
+        headers_v2.get(header::CONTENT_TYPE).unwrap(),
+        "application/json"
+    );
     assert_eq!(body_v2["openapi"], "3.1.0");
     assert_eq!(body_v2["info"]["version"], "2.0.0");
     assert_eq!(body_v2["servers"][0]["url"], "/api/v2");

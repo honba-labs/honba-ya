@@ -38,10 +38,7 @@ fn pair_fills_pairs_consecutive_entry_exit_fills() {
         fill(OrderSide::Buy, 104.0, 4),
     ];
     let trips = pair_fills(&fills);
-    let pnl: Vec<f64> = trips
-        .iter()
-        .map(|t| t.net_pnl.to_f64().unwrap())
-        .collect();
+    let pnl: Vec<f64> = trips.iter().map(|t| t.net_pnl.to_f64().unwrap()).collect();
     assert_eq!(pnl, [5.0, 6.0]);
 }
 

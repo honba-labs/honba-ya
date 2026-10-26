@@ -280,12 +280,10 @@ impl RunService {
         }
         if queue.items.len() >= self.max_queued {
             return Err(
-                ErrorDetail::new(ErrorCode::Timeout, "the run queue is full").with_context(
-                    json!({
-                        "reason": "run_queue_full",
-                        "max_queued": self.max_queued
-                    }),
-                ),
+                ErrorDetail::new(ErrorCode::Timeout, "the run queue is full").with_context(json!({
+                    "reason": "run_queue_full",
+                    "max_queued": self.max_queued
+                })),
             );
         }
         let manifest =
@@ -326,12 +324,10 @@ impl RunService {
         }
         if queue.items.len() >= self.max_queued {
             return Err(
-                ErrorDetail::new(ErrorCode::Timeout, "the run queue is full").with_context(
-                    json!({
-                        "reason": "run_queue_full",
-                        "max_queued": self.max_queued
-                    }),
-                ),
+                ErrorDetail::new(ErrorCode::Timeout, "the run queue is full").with_context(json!({
+                    "reason": "run_queue_full",
+                    "max_queued": self.max_queued
+                })),
             );
         }
         let manifest =

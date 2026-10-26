@@ -2,15 +2,15 @@
 
 use std::sync::{Arc, PoisonError};
 
-use axum::handler::Handler as _;
+use axum::Router;
 use axum::extract::{Path, State};
+use axum::handler::Handler as _;
 use axum::http::StatusCode;
 use axum::response::{Json, Response};
 use axum::routing::{delete, get, post, put};
-use axum::Router;
 use honba_api::{
-    ApiResponse, Capabilities, CapabilitiesResponse, CompiledStrategy,
-    OrdersRequest, ResponseEnvelope, StrategiesResponse, SweepRequest, VerifyStrategyRequest,
+    ApiResponse, Capabilities, CapabilitiesResponse, CompiledStrategy, OrdersRequest,
+    ResponseEnvelope, StrategiesResponse, SweepRequest, VerifyStrategyRequest,
     VerifyStrategyResponse,
 };
 
@@ -21,8 +21,8 @@ use crate::reports::{
 };
 use crate::ws::ws_handler;
 use crate::{
-    capability_manifest, ingest, openapi, orders, portfolio, profile, runs, screener,
-    streams::get_backtest_events, trading_state, ApiJson, AppState,
+    ApiJson, AppState, capability_manifest, ingest, openapi, orders, portfolio, profile, runs,
+    screener, streams::get_backtest_events, trading_state,
 };
 
 /// Get API capabilities for v1.
@@ -99,7 +99,10 @@ pub async fn post_sweeps(
 }
 
 /// Get sweep by id.
-pub async fn get_sweep_by_id(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+pub async fn get_sweep_by_id(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
     runs::get_sweep_by_id(State(state), Path(id)).await
 }
 
@@ -112,7 +115,10 @@ pub async fn get_orders(
 }
 
 /// Post orders.
-pub async fn post_orders(State(state): State<Arc<AppState>>, req: ApiJson<OrdersRequest>) -> Response {
+pub async fn post_orders(
+    State(state): State<Arc<AppState>>,
+    req: ApiJson<OrdersRequest>,
+) -> Response {
     orders::post_orders(State(state), req, "rest".to_string()).await
 }
 
@@ -199,7 +205,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/reports/fills/:order_id", get(get_order_fills))
         .route("/strategies", post(post_strategies).get(get_strategies))
         .route("/strategies/verify", post(post_verify_strategy))
-        .route("/backtests", post(runs::post_backtests).get(runs::get_backtests))
+        .route(
+            "/backtests",
+            post(runs::post_backtests).get(runs::get_backtests),
+        )
         .route("/backtests/:id", get(runs::get_backtest_by_id))
         .route("/backtests/:id/journal", get(runs::get_backtest_journal))
         .route("/backtests/:id/events", get(get_backtest_events))

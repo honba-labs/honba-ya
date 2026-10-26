@@ -383,8 +383,7 @@ async fn a_journal_at_another_schema_version_is_422_unsupported() {
 
 #[tokio::test]
 #[ignore = "journal fills carry their own context without earlier order record"]
-async fn a_fill_without_an_order_record_is_a_500_journal_orphan_fill() {
-}
+async fn a_fill_without_an_order_record_is_a_500_journal_orphan_fill() {}
 
 #[tokio::test]
 async fn restart_recovery_through_the_router() {

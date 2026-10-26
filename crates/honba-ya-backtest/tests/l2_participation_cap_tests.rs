@@ -15,6 +15,7 @@ use honba_backtest::{NseTradingCalendar, ProductType};
 use honba_core::{Bar, Exchange, InstrumentId, Price, Quantity};
 use honba_mon::{OtrConfig, RiskEngine, RiskLimits};
 use honba_strategy::{OrderIntent, Strategy, StrategyContext};
+use std::sync::Arc;
 
 fn bar(inst: &InstrumentId, close: &str, volume: u64, ts: DateTime<Utc>) -> Bar {
     let price = Price::from_rupees(close).unwrap();
@@ -77,10 +78,15 @@ fn run_once(
         ProductType::Delivery,
         NetworkLatency::new(0, 0, 1),
         slippage,
-        MisSquareOffManager::new(NseTradingCalendar::new()),
+        MisSquareOffManager::new(Arc::new(NseTradingCalendar::new())),
     );
 
-    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
+    let mut engine = BacktestEngine::new(
+        strategy,
+        risk_engine,
+        config,
+        Arc::new(NseTradingCalendar::new()),
+    );
 
     let day = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
     let t0 = Utc.from_utc_datetime(&day.and_time(NaiveTime::from_hms_opt(9, 20, 0).unwrap()));

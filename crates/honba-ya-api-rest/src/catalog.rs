@@ -17,12 +17,12 @@ use async_trait::async_trait;
 use honba_api::parse_timeframe;
 use honba_api::wire::{BarAggregation, BarSpecification, PriceType};
 use honba_core::{Exchange, InstrumentId};
+use honba_feed::ports::{BarReader, BarRequest, PortError, PortResult};
 use honba_feed::wire::Bar;
 use honba_feed::{
     ColumnarSlice, ColumnarSliceBuilder, Dataset, DatasetBuildError, DatasetReader,
     ParquetBarSource, ParquetError,
 };
-use honba_feed::ports::{BarReader, BarRequest, PortError, PortResult};
 use thiserror::Error;
 
 /// Converts the REST contract's bar specification (`honba_api::wire`, this crate's own

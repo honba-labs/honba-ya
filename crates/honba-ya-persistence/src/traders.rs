@@ -53,14 +53,22 @@ impl PersistedTrader {
         DateTime<Utc>: sqlx::Type<R::Database> + for<'r> sqlx::Decode<'r, R::Database>,
     {
         let id: i64 = row.try_get("id").map_err(TraderStoreError::Database)?;
-        let client_id: String = row.try_get("client_id").map_err(TraderStoreError::Database)?;
+        let client_id: String = row
+            .try_get("client_id")
+            .map_err(TraderStoreError::Database)?;
         let algo_id: String = row.try_get("algo_id").map_err(TraderStoreError::Database)?;
-        let risk_profile: String = row.try_get("risk_profile").map_err(TraderStoreError::Database)?;
+        let risk_profile: String = row
+            .try_get("risk_profile")
+            .map_err(TraderStoreError::Database)?;
         let cap_str: String = row.try_get("capital").map_err(TraderStoreError::Database)?;
-        let capital = Decimal::from_str(&cap_str)
-            .map_err(|_| TraderStoreError::InvalidCapital(cap_str))?;
-        let created_at: DateTime<Utc> = row.try_get("created_at").map_err(TraderStoreError::Database)?;
-        let updated_at: DateTime<Utc> = row.try_get("updated_at").map_err(TraderStoreError::Database)?;
+        let capital =
+            Decimal::from_str(&cap_str).map_err(|_| TraderStoreError::InvalidCapital(cap_str))?;
+        let created_at: DateTime<Utc> = row
+            .try_get("created_at")
+            .map_err(TraderStoreError::Database)?;
+        let updated_at: DateTime<Utc> = row
+            .try_get("updated_at")
+            .map_err(TraderStoreError::Database)?;
 
         Ok(Self {
             id,
@@ -154,11 +162,17 @@ impl TraderStore {
         let sql_sqlite = format!("{SELECT_TRADERS} WHERE client_id = ?");
         match &self.db {
             Database::Postgres(pool) => {
-                let maybe_row = sqlx::query(&sql).bind(client_id).fetch_optional(pool).await?;
+                let maybe_row = sqlx::query(&sql)
+                    .bind(client_id)
+                    .fetch_optional(pool)
+                    .await?;
                 maybe_row.map(|r| PersistedTrader::from_row(&r)).transpose()
             }
             Database::Sqlite(pool) => {
-                let maybe_row = sqlx::query(&sql_sqlite).bind(client_id).fetch_optional(pool).await?;
+                let maybe_row = sqlx::query(&sql_sqlite)
+                    .bind(client_id)
+                    .fetch_optional(pool)
+                    .await?;
                 maybe_row.map(|r| PersistedTrader::from_row(&r)).transpose()
             }
         }
@@ -177,7 +191,10 @@ impl TraderStore {
                 maybe_row.map(|r| PersistedTrader::from_row(&r)).transpose()
             }
             Database::Sqlite(pool) => {
-                let maybe_row = sqlx::query(&sql_sqlite).bind(algo_id).fetch_optional(pool).await?;
+                let maybe_row = sqlx::query(&sql_sqlite)
+                    .bind(algo_id)
+                    .fetch_optional(pool)
+                    .await?;
                 maybe_row.map(|r| PersistedTrader::from_row(&r)).transpose()
             }
         }

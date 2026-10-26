@@ -4,8 +4,8 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 use chrono::DateTime;
-use honba_api::{ErrorCode, Event, Message, SCHEMA_VERSION};
 use honba_api::wire::QuoteTick;
+use honba_api::{ErrorCode, Event, Message, SCHEMA_VERSION};
 use honba_core::{Exchange, InstrumentId};
 use rust_decimal::Decimal;
 

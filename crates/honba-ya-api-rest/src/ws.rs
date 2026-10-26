@@ -15,14 +15,14 @@ use tracing::debug;
 
 use axum::{
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::Response,
 };
 use futures::{SinkExt, StreamExt};
-use honba_core::rust_decimal::prelude::ToPrimitive;
 use honba_core::Tick;
+use honba_core::rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
@@ -142,9 +142,16 @@ pub fn tick_to_ws(tick: &Tick, prev_price: Option<f64>) -> WsTick {
         } => {
             let p = last_price
                 .map(|lp| lp.0.to_f64().unwrap_or(0.0))
-                .unwrap_or_else(|| (bid.0.to_f64().unwrap_or(0.0) + ask.0.to_f64().unwrap_or(0.0)) / 2.0);
+                .unwrap_or_else(|| {
+                    (bid.0.to_f64().unwrap_or(0.0) + ask.0.to_f64().unwrap_or(0.0)) / 2.0
+                });
             let v = (bid_qty.0 + ask_qty.0).to_f64().unwrap_or(0.0);
-            (instrument.symbol.clone(), p, Some(v), exchange_ts.timestamp_millis())
+            (
+                instrument.symbol.clone(),
+                p,
+                Some(v),
+                exchange_ts.timestamp_millis(),
+            )
         }
         Tick::Depth {
             instrument,
@@ -155,8 +162,17 @@ pub fn tick_to_ws(tick: &Tick, prev_price: Option<f64>) -> WsTick {
         } => {
             let p = last_price
                 .map(|lp| lp.0.to_f64().unwrap_or(0.0))
-                .unwrap_or_else(|| bids.first().map(|b| b.price.0.to_f64().unwrap_or(0.0)).unwrap_or(0.0));
-            (instrument.symbol.clone(), p, None, exchange_ts.timestamp_millis())
+                .unwrap_or_else(|| {
+                    bids.first()
+                        .map(|b| b.price.0.to_f64().unwrap_or(0.0))
+                        .unwrap_or(0.0)
+                });
+            (
+                instrument.symbol.clone(),
+                p,
+                None,
+                exchange_ts.timestamp_millis(),
+            )
         }
     };
 

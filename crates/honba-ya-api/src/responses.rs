@@ -17,7 +17,7 @@ use honba_core::{Bar, Currency, InstrumentId, OrderSide};
 use crate::capabilities::Capabilities;
 use crate::strategy_ir::StrategyIr;
 use crate::wire::{
-    ErrorDetail, Message, Order, Position, PortfolioAccount, PortfolioHolding, PortfolioPosition,
+    ErrorDetail, Message, Order, PortfolioAccount, PortfolioHolding, PortfolioPosition, Position,
     QuoteTick, Trade, TradingState, ValidationBlock,
 };
 

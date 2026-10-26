@@ -1,7 +1,10 @@
 //! Message contracts and types for actor communications.
 
 use chrono::{DateTime, Utc};
-use honba_core::{Bar, FillReport, InstrumentId, Money, OrderAck, OrderRequest, OrderStatus, Price, Quantity, Tick};
+use honba_core::{
+    Bar, FillReport, InstrumentId, Money, OrderAck, OrderRequest, OrderStatus, Price, Quantity,
+    Tick,
+};
 use honba_portfolio::CorporateAction;
 use honba_portfolio::TaxSummary;
 use rust_decimal::Decimal;

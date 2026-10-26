@@ -284,7 +284,12 @@ impl SqliteAuditLedger {
         .bind(event.instrument.to_string())
         .bind(side_str)
         .bind(order_type_str)
-        .bind(event.requested_qty.map(|q| q.0.to_string()).unwrap_or_default())
+        .bind(
+            event
+                .requested_qty
+                .map(|q| q.0.to_string())
+                .unwrap_or_default(),
+        )
         .bind(price_str)
         .bind(&event.refusal_reason)
         .bind(event.eval_duration_us as i64)

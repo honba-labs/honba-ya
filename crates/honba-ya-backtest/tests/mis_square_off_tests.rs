@@ -18,6 +18,7 @@ use honba_backtest::{NseTradingCalendar, ProductType};
 use honba_core::{Bar, Exchange, InstrumentId, OrderSide, Price, Quantity};
 use honba_mon::{OtrConfig, RiskEngine, RiskLimits};
 use honba_strategy::{OrderIntent, Strategy, StrategyContext};
+use std::sync::Arc;
 
 fn bar(inst: &InstrumentId, close: &str, ts: DateTime<Utc>) -> Bar {
     let price = Price::from_rupees(close).unwrap();
@@ -95,10 +96,17 @@ fn test_square_off_closes_all_open_mis_positions_at_1520_ist() {
     let config = BacktestConfig {
         starting_cash: dec!(1_000_000.00),
         product_type: ProductType::Intraday,
-        mis_square_off: Some(MisSquareOffManager::new(NseTradingCalendar::new())),
+        mis_square_off: Some(MisSquareOffManager::new(
+            Arc::new(NseTradingCalendar::new()),
+        )),
         ..Default::default()
     };
-    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
+    let mut engine = BacktestEngine::new(
+        strategy,
+        risk_engine,
+        config,
+        Arc::new(NseTradingCalendar::new()),
+    );
 
     let events = vec![
         MarketEvent::Bar(bar(&inst1, "1500.00", before_square_off_utc(day))),
@@ -146,10 +154,17 @@ fn test_process_trade_updates_square_off_eligibility() {
     let config = BacktestConfig {
         starting_cash: dec!(1_000_000.00),
         product_type: ProductType::Intraday,
-        mis_square_off: Some(MisSquareOffManager::new(NseTradingCalendar::new())),
+        mis_square_off: Some(MisSquareOffManager::new(
+            Arc::new(NseTradingCalendar::new()),
+        )),
         ..Default::default()
     };
-    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
+    let mut engine = BacktestEngine::new(
+        strategy,
+        risk_engine,
+        config,
+        Arc::new(NseTradingCalendar::new()),
+    );
 
     let events = vec![MarketEvent::Bar(bar(
         &inst,
@@ -178,10 +193,17 @@ fn test_no_square_off_for_delivery_positions() {
     let config = BacktestConfig {
         starting_cash: dec!(1_000_000.00),
         product_type: ProductType::Delivery,
-        mis_square_off: Some(MisSquareOffManager::new(NseTradingCalendar::new())),
+        mis_square_off: Some(MisSquareOffManager::new(
+            Arc::new(NseTradingCalendar::new()),
+        )),
         ..Default::default()
     };
-    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
+    let mut engine = BacktestEngine::new(
+        strategy,
+        risk_engine,
+        config,
+        Arc::new(NseTradingCalendar::new()),
+    );
 
     let events = vec![
         MarketEvent::Bar(bar(&inst, "1500.00", before_square_off_utc(day))),

@@ -8,7 +8,7 @@ use honba_core::{
     Exchange, InstrumentId, OrderRequest, OrderSide, OrderStatus, OrderType, Price, Quantity,
 };
 use honba_persistence::orders::is_legal_transition;
-use honba_persistence::{migrate, Database, OrderStore, OrderStoreError, PersistedOrder};
+use honba_persistence::{Database, OrderStore, OrderStoreError, PersistedOrder, migrate};
 use rust_decimal_macros::dec;
 
 async fn setup() -> Database {
@@ -38,22 +38,18 @@ fn sample_request(algo_id: &str) -> OrderRequest {
 async fn count_order(db: &Database, client_order_id: &str) -> i64 {
     match db {
         Database::Sqlite(pool) => {
-            sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM orders WHERE client_order_id = $1",
-            )
-            .bind(client_order_id)
-            .fetch_one(pool)
-            .await
-            .unwrap()
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM orders WHERE client_order_id = $1")
+                .bind(client_order_id)
+                .fetch_one(pool)
+                .await
+                .unwrap()
         }
         Database::Postgres(pool) => {
-            sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM orders WHERE client_order_id = $1",
-            )
-            .bind(client_order_id)
-            .fetch_one(pool)
-            .await
-            .unwrap()
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM orders WHERE client_order_id = $1")
+                .bind(client_order_id)
+                .fetch_one(pool)
+                .await
+                .unwrap()
         }
     }
 }
@@ -130,7 +126,10 @@ async fn full_legal_transition_matrix_and_illegal_rejections() {
         (Expired, New),
     ];
     for (from, to) in legal {
-        assert!(is_legal_transition(from, to), "{from:?} -> {to:?} must be legal");
+        assert!(
+            is_legal_transition(from, to),
+            "{from:?} -> {to:?} must be legal"
+        );
     }
     for (from, to) in illegal {
         assert!(
@@ -185,7 +184,12 @@ async fn full_legal_transition_matrix_and_illegal_rejections() {
 
     // Unknown order -> NotFound.
     match store
-        .update_status("00000000-0000-0000-0000-000000000000", PendingNew, New, ts(1006))
+        .update_status(
+            "00000000-0000-0000-0000-000000000000",
+            PendingNew,
+            New,
+            ts(1006),
+        )
         .await
     {
         Err(OrderStoreError::NotFound(_)) => {}
@@ -204,7 +208,13 @@ async fn broker_order_id_roundtrip() {
     let req = sample_request("algo-order-03");
     let cid = req.client_order_id.to_string();
     store.upsert(&req, ts(1000)).await.expect("upsert");
-    assert!(store.get_by_broker_order_id("BRK-999").await.unwrap().is_none());
+    assert!(
+        store
+            .get_by_broker_order_id("BRK-999")
+            .await
+            .unwrap()
+            .is_none()
+    );
 
     let acked = store
         .attach_broker_order_id(&cid, "BRK-999", ts(1001))
@@ -246,8 +256,11 @@ async fn concurrent_upserts_return_existing_row_without_duplicates() {
         })
         .collect();
 
-    let results: Vec<Result<PersistedOrder, OrderStoreError>> =
-        join_all(handles).await.into_iter().map(|r| r.unwrap()).collect();
+    let results: Vec<Result<PersistedOrder, OrderStoreError>> = join_all(handles)
+        .await
+        .into_iter()
+        .map(|r| r.unwrap())
+        .collect();
     let mut seen_ids = Vec::new();
     for result in results {
         let order = result.expect("concurrent upsert must succeed");

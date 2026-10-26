@@ -72,7 +72,14 @@ async fn ws_streams_ticks_to_client() {
     let spec = BarSpecification::new(1, BarAggregation::Minute, PriceType::Last);
     let mut builder = ColumnarSliceBuilder::new(id.clone(), spec);
     builder
-        .push(UnixNanos::from_u64(1), 2500.0, 2500.0, 2500.0, 2500.0, 100.0)
+        .push(
+            UnixNanos::from_u64(1),
+            2500.0,
+            2500.0,
+            2500.0,
+            2500.0,
+            100.0,
+        )
         .unwrap();
     let dataset = Dataset::from_slices(vec![builder.finish().unwrap()]).unwrap();
     let instrument = Instrument::new(id, InstrumentKind::Equity, Currency::Inr, 1.0, 0.05);
@@ -99,4 +106,3 @@ async fn ws_streams_ticks_to_client() {
     stop.send(()).unwrap();
     server.await.unwrap().unwrap();
 }
-

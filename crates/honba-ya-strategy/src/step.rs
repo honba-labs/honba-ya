@@ -252,7 +252,10 @@ impl StepManifest {
         manifest.warmup_bars = warmup_bars;
         manifest.parameters = parameters;
         manifest.subscriptions = Subscriptions {
-            instruments: vec![honba_core::InstrumentId::new(honba_core::Exchange::Nse, "NIFTY50")],
+            instruments: vec![honba_core::InstrumentId::new(
+                honba_core::Exchange::Nse,
+                "NIFTY50",
+            )],
             quotes: false,
             trades: false,
         };

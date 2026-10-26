@@ -88,7 +88,10 @@ impl NetworkLatency {
     pub fn advance_step(&mut self) {
         self.step += 1;
         // Simple trending: latency increases slowly over time
-        self.current_latency_us = self.mean_us.saturating_add(self.step / 1000).max(self.mean_us);
+        self.current_latency_us = self
+            .mean_us
+            .saturating_add(self.step / 1000)
+            .max(self.mean_us);
     }
 }
 
@@ -121,9 +124,7 @@ impl MisSquareOffLatency {
     pub fn advance_time_ist(&mut self, seconds: u64) {
         self.current_time_ist_seconds += seconds;
         // Check if we've passed square-off time
-        if !self.square_off_triggered
-            && self.current_time_ist_seconds >= self.square_off_seconds
-        {
+        if !self.square_off_triggered && self.current_time_ist_seconds >= self.square_off_seconds {
             self.square_off_triggered = true;
         }
     }
@@ -144,7 +145,9 @@ impl MisSquareOffLatency {
         if self.square_off_triggered {
             return None;
         }
-        let remaining = self.square_off_seconds.saturating_sub(self.current_time_ist_seconds);
+        let remaining = self
+            .square_off_seconds
+            .saturating_sub(self.current_time_ist_seconds);
         Some(remaining)
     }
 }

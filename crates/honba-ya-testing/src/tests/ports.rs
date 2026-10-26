@@ -220,7 +220,12 @@ struct EndlessGateway;
 #[async_trait]
 impl ExecutionGateway for EndlessGateway {
     async fn submit_order(&mut self, _order: OrderRequest) -> PortResult<OrderAck> {
-        Ok(OrderAck::new("O-1", Uuid::nil(), OrderStatus::New, utc_nanos(0)))
+        Ok(OrderAck::new(
+            "O-1",
+            Uuid::nil(),
+            OrderStatus::New,
+            utc_nanos(0),
+        ))
     }
 
     async fn cancel_order(&mut self, _order_id: &str) -> PortResult<()> {
@@ -357,10 +362,7 @@ async fn map_instrument_master_returns_registered_instruments() {
 
     assert_eq!(master.len(), 2);
     assert!(!master.is_empty());
-    assert_eq!(
-        master.get_instrument(&known.id).await.unwrap(),
-        Some(known)
-    );
+    assert_eq!(master.get_instrument(&known.id).await.unwrap(), Some(known));
     assert_eq!(
         master.get_instrument(&instrument("MISSING")).await.unwrap(),
         None
@@ -398,7 +400,10 @@ async fn stub_gateway_numbers_orders_and_fills_once() {
 
     assert_eq!(first.order_id, "STUB-1");
     assert_eq!(second.order_id, "STUB-2");
-    assert_eq!(gateway.submitted(), &["STUB-1".to_string(), "STUB-2".to_string()]);
+    assert_eq!(
+        gateway.submitted(),
+        &["STUB-1".to_string(), "STUB-2".to_string()]
+    );
     assert_eq!(gateway.cancellations(), &["STUB-1".to_string()]);
     assert_eq!(
         gateway.modifications(),
@@ -506,10 +511,7 @@ async fn sink_contract_rejects_a_failing_write() {
 #[tokio::test]
 async fn clock_contract_rejects_a_sleep_that_does_not_advance_time() {
     assert_violation(
-        check_clock_contract(&FrozenClock {
-            now: utc_nanos(5),
-        })
-        .await,
+        check_clock_contract(&FrozenClock { now: utc_nanos(5) }).await,
         "a clock whose sleep returns without waiting violates the contract",
     );
 }

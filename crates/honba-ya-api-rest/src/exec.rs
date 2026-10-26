@@ -120,7 +120,10 @@ impl NextOpenSim {
                 OrderSide::Buy => w.quantity,
                 OrderSide::Sell => -w.quantity,
             };
-            let entry = self.holdings.entry(w.instrument_id).or_insert(Decimal::ZERO);
+            let entry = self
+                .holdings
+                .entry(w.instrument_id)
+                .or_insert(Decimal::ZERO);
             *entry += signed;
             ledger.apply_fill(
                 &order_id,

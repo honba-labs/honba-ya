@@ -3,7 +3,7 @@
 //! `audit_ledger` in sqlite migrations), and full down-migration rollback —
 //! SQLite in-memory via `Database::connect`.
 
-use honba_persistence::{migrate, rollback_last, Database};
+use honba_persistence::{Database, migrate, rollback_last};
 
 async fn setup() -> Database {
     Database::connect("sqlite::memory:")
@@ -119,8 +119,18 @@ async fn rollback_last_then_re_migrate_then_full_rollback_to_empty() {
     }
     assert_eq!(rolled_back, vec![5, 4, 3, 2, 1]);
     assert_eq!(applied_count(&db).await, 0);
-    for name in ["traders", "orders", "fills", "decisions", "positions", "position_lots"] {
-        assert!(!table_exists(&db, name).await, "table {name} must be dropped");
+    for name in [
+        "traders",
+        "orders",
+        "fills",
+        "decisions",
+        "positions",
+        "position_lots",
+    ] {
+        assert!(
+            !table_exists(&db, name).await,
+            "table {name} must be dropped"
+        );
     }
     // The tracking table itself survives (not part of the migration set).
     assert!(table_exists(&db, "schema_migrations").await);

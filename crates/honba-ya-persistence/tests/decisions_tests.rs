@@ -3,7 +3,7 @@
 //! SQLite in-memory via `Database::connect` + `migrate`.
 
 use chrono::{DateTime, TimeZone, Utc};
-use honba_persistence::{migrate, sha256_hex, Database, DecisionStore, DecisionStoreError};
+use honba_persistence::{Database, DecisionStore, DecisionStoreError, migrate, sha256_hex};
 use rust_decimal_macros::dec;
 
 async fn setup() -> Database {
@@ -182,10 +182,7 @@ async fn list_by_algo_is_ordered_by_created_at_desc() {
         .await
         .expect("insert other algo");
 
-    let all = store
-        .list_by_algo("algo-dec-list", 10)
-        .await
-        .expect("list");
+    let all = store.list_by_algo("algo-dec-list", 10).await.expect("list");
     let ids: Vec<&str> = all.iter().map(|d| d.decision_id.as_str()).collect();
     assert_eq!(ids, vec!["DEC-A3", "DEC-A2", "DEC-A1"]);
     assert_eq!(all[0].created_at, ts(300));

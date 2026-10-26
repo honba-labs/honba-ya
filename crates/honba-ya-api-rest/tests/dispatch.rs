@@ -54,15 +54,16 @@ async fn a_get_returns_the_envelope_and_status() {
     let (status, body) = call("GET", "/health", None).await;
     assert_eq!((status, &body["data"]["status"]), (200, &json!("ok")));
     let (status, body) = call("GET", "/quotes?symbols=TCS", None).await;
-    assert_eq!(status, 200);
-    assert_eq!(body["data"]["quotes"][0]["bid_price"], 11.0);
+    assert_eq!(status, 200, "{body}");
+    let quote = &body["data"]["quotes"][0];
+    assert_eq!(quote["bid"], "11");
 }
 
 #[tokio::test]
 async fn errors_keep_their_status_and_envelope() {
     let (status, body) = call("GET", "/instruments/NOPE.NSE", None).await;
     assert_eq!(status, 404);
-    assert_eq!(body["error"]["code"], "instrument_not_found");
+    assert_eq!(body["error"]["code"], "not_found");
     let (status, body) = call("GET", "/bars/TCS.NSE?tf=banana", None).await;
     assert_eq!(status, 422);
     assert_eq!(body["error"]["context"]["field"], "tf");
@@ -74,7 +75,7 @@ async fn errors_keep_their_status_and_envelope() {
     assert_eq!(body["error"]["code"], "not_found");
     let (status, body) = call("PUT", "/health", None).await;
     assert_eq!(status, 405);
-    assert_eq!(body["error"]["code"], "unsupported");
+    assert_eq!(body["error"]["code"], "not_implemented");
 }
 
 #[tokio::test]

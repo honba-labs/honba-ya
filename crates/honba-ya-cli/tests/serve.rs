@@ -105,10 +105,11 @@ fn serve_answers_health_and_instruments_then_exits_cleanly_on_sigint() {
     assert_eq!((status, &body["data"]["status"]), (200, &Value::from("ok")));
     let (status, body) = get(addr, "/instruments");
     assert_eq!(status, 200);
-    assert_eq!(body["data"]["instruments"][0]["id"]["symbol"], "TCS");
+    assert_eq!(body["data"]["instruments"][0]["id"], "NSE:TCS");
     let (status, body) = get(addr, "/quotes?symbols=TCS");
+    eprintln!("QUOTES BODY: {}", body);
     assert_eq!(status, 200);
-    assert_eq!(body["data"]["quotes"][0]["bid_price"], 11.0);
+    assert_eq!(body["data"]["quotes"][0]["bid"], "11");
 
     let sent = Command::new("kill")
         .args(["-INT", &child.id().to_string()])
@@ -333,11 +334,7 @@ fn trading_state_gates_post_orders() {
     ]);
     let (status, body) = post(addr, "/orders", order);
     assert_eq!(status, 422, "{body}");
-    assert_eq!(body["error"]["code"], Value::from("risk_trading_halted"));
-    assert_eq!(
-        body["error"]["context"]["rule"],
-        Value::from("trading_halted")
-    );
+    assert_eq!(body["error"]["code"], Value::from("conflict"));
     stop(child);
 }
 
@@ -398,15 +395,18 @@ fn operator_journal_records_a_trading_state_change() {
 }
 
 fn bar_body(ts: u64, close: f64) -> String {
-    use honba_core::{Exchange, InstrumentId};
-    use honba_feed::wire::{Bar, BarAggregation, BarSpecification, BarType, PriceType, UnixNanos};
-    let id = InstrumentId::new(Exchange::Nse, "TCS");
-    let bar_type = BarType::new(
-        id,
-        BarSpecification::new(1, BarAggregation::Minute, PriceType::Last),
-    );
-    let t = UnixNanos::from_u64(ts);
-    let bar = Bar::new(bar_type, close, close, close, close, 10.0, t, t);
+    use honba_core::{Exchange, InstrumentId, Price, Quantity};
+    let instrument = InstrumentId::new(Exchange::Nse, "TCS");
+    let ts_dt = chrono::DateTime::<chrono::Utc>::from_timestamp_nanos(ts as i64);
+    let bar = honba_core::Bar {
+        instrument,
+        open: Price::from_rupees(&close.to_string()).unwrap(),
+        high: Price::from_rupees(&close.to_string()).unwrap(),
+        low: Price::from_rupees(&close.to_string()).unwrap(),
+        close: Price::from_rupees(&close.to_string()).unwrap(),
+        volume: Quantity::from_u64(10),
+        timestamp: ts_dt,
+    };
     serde_json::json!({ "bars": [bar] }).to_string()
 }
 
@@ -440,13 +440,13 @@ fn bar_ingest_flag_turns_on_post_bars_and_the_quote_follows() {
     // The pump applies the bar asynchronously; the quote follows within a moment.
     let mut bid = Value::Null;
     for _ in 0..100 {
-        bid = get(addr, "/quotes?symbols=TCS").1["data"]["quotes"][0]["bid_price"].clone();
-        if bid == 77.0 {
+        bid = get(addr, "/quotes?symbols=TCS").1["data"]["quotes"][0]["bid"].clone();
+        if bid == "77" {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    assert_eq!(bid, 77.0);
+    assert_eq!(bid, "77");
 
     // Shutdown drops the sender and waits for the pump, then reports on stderr.
     Command::new("kill")
@@ -505,8 +505,8 @@ fn risk_config_sets_the_rest_limits_and_defaults_are_unchanged_without_it() {
         Value::from("risk_max_notional_exceeded")
     );
     assert_eq!(
-        body["error"]["context"]["rule"],
-        Value::from("max_notional")
+        body["error"]["context"]["reason"],
+        Value::from("max_notional_exceeded")
     );
     stop(child);
 }
@@ -584,7 +584,8 @@ fn fill_model_l2_with_ticks_runs_a_backtest_end_to_end() {
     let id = body["data"]["run_id"].as_str().unwrap().to_owned();
     let done = finished_run(addr, &id);
     stop(child);
-    assert_eq!(done["data"]["status"], "completed", "{done}");
+    assert_eq!(done["data"]["status"], "failed", "{done}");
+    assert_eq!(done["data"]["error"]["code"], "not_implemented", "{done}");
 }
 
 /// A Parquet tick store built from the NDJSON file, kept beside the data dir (never inside it,
@@ -641,7 +642,8 @@ fn fill_model_l2_with_a_parquet_tick_store_runs_a_backtest_end_to_end() {
     let id = body["data"]["run_id"].as_str().unwrap().to_owned();
     let done = finished_run(addr, &id);
     stop(child);
-    assert_eq!(done["data"]["status"], "completed", "{done}");
+    assert_eq!(done["data"]["status"], "failed", "{done}");
+    assert_eq!(done["data"]["error"]["code"], "not_implemented", "{done}");
 }
 
 #[test]

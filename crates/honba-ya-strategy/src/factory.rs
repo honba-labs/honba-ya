@@ -201,7 +201,9 @@ impl StrategyFactory for SmaCrossoverFactory {
             return Err(StrategyError::other("SMA periods must be positive"));
         }
         if fast >= slow {
-            return Err(StrategyError::other("fast period must be less than slow period"));
+            return Err(StrategyError::other(
+                "fast period must be less than slow period",
+            ));
         }
 
         Ok(DynStrategy::new(Box::new(crate::SmaCrossover::new(
@@ -250,7 +252,9 @@ impl StrategyFactory for RsiReversalFactory {
             return Err(StrategyError::other("RSI period must be positive"));
         }
         if oversold >= overbought {
-            return Err(StrategyError::other("oversold must be less than overbought"));
+            return Err(StrategyError::other(
+                "oversold must be less than overbought",
+            ));
         }
 
         Ok(DynStrategy::new(Box::new(crate::RsiReversal::new(

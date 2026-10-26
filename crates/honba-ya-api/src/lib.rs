@@ -80,8 +80,8 @@ pub use strategy_ir::{
 };
 pub use verify::{VerifyStrategyRequest, VerifyStrategyResponse, verify_strategy};
 pub use wire::{
-    API_VERSION, SCHEMA_VERSION, Access, ApiResponse, ApiVersion, ENDPOINTS, Endpoint, ErrorCode,
-    ErrorDetail, Event, HttpMethod, Message, ParamLocation, ResponseEnvelope, TradingState,
+    API_VERSION, Access, ApiResponse, ApiVersion, ENDPOINTS, Endpoint, ErrorCode, ErrorDetail,
+    Event, HttpMethod, Message, ParamLocation, ResponseEnvelope, SCHEMA_VERSION, TradingState,
     WRITE_PATHS, write_endpoints,
 };
 

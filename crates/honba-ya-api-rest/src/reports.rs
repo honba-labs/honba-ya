@@ -4,7 +4,12 @@
 //! They read from the portfolio store, trade history, and run journals to build
 //! ledger, tax, snapshots, audit trail, concentration risk, WAC, fees, equity curve,
 //! and order fills reports.
+//!
+//! Zero-floats invariant: every monetary calculation here uses `rust_decimal::Decimal`.
+//! No `f64` appears in any fee, P&L, tax, equity, or balance computation.
 
+use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -17,7 +22,6 @@ use honba_api::{
     TaxReportSummary, TaxTransaction, WACEntry, WeightedAverageCostResponse,
 };
 use honba_core::rust_decimal::Decimal;
-use honba_core::rust_decimal::prelude::ToPrimitive;
 use honba_core::{FillReport as Trade, OrderSide};
 use serde::Deserialize;
 use serde_json::json;
@@ -27,18 +31,17 @@ use crate::caller::Caller;
 use crate::market::{failure, success};
 use crate::{AppState, PortfolioDocument, PortfolioError};
 
-/// Deterministic pseudo-random value from a seed (timestamp).
-fn pseudo_random(seed: u64) -> f64 {
+/// Deterministic pseudo-random value in `[0, 1)` from a seed (timestamp), as exact `Decimal`.
+///
+/// Uses a 64-bit LCG and scales the top 32 bits into `[0, 1)` with exact decimal division,
+/// so repeated calls with the same seed are byte-identical across runs.
+fn pseudo_random(seed: u64) -> Decimal {
     let x = seed
         .wrapping_mul(6364136223846793005)
         .wrapping_add(1442695040888963407);
-    (x as f64) / (u64::MAX as f64)
-}
-
-/// Converts an `f64` computed internally back into the exact `Decimal` the
-/// response DTOs carry. Non-finite inputs (NaN/infinite) fall back to zero.
-fn to_decimal(value: f64) -> Decimal {
-    Decimal::from_f64_retain(value).unwrap_or_default()
+    let top = (x >> 32) as u64;
+    let max_val = Decimal::from(u64::MAX >> 32);
+    Decimal::from(top) / max_val.max(Decimal::ONE)
 }
 
 /// IST offset: UTC+5:30 = 19800 seconds
@@ -113,8 +116,11 @@ fn store_failure(error: PortfolioError) -> axum::response::Response {
     match error {
         PortfolioError::InvalidUserId => failure(
             StatusCode::FORBIDDEN,
-            ErrorDetail::new(ErrorCode::Unauthorized, "this token id cannot own a portfolio")
-                .with_context(json!({"reason": "invalid_user_id"})),
+            ErrorDetail::new(
+                ErrorCode::Unauthorized,
+                "this token id cannot own a portfolio",
+            )
+            .with_context(json!({"reason": "invalid_user_id"})),
         ),
         PortfolioError::RevisionConflict { expected, current } => failure(
             StatusCode::CONFLICT,
@@ -159,13 +165,13 @@ pub async fn get_ledger(
 
     // Build ledger entries from trades
     let mut entries = Vec::new();
-    let mut balance = 0.0;
+    let mut balance = Decimal::ZERO;
 
     for trade in &document.trades {
-        let quantity = trade.quantity.0.to_f64().unwrap_or(0.0);
-        let price = trade.price.0.to_f64().unwrap_or(0.0);
+        let quantity = trade.quantity.value();
+        let price = trade.price.value();
         let notional = quantity * price;
-        let costs = trade.fee.amount.to_f64().unwrap_or(0.0);
+        let costs = trade.fee.amount;
         let amount = if trade.side == OrderSide::Buy {
             -(notional + costs)
         } else {
@@ -185,17 +191,20 @@ pub async fn get_ledger(
             category: "trade".to_string(),
             description: format!(
                 "{} {} {} @ {}",
-                side_str, trade.quantity.0, trade.instrument, trade.price.0
+                side_str,
+                trade.quantity.value(),
+                trade.instrument,
+                trade.price.value()
             ),
             currency: trade.fee.currency,
-            amount: to_decimal(amount),
+            amount,
             amount_usd: None, // TODO: FX conversion
-            balance: to_decimal(balance),
+            balance,
             balance_usd: None,
             wallet: Some("Main".to_string()),
             instrument: Some(trade.instrument.to_string()),
             side: Some(trade.side),
-            fees: Some(to_decimal(costs)),
+            fees: Some(costs),
         });
     }
 
@@ -252,42 +261,59 @@ pub async fn get_tax_report(
     let mut transactions = Vec::new();
     let mut open_buys: Vec<&Trade> = Vec::new();
 
+    let stt_rate = Decimal::from_str("0.001").unwrap(); // 0.1% STT on sell notional
+    let stamp_duty_rate = Decimal::from_str("0.00015").unwrap(); // 0.015% on buy notional
+    let exchange_rate = Decimal::from_str("0.0000325").unwrap(); // ~0.00325% turnover
+    let sebi_rate = Decimal::from_str("0.000001").unwrap(); // ₹10 per crore
+    let gst_rate = Decimal::from_str("0.18").unwrap(); // 18% GST
+    let stcg_rate = Decimal::from_str("0.15").unwrap(); // 15% STCG
+    let ltcg_rate = Decimal::from_str("0.10").unwrap(); // 10% LTCG
+
     for trade in &document.trades {
         if trade.side == OrderSide::Buy {
             open_buys.push(trade);
         } else if trade.side == OrderSide::Sell {
             // Simple FIFO matching
-            let mut remaining = trade.quantity.0.to_f64().unwrap_or(0.0);
-            let sell_price = trade.price.0.to_f64().unwrap_or(0.0);
-            let trade_quantity = trade.quantity.0.to_f64().unwrap_or(0.0);
-            let trade_costs = trade.fee.amount.to_f64().unwrap_or(0.0);
+            let mut remaining = trade.quantity.value();
+            let sell_price = trade.price.value();
+            let trade_quantity = trade.quantity.value();
+            let trade_costs = trade.fee.amount;
 
-            while remaining > 0.0 && !open_buys.is_empty() {
+            while remaining > Decimal::ZERO && !open_buys.is_empty() {
                 let buy = open_buys[0];
-                let buy_total_qty = buy.quantity.0.to_f64().unwrap_or(0.0);
+                let buy_total_qty = buy.quantity.value();
                 let buy_qty = buy_total_qty.min(remaining);
-                let buy_price = buy.price.0.to_f64().unwrap_or(0.0);
+                let buy_price = buy.price.value();
                 let buy_date = format_ts(buy.timestamp);
                 let sell_date = format_ts(trade.timestamp);
-                let holding_days = (ts_nanos(trade.timestamp).saturating_sub(ts_nanos(buy.timestamp))
+                let holding_days = (ts_nanos(trade.timestamp)
+                    .saturating_sub(ts_nanos(buy.timestamp))
                     / 86_400_000_000_000) as u64;
                 let is_ltcg = holding_days > 365;
 
                 let gross_pl = (sell_price - buy_price) * buy_qty;
                 let costs = trade_costs * (buy_qty / trade_quantity);
                 let net_pl = gross_pl - costs;
-                let stcg = if is_ltcg { 0.0 } else { net_pl.max(0.0) };
-                let ltcg = if is_ltcg { net_pl.max(0.0) } else { 0.0 };
-                let tax_rate = if is_ltcg { 0.10 } else { 0.15 };
-                let tax_liability = net_pl.max(0.0) * tax_rate;
+                let stcg = if is_ltcg {
+                    Decimal::ZERO
+                } else {
+                    net_pl.max(Decimal::ZERO)
+                };
+                let ltcg = if is_ltcg {
+                    net_pl.max(Decimal::ZERO)
+                } else {
+                    Decimal::ZERO
+                };
+                let tax_rate = if is_ltcg { ltcg_rate } else { stcg_rate };
+                let tax_liability = net_pl.max(Decimal::ZERO) * tax_rate;
 
                 // Approximate cost breakdown
                 let notional = sell_price * buy_qty;
-                let stt = notional * 0.001; // 0.1% STT
-                let stamp_duty = notional * 0.00015; // 0.015%
-                let exchange_charges = notional * 0.0000325; // ~0.00325%
-                let sebi_fees = notional * 0.000001; // ₹10 per crore
-                let gst = (stamp_duty + exchange_charges + sebi_fees) * 0.18;
+                let stt = notional * stt_rate;
+                let stamp_duty = notional * stamp_duty_rate;
+                let exchange_charges = notional * exchange_rate;
+                let sebi_fees = notional * sebi_rate;
+                let gst = (stamp_duty + exchange_charges + sebi_fees) * gst_rate;
                 let total_charges = stt + stamp_duty + exchange_charges + sebi_fees + gst;
 
                 transactions.push(TaxTransaction {
@@ -298,24 +324,24 @@ pub async fn get_tax_report(
                     symbol: trade.instrument.symbol.clone(),
                     exchange: trade.instrument.exchange.to_string(),
                     side: OrderSide::Sell,
-                    quantity: to_decimal(buy_qty),
-                    buy_price: to_decimal(buy_price),
-                    sell_price: to_decimal(sell_price),
+                    quantity: buy_qty,
+                    buy_price,
+                    sell_price,
                     buy_date,
                     sell_date,
                     holding_period_days: holding_days,
-                    gain_loss: to_decimal(gross_pl),
+                    gain_loss: gross_pl,
                     gain_loss_usd: None,
-                    stcg: to_decimal(stcg),
-                    ltcg: to_decimal(ltcg),
-                    stt: to_decimal(stt),
-                    stamp_duty: to_decimal(stamp_duty),
-                    exchange_charges: to_decimal(exchange_charges),
-                    sebi_fees: to_decimal(sebi_fees),
-                    gst: to_decimal(gst),
-                    total_charges: to_decimal(total_charges),
-                    net_gain_loss: to_decimal(net_pl),
-                    tax_liability: to_decimal(tax_liability),
+                    stcg,
+                    ltcg,
+                    stt,
+                    stamp_duty,
+                    exchange_charges,
+                    sebi_fees,
+                    gst,
+                    total_charges,
+                    net_gain_loss: net_pl,
+                    tax_liability,
                     category: if is_ltcg { "LTCG" } else { "STCG" }.to_string(),
                 });
 
@@ -349,7 +375,7 @@ pub async fn get_tax_report(
     // Sort by date descending
     filtered.sort_by(|a, b| b.ts_event.cmp(&a.ts_event));
 
-    // Compute summary
+    // Compute summary (all Decimal)
     let total_stcg: Decimal = filtered.iter().map(|t| t.stcg).sum();
     let total_ltcg: Decimal = filtered.iter().map(|t| t.ltcg).sum();
     let total_stt: Decimal = filtered.iter().map(|t| t.stt).sum();
@@ -398,8 +424,8 @@ pub async fn get_portfolio_snapshots(
     // Generate synthetic snapshots from trade history
     // In production, this would read from a dedicated snapshots table
     let mut snapshots = Vec::new();
-    let mut equity = 10_00_000.0; // Base equity
-    let mut realized_pnl = 0.0;
+    let mut equity = Decimal::from(1_000_000); // Base equity: ₹10 lakhs
+    let mut realized_pnl = Decimal::ZERO;
 
     // Use trade timestamps to create snapshots
     let mut trade_times: Vec<_> = document.trades.iter().map(|t| t.timestamp).collect();
@@ -408,31 +434,36 @@ pub async fn get_portfolio_snapshots(
 
     for (i, &ts) in trade_times.iter().rev().take(200).enumerate() {
         let seed = ts_nanos(ts).wrapping_add(i as u64 * 12345);
-        let day_change = (pseudo_random(seed) - 0.5) * 20_000.0;
-        equity += day_change + 500.0; // Slight upward drift
+        let day_change =
+            (pseudo_random(seed) - Decimal::from_str("0.5").unwrap()) * Decimal::from(20_000);
+        equity += day_change + Decimal::from(500); // Slight upward drift
         // Per-day derived allocation (cash 20%, positions 80% of equity).
-        let cash = equity * 0.2;
-        let positions_val = equity * 0.8;
+        let cash = equity * Decimal::from_str("0.2").unwrap();
+        let positions_val = equity * Decimal::from_str("0.8").unwrap();
         let seed2 = seed.wrapping_add(98765);
-        let unrealized_pnl = (pseudo_random(seed2) - 0.5) * 50_000.0;
+        let unrealized_pnl =
+            (pseudo_random(seed2) - Decimal::from_str("0.5").unwrap()) * Decimal::from(50_000);
         let seed3 = seed2.wrapping_add(54321);
-        realized_pnl += (pseudo_random(seed3) - 0.3) * 1_000.0;
+        realized_pnl +=
+            (pseudo_random(seed3) - Decimal::from_str("0.3").unwrap()) * Decimal::from(1_000);
+
+        let day_change_pct = if equity > Decimal::ZERO {
+            (day_change / equity) * Decimal::from(100)
+        } else {
+            Decimal::ZERO
+        };
 
         snapshots.push(SnapshotEntry {
             id: format!("SNAP-{}", ts_nanos(ts)),
             ts_event: ts,
             date: format_ts(ts),
-            total_equity: to_decimal(equity),
-            total_cash: to_decimal(cash),
-            positions_value: to_decimal(positions_val),
-            unrealized_pnl: to_decimal(unrealized_pnl),
-            realized_pnl: to_decimal(realized_pnl),
-            day_change: to_decimal(day_change),
-            day_change_pct: to_decimal(if equity > 0.0 {
-                (day_change / equity) * 100.0
-            } else {
-                0.0
-            }),
+            total_equity: equity,
+            total_cash: cash,
+            positions_value: positions_val,
+            unrealized_pnl,
+            realized_pnl,
+            day_change,
+            day_change_pct,
             accounts: document.accounts.len() as u32,
             positions: document.accounts.iter().flat_map(|a| &a.positions).count() as u32,
         });
@@ -480,8 +511,8 @@ pub async fn get_position_audit(
     let mut entries = Vec::new();
 
     for trade in &document.trades {
-        let quantity = trade.quantity.0.to_f64().unwrap_or(0.0);
-        let price = trade.price.0.to_f64().unwrap_or(0.0);
+        let quantity = trade.quantity.value();
+        let price = trade.price.value();
         let qty_change = if trade.side == OrderSide::Buy {
             quantity
         } else {
@@ -494,11 +525,11 @@ pub async fn get_position_audit(
             date: format_ts(trade.timestamp),
             instrument: trade.instrument.to_string(),
             side: trade.side,
-            quantity_change: to_decimal(qty_change),
-            price: to_decimal(price),
-            position_after: to_decimal(0.0), // Would need position tracking
-            avg_price_after: to_decimal(price),
-            realized_pnl: to_decimal(0.0), // Would need pairing
+            quantity_change: qty_change,
+            price,
+            position_after: Decimal::ZERO, // Would need position tracking
+            avg_price_after: price,
+            realized_pnl: Decimal::ZERO, // Would need pairing
             order_id: trade.order_id.clone(),
             reason: match trade.side {
                 OrderSide::Buy => "Buy fill".to_string(),
@@ -554,31 +585,31 @@ pub async fn get_concentration_risk(
 
     // Build concentration from current positions
     let mut entries = Vec::new();
-    let mut total_value = 0.0;
+    let mut total_value = Decimal::ZERO;
 
     for account in &document.accounts {
         for held in &account.positions {
             let position = &held.position;
-            if position.quantity.0 != Decimal::ZERO {
-                let quantity = position.quantity.0.to_f64().unwrap_or(0.0);
-                let avg_price = position.avg_price.0.to_f64().unwrap_or(0.0);
+            if position.quantity.value() != Decimal::ZERO {
+                let quantity = position.quantity.value();
+                let avg_price = position.avg_price.value();
                 // Use avg_price as mark since we don't have live marks in the stored document
                 let mark = avg_price;
                 let market_value = quantity * mark;
-                let unrealized = 0.0; // Would need live mark
-                let realized = position.realized_pnl.amount.to_f64().unwrap_or(0.0);
+                let unrealized = Decimal::ZERO; // Would need live mark
+                let realized = position.realized_pnl.amount; // Decimal
 
                 entries.push(ConcentrationEntry {
                     instrument: position.instrument.to_string(),
                     symbol: position.instrument.symbol.clone(),
                     exchange: position.instrument.exchange.to_string(),
-                    market_value: to_decimal(market_value),
-                    pct_of_portfolio: to_decimal(0.0), // Will calculate after total
-                    quantity: to_decimal(quantity),
-                    avg_price: to_decimal(avg_price),
-                    mark: to_decimal(mark),
-                    unrealized_pnl: to_decimal(unrealized),
-                    realized_pnl: to_decimal(realized),
+                    market_value,
+                    pct_of_portfolio: Decimal::ZERO, // Will calculate after total
+                    quantity,
+                    avg_price,
+                    mark,
+                    unrealized_pnl: unrealized,
+                    realized_pnl: realized,
                     sector: None, // Would need sector mapping
                 });
                 total_value += market_value;
@@ -586,42 +617,33 @@ pub async fn get_concentration_risk(
         }
     }
 
-    // Calculate percentages
+    // Calculate percentages (exact Decimal)
     for entry in &mut entries {
-        if total_value > 0.0 {
-            let market_value = entry.market_value.to_f64().unwrap_or(0.0);
-            entry.pct_of_portfolio = to_decimal((market_value / total_value) * 100.0);
+        if total_value > Decimal::ZERO {
+            entry.pct_of_portfolio = (entry.market_value / total_value) * Decimal::from(100);
         }
     }
 
     // Sort by market value descending
     entries.sort_by(|a, b| b.market_value.cmp(&a.market_value));
 
-    // Calculate HHI and top concentrations
-    let hhi: f64 = entries
+    // Calculate HHI and top concentrations (exact Decimal)
+    let hhi: Decimal = entries
         .iter()
         .map(|e| {
-            let pct = e.pct_of_portfolio.to_f64().unwrap_or(0.0);
-            (pct / 100.0).powi(2)
+            let pct = e.pct_of_portfolio / Decimal::from(100);
+            pct * pct
         })
         .sum();
-    let top5: f64 = entries
-        .iter()
-        .take(5)
-        .map(|e| e.pct_of_portfolio.to_f64().unwrap_or(0.0))
-        .sum();
-    let top10: f64 = entries
-        .iter()
-        .take(10)
-        .map(|e| e.pct_of_portfolio.to_f64().unwrap_or(0.0))
-        .sum();
+    let top5: Decimal = entries.iter().take(5).map(|e| e.pct_of_portfolio).sum();
+    let top10: Decimal = entries.iter().take(10).map(|e| e.pct_of_portfolio).sum();
 
     success(ConcentrationRiskResponse {
         entries,
-        total_portfolio_value: to_decimal(total_value),
-        hhi: to_decimal(hhi),
-        top5_concentration: to_decimal(top5),
-        top10_concentration: to_decimal(top10),
+        total_portfolio_value: total_value,
+        hhi,
+        top5_concentration: top5,
+        top10_concentration: top10,
     })
 }
 
@@ -636,22 +658,20 @@ pub async fn get_weighted_average_cost(
         Err(resp) => return resp,
     };
 
-    use std::collections::HashMap;
-
     #[derive(Default)]
     struct Accumulator {
-        total_qty: f64,
-        total_cost: f64,
-        total_proceeds: f64,
-        realized_pnl: f64,
-        mark: f64,
+        total_qty: Decimal,
+        total_cost: Decimal,
+        total_proceeds: Decimal,
+        realized_pnl: Decimal,
+        mark: Decimal,
     }
 
     let mut acc: HashMap<String, Accumulator> = HashMap::new();
 
     for trade in &document.trades {
-        let quantity = trade.quantity.0.to_f64().unwrap_or(0.0);
-        let price = trade.price.0.to_f64().unwrap_or(0.0);
+        let quantity = trade.quantity.value();
+        let price = trade.price.value();
         let key = trade.instrument.to_string();
         let a = acc.entry(key.clone()).or_default();
         a.mark = price; // Last trade price as mark
@@ -662,13 +682,18 @@ pub async fn get_weighted_average_cost(
         } else {
             a.total_qty -= quantity;
             a.total_proceeds += quantity * price;
-            a.realized_pnl += (price - (a.total_cost / a.total_qty.max(1.0))) * quantity;
+            let avg_cost = if a.total_qty > Decimal::ZERO {
+                a.total_cost / a.total_qty
+            } else {
+                Decimal::ZERO
+            };
+            a.realized_pnl += (price - avg_cost) * quantity;
         }
     }
 
     let mut entries = Vec::new();
     for (instrument, a) in acc {
-        if a.total_qty > 0.0 {
+        if a.total_qty > Decimal::ZERO {
             let wac = a.total_cost / a.total_qty;
             let market_value = a.total_qty * a.mark;
             let unrealized = (a.mark - wac) * a.total_qty;
@@ -681,14 +706,14 @@ pub async fn get_weighted_average_cost(
                     .unwrap_or(&instrument)
                     .to_string(),
                 exchange: instrument.split('.').nth(1).unwrap_or("NSE").to_string(),
-                quantity: to_decimal(a.total_qty),
-                weighted_avg_cost: to_decimal(wac),
-                mark: to_decimal(a.mark),
-                market_value: to_decimal(market_value),
-                unrealized_pnl: to_decimal(unrealized),
-                realized_pnl: to_decimal(a.realized_pnl),
-                total_cost_basis: to_decimal(a.total_cost),
-                total_proceeds: to_decimal(a.total_proceeds),
+                quantity: a.total_qty,
+                weighted_avg_cost: wac,
+                mark: a.mark,
+                market_value,
+                unrealized_pnl: unrealized,
+                realized_pnl: a.realized_pnl,
+                total_cost_basis: a.total_cost,
+                total_proceeds: a.total_proceeds,
             });
         }
     }
@@ -710,18 +735,20 @@ pub async fn get_fees_report(
     };
 
     let mut entries = Vec::new();
-    use std::collections::HashMap;
-    let mut by_type: HashMap<String, (f64, u64)> = HashMap::new();
+    let mut by_type: HashMap<String, (Decimal, u64)> = HashMap::new();
 
     for trade in &document.trades {
-        let costs = trade.fee.amount.to_f64().unwrap_or(0.0);
-        if costs > 0.0 {
+        let costs = trade.fee.amount;
+        if costs > Decimal::ZERO {
             let fee_types = vec![
-                ("STT", costs * 0.4),
-                ("Stamp Duty", costs * 0.15),
-                ("Exchange Charges", costs * 0.2),
-                ("SEBI Fees", costs * 0.05),
-                ("GST", costs * 0.2),
+                ("STT", costs * Decimal::from_str("0.4").unwrap()),
+                ("Stamp Duty", costs * Decimal::from_str("0.15").unwrap()),
+                (
+                    "Exchange Charges",
+                    costs * Decimal::from_str("0.2").unwrap(),
+                ),
+                ("SEBI Fees", costs * Decimal::from_str("0.05").unwrap()),
+                ("GST", costs * Decimal::from_str("0.2").unwrap()),
             ];
 
             for (fee_type, amount) in fee_types {
@@ -731,7 +758,7 @@ pub async fn get_fees_report(
                     date: format_ts(trade.timestamp),
                     fee_type: fee_type.to_string(),
                     instrument: Some(trade.instrument.to_string()),
-                    amount: to_decimal(amount),
+                    amount,
                     currency: trade.fee.currency,
                     order_id: Some(trade.order_id.clone()),
                 });
@@ -770,7 +797,7 @@ pub async fn get_fees_report(
         .into_iter()
         .map(|(fee_type, (total_amount, count))| FeeTypeSummary {
             fee_type,
-            total_amount: to_decimal(total_amount),
+            total_amount,
             count,
         })
         .collect();
@@ -801,8 +828,8 @@ pub async fn get_equity_curve(
     };
 
     let mut points = Vec::new();
-    let mut equity = 10_00_000.0;
-    let mut realized_pnl = 0.0;
+    let mut equity = Decimal::from(1_000_000);
+    let mut realized_pnl = Decimal::ZERO;
     let mut peak = equity;
 
     let mut trade_times: Vec<_> = document.trades.iter().map(|t| t.timestamp).collect();
@@ -811,34 +838,37 @@ pub async fn get_equity_curve(
 
     for (i, &ts) in trade_times.iter().rev().take(200).enumerate() {
         let seed = ts_nanos(ts).wrapping_add(i as u64 * 12345);
-        let day_change = (pseudo_random(seed) - 0.5) * 20_000.0;
-        equity += day_change + 500.0;
+        let day_change =
+            (pseudo_random(seed) - Decimal::from_str("0.5").unwrap()) * Decimal::from(20_000);
+        equity += day_change + Decimal::from(500);
         peak = peak.max(equity);
         // Per-day derived allocation (cash 20%, positions 80% of equity).
-        let cash = equity * 0.2;
-        let positions_val = equity * 0.8;
+        let cash = equity * Decimal::from_str("0.2").unwrap();
+        let positions_val = equity * Decimal::from_str("0.8").unwrap();
         let seed2 = seed.wrapping_add(98765);
-        let unrealized_pnl = (pseudo_random(seed2) - 0.5) * 50_000.0;
+        let unrealized_pnl =
+            (pseudo_random(seed2) - Decimal::from_str("0.5").unwrap()) * Decimal::from(50_000);
         let seed3 = seed2.wrapping_add(54321);
-        realized_pnl += (pseudo_random(seed3) - 0.3) * 1_000.0;
+        realized_pnl +=
+            (pseudo_random(seed3) - Decimal::from_str("0.3").unwrap()) * Decimal::from(1_000);
 
         let drawdown = peak - equity;
-        let drawdown_pct = if peak > 0.0 {
-            (drawdown / peak) * 100.0
+        let drawdown_pct = if peak > Decimal::ZERO {
+            (drawdown / peak) * Decimal::from(100)
         } else {
-            0.0
+            Decimal::ZERO
         };
 
         points.push(EquityPoint {
             ts_event: ts,
             date: format_ts(ts),
-            equity: to_decimal(equity),
-            cash: to_decimal(cash),
-            positions_value: to_decimal(positions_val),
-            unrealized_pnl: to_decimal(unrealized_pnl),
-            realized_pnl: to_decimal(realized_pnl),
-            drawdown: to_decimal(drawdown),
-            drawdown_pct: to_decimal(drawdown_pct),
+            equity,
+            cash,
+            positions_value: positions_val,
+            unrealized_pnl,
+            realized_pnl,
+            drawdown,
+            drawdown_pct,
         });
     }
 
@@ -856,9 +886,8 @@ pub async fn get_equity_curve(
     let start_equity = filtered.first().map(|p| p.equity).unwrap_or(Decimal::ZERO);
     let end_equity = filtered.last().map(|p| p.equity).unwrap_or(Decimal::ZERO);
     let total_return = end_equity - start_equity;
-    let start_equity_f64 = start_equity.to_f64().unwrap_or(0.0);
-    let total_return_pct = if start_equity_f64 > 0.0 {
-        to_decimal((total_return.to_f64().unwrap_or(0.0) / start_equity_f64) * 100.0)
+    let total_return_pct = if start_equity > Decimal::ZERO {
+        (total_return / start_equity) * Decimal::from(100)
     } else {
         Decimal::ZERO
     };
@@ -901,9 +930,9 @@ pub async fn get_order_fills(
 
     for trade in &document.trades {
         if trade.order_id == order_id {
-            let quantity = trade.quantity.0.to_f64().unwrap_or(0.0);
-            let price = trade.price.0.to_f64().unwrap_or(0.0);
-            let costs = trade.fee.amount.to_f64().unwrap_or(0.0);
+            let quantity = trade.quantity.value();
+            let price = trade.price.value();
+            let costs = trade.fee.amount;
 
             fills.push(FillEntry {
                 id: format!("FILL-{}-{}", trade.order_id, fills.len()),
@@ -912,9 +941,9 @@ pub async fn get_order_fills(
                 date: format_ts(trade.timestamp),
                 instrument: trade.instrument.to_string(),
                 side: trade.side,
-                quantity: to_decimal(quantity),
-                price: to_decimal(price),
-                costs: to_decimal(costs),
+                quantity,
+                price,
+                costs,
                 currency: trade.fee.currency,
             });
         }
@@ -946,5 +975,7 @@ pub async fn get_order_fills(
 fn format_ts(ts: chrono::DateTime<chrono::Utc>) -> String {
     use chrono::FixedOffset;
     let ist = FixedOffset::east_opt(IST_OFFSET_SECS).unwrap();
-    ts.with_timezone(&ist).format("%Y-%m-%d %H:%M:%S").to_string()
+    ts.with_timezone(&ist)
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string()
 }

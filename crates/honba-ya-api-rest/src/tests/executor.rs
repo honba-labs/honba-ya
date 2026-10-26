@@ -1,11 +1,11 @@
 //! `BacktestExecutor`: one backtest through the real kernel over an in-memory bar store.
 
-use std::sync::Arc;
 use chrono::DateTime;
+use std::sync::Arc;
 
 use honba_api::{
-    ErrorCode, ErrorDetail, JournalWriter, Message, ResolvedBacktest,
-    ResolvedRequest, RunExecutor, RunJob, RunKind,
+    ErrorCode, ErrorDetail, JournalWriter, Message, ResolvedBacktest, ResolvedRequest, RunExecutor,
+    RunJob, RunKind,
 };
 use honba_core::{BarReader, PortResult};
 

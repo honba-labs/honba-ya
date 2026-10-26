@@ -7,6 +7,7 @@
 //! - Special trading sessions such as annual Diwali **Muhurat trading** (18:15 to 19:15 IST)
 
 use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveTime, Utc, Weekday};
+use honba_core::TradingCalendar;
 use std::collections::HashSet;
 
 /// Session window on a trading date.
@@ -189,6 +190,35 @@ impl NseTradingCalendar {
             .insert(NaiveDate::from_ymd_opt(2025, 10, 21).unwrap());
         self.muhurat_dates
             .insert(NaiveDate::from_ymd_opt(2026, 11, 8).unwrap());
+    }
+}
+
+/// `NseTradingCalendar` implements the canonical object-safe
+/// [`honba_core::TradingCalendar`] port, allowing the backtest engine and
+/// enhancer optimizers to be decoupled from the concrete NSE venue.
+impl TradingCalendar for NseTradingCalendar {
+    fn is_trading_day(&self, date: NaiveDate) -> bool {
+        self.is_trading_day(date)
+    }
+
+    fn is_holiday(&self, date: NaiveDate) -> bool {
+        self.is_holiday(date)
+    }
+
+    fn session_for_date(&self, date: NaiveDate) -> Option<honba_core::SessionWindow> {
+        self.session_for_date(date)
+            .map(|sw| honba_core::SessionWindow {
+                open: sw.open,
+                close: sw.close,
+            })
+    }
+
+    fn holidays(&self) -> Vec<NaiveDate> {
+        self.holidays()
+    }
+
+    fn timezone_offset(&self) -> FixedOffset {
+        self.ist_offset
     }
 }
 

@@ -17,10 +17,10 @@ pub mod positions;
 pub mod traders;
 
 pub use audit::{AuditError, AuditLedgerRecord, SqliteAuditLedger};
-pub use decisions::{sha256_hex, DecisionStore, DecisionStoreError, PersistedDecision};
+pub use decisions::{DecisionStore, DecisionStoreError, PersistedDecision, sha256_hex};
 pub use fills::{FillStore, FillStoreError, PersistedFill};
 pub use messages::RiskBreachEvent;
-pub use migrations::{migrate, rollback_last, MigrationError};
+pub use migrations::{MigrationError, migrate, rollback_last};
 pub use orders::{OrderStore, OrderStoreError, PersistedOrder};
 pub use positions::{PersistedPosition, PersistedPositionLot, PositionStore, PositionStoreError};
 pub use traders::{PersistedTrader, TraderStore, TraderStoreError};
@@ -70,7 +70,10 @@ impl Database {
     /// for the lifetime of the pool.
     pub async fn connect(url: &str) -> Result<Self, sqlx::Error> {
         if url.starts_with("postgres://") || url.starts_with("postgresql://") {
-            let pool = PgPoolOptions::new().max_connections(16).connect(url).await?;
+            let pool = PgPoolOptions::new()
+                .max_connections(16)
+                .connect(url)
+                .await?;
             Ok(Self::Postgres(pool))
         } else if url.starts_with("sqlite:") {
             let in_memory = url.contains(":memory:");

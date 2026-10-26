@@ -174,11 +174,16 @@ fn test_spread_crossing_penalty_and_adverse_fill_slippage_in_engine() {
         ProductType::Delivery,
         NetworkLatency::new(0, 0, 42),
         slippage,
-        MisSquareOffManager::new(NseTradingCalendar::new()),
+        MisSquareOffManager::new(Arc::new(NseTradingCalendar::new())),
     )
     .with_adverse_fill(adverse);
 
-    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
+    let mut engine = BacktestEngine::new(
+        strategy,
+        risk_engine,
+        config,
+        Arc::new(NseTradingCalendar::new()),
+    );
 
     let day = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
     let ts = Utc.from_utc_datetime(&day.and_time(NaiveTime::from_hms_opt(9, 20, 0).unwrap()));
@@ -244,7 +249,12 @@ fn test_iccl_t1_demat_settlement_margin_holdbacks_and_double_entry_ledger() {
         product_type: ProductType::Delivery,
         ..Default::default()
     };
-    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
+    let mut engine = BacktestEngine::new(
+        strategy,
+        risk_engine,
+        config,
+        Arc::new(NseTradingCalendar::new()),
+    );
 
     // Day 1: Wednesday Jan 15, 2025 (Buy 100 INFY @ 1500)
     // Day 2: Thursday Jan 16, 2025 (T+1 settles Day 1 buy into free Demat, then Sells 100 INFY @ 1550)
@@ -278,7 +288,7 @@ fn test_iccl_t1_demat_settlement_margin_holdbacks_and_double_entry_ledger() {
             product_type: ProductType::Delivery,
             ..Default::default()
         },
-        NseTradingCalendar::new(),
+        Arc::new(NseTradingCalendar::new()),
     );
     let res_day1 = engine_step.run_events(events_day1.clone());
     // After run_events finishes, final flush_settlements(next_day) settles the T+1 receivable into free Demat!
@@ -334,7 +344,12 @@ fn test_intraday_mis_statutory_cost_rates() {
         product_type: ProductType::Intraday,
         ..Default::default()
     };
-    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
+    let mut engine = BacktestEngine::new(
+        strategy,
+        risk_engine,
+        config,
+        Arc::new(NseTradingCalendar::new()),
+    );
 
     let day = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
     let t1 = Utc.from_utc_datetime(&day.and_time(NaiveTime::from_hms_opt(9, 30, 0).unwrap()));
@@ -485,7 +500,7 @@ fn test_catalog_loader_synthetic_partitions_and_bar_reader() {
         strategy,
         risk_engine_for("buy_day1_sell_day2"),
         BacktestConfig::default(),
-        NseTradingCalendar::new(),
+        Arc::new(NseTradingCalendar::new()),
     );
     let result = engine
         .run_catalog(&loader, &[inst], "1D", None, None)
@@ -597,7 +612,7 @@ fn test_real_honba_data_catalog_ingestion_if_present() {
         strategy,
         risk_engine_for("buy_day1_sell_day2"),
         BacktestConfig::default(),
-        NseTradingCalendar::new(),
+        Arc::new(NseTradingCalendar::new()),
     );
     let sample_events: Vec<MarketEvent> =
         bars_5m.into_iter().take(20).map(MarketEvent::Bar).collect();

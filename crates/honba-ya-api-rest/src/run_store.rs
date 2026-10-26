@@ -430,7 +430,11 @@ fn decode_record(line: &[u8]) -> Result<Message, ErrorDetail> {
         // moved from an integer to a string constant in the honba_messages -> honba_api move.
         let found = serde_json::from_slice::<serde_json::Value>(line)
             .ok()
-            .and_then(|v| v.get("schema_version").and_then(serde_json::Value::as_str).map(str::to_owned));
+            .and_then(|v| {
+                v.get("schema_version")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+            });
         match found.as_deref() {
             Some(found) if found != SCHEMA_VERSION => ErrorDetail::new(
                 ErrorCode::NotImplemented,

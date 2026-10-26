@@ -9,10 +9,10 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Json, Response},
 };
+use chrono::Utc;
 use honba_api::{ApiResponse, ErrorCode, ErrorDetail, ResponseEnvelope};
 use serde::{Deserialize, Serialize};
 use tracing::info;
-use chrono::Utc;
 
 /// Hex-encoded SHA-256 digest of `s`.
 ///
@@ -268,20 +268,17 @@ pub const ROUTE_SCOPES: &[(&str, &str, RouteScope)] = &[
     ("GET", "/capabilities", RouteScope::Public),
     ("GET", "/health", RouteScope::Public),
     ("GET", "/schema", RouteScope::Public),
-
     // Read routes: `read` RBAC scope
     ("GET", "/instruments", RouteScope::Required("read")),
     ("GET", "/instruments/{id}", RouteScope::Required("read")),
     ("GET", "/quotes", RouteScope::Required("read")),
     ("GET", "/bars/{id}", RouteScope::Required("read")),
     ("GET", "/depth/{id}", RouteScope::Required("read")),
-
     // Write/Trade routes: `trade` RBAC scope
     ("POST", "/bars", RouteScope::Required("trade")),
     ("POST", "/orders", RouteScope::Required("trade")),
     ("DELETE", "/orders/{id}", RouteScope::Required("trade")),
     ("POST", "/positions/close", RouteScope::Required("trade")),
-
     // Operator / Admin routes: `admin` RBAC scope
     ("GET", "/trading-state", RouteScope::Required("admin")),
     ("PUT", "/trading-state", RouteScope::Required("admin")),
@@ -301,27 +298,10 @@ pub const ROUTE_SCOPES: &[(&str, &str, RouteScope)] = &[
     ("DELETE", "/profile/modules/{id}", RouteScope::Authenticated),
     // Portfolio routes: `read` scope for read-only portfolio access (ADR 0032 §1, §6)
     ("GET", "/portfolio", RouteScope::Required("read")),
-    (
-        "GET",
-        "/portfolio/accounts",
-        RouteScope::Required("read"),
-    ),
-    (
-        "GET",
-        "/portfolio/positions",
-        RouteScope::Required("read"),
-    ),
-    (
-        "GET",
-        "/portfolio/holdings",
-        RouteScope::Required("read"),
-    ),
-    (
-        "GET",
-        "/portfolio/trades",
-        RouteScope::Required("read"),
-    ),
-
+    ("GET", "/portfolio/accounts", RouteScope::Required("read")),
+    ("GET", "/portfolio/positions", RouteScope::Required("read")),
+    ("GET", "/portfolio/holdings", RouteScope::Required("read")),
+    ("GET", "/portfolio/trades", RouteScope::Required("read")),
     // Research routes: still use `research` scope for backward compatibility
     ("GET", "/strategies", RouteScope::Required("research")),
     ("POST", "/strategies", RouteScope::Required("research")),
@@ -350,20 +330,16 @@ pub const ROUTE_SCOPES: &[(&str, &str, RouteScope)] = &[
         RouteScope::Required("research"),
     ),
     ("GET", "/journals/{id}", RouteScope::Required("research")),
-
     // Approval queue routes: `admin` scope
     ("GET", "/approval/queue", RouteScope::Required("admin")),
     ("POST", "/approval/approve", RouteScope::Required("admin")),
     ("POST", "/approval/reject", RouteScope::Required("admin")),
-
     // WebSocket routes: public
     ("GET", "/ws", RouteScope::Public),
     ("GET", "/ws/market", RouteScope::Public),
-
     // Additional research / run routes
     ("GET", "/backtests", RouteScope::Required("research")),
     ("GET", "/sweeps", RouteScope::Required("research")),
-
     // Additional orders & positions & portfolio routes
     ("GET", "/orders", RouteScope::Required("trade")),
     ("GET", "/orders/{id}/fills", RouteScope::Required("read")),
@@ -371,23 +347,33 @@ pub const ROUTE_SCOPES: &[(&str, &str, RouteScope)] = &[
     ("GET", "/positions/audit", RouteScope::Required("read")),
     ("GET", "/trades", RouteScope::Required("read")),
     ("GET", "/portfolio/chart", RouteScope::Required("read")),
-    ("GET", "/portfolio/concentration", RouteScope::Required("read")),
+    (
+        "GET",
+        "/portfolio/concentration",
+        RouteScope::Required("read"),
+    ),
     ("GET", "/portfolio/wac", RouteScope::Required("read")),
     ("GET", "/ledger", RouteScope::Required("read")),
     ("GET", "/tax/report", RouteScope::Required("read")),
     ("GET", "/fees", RouteScope::Required("read")),
-
     // Additional reports routes
     ("GET", "/reports/ledger", RouteScope::Required("read")),
     ("GET", "/reports/tax", RouteScope::Required("read")),
     ("GET", "/reports/snapshots", RouteScope::Required("read")),
     ("GET", "/reports/audit", RouteScope::Required("read")),
-    ("GET", "/reports/concentration", RouteScope::Required("read")),
+    (
+        "GET",
+        "/reports/concentration",
+        RouteScope::Required("read"),
+    ),
     ("GET", "/reports/wac", RouteScope::Required("read")),
     ("GET", "/reports/fees", RouteScope::Required("read")),
     ("GET", "/reports/equity-curve", RouteScope::Required("read")),
-    ("GET", "/reports/fills/{order_id}", RouteScope::Required("read")),
-
+    (
+        "GET",
+        "/reports/fills/{order_id}",
+        RouteScope::Required("read"),
+    ),
     // Documentation / OpenAPI routes
     ("GET", "/schema/openapi/v1.json", RouteScope::Public),
     ("GET", "/schema/openapi/v2.json", RouteScope::Public),
@@ -417,7 +403,9 @@ pub fn scope_for(method: &str, path: &str) -> Option<RouteScope> {
         .unwrap_or(path);
     ROUTE_SCOPES
         .iter()
-        .find(|(m, pattern, _)| m.eq_ignore_ascii_case(method) && path_matches(pattern, unversioned_path))
+        .find(|(m, pattern, _)| {
+            m.eq_ignore_ascii_case(method) && path_matches(pattern, unversioned_path)
+        })
         .map(|(_, _, scope)| *scope)
 }
 
@@ -468,7 +456,11 @@ pub struct AuthLayer {
 
 impl AuthLayer {
     /// Creates a new auth layer with the given token store and audit log path.
-    pub fn new(store: FileTokenStore, audit_log_path: Option<PathBuf>, jwt_config: Option<JwtConfig>) -> Self {
+    pub fn new(
+        store: FileTokenStore,
+        audit_log_path: Option<PathBuf>,
+        jwt_config: Option<JwtConfig>,
+    ) -> Self {
         Self {
             store,
             audit_log_path,
@@ -563,10 +555,7 @@ impl AuthLayer {
                     ErrorCode::Unauthorized,
                     "Authorization header missing or not Bearer",
                 );
-                return Err((
-                    StatusCode::UNAUTHORIZED,
-                    Json(ApiResponse::error(detail)),
-                ));
+                return Err((StatusCode::UNAUTHORIZED, Json(ApiResponse::error(detail))));
             }
         };
 
@@ -654,7 +643,9 @@ impl AuthLayer {
                         JwtError::MissingToken => ("missing_token", StatusCode::UNAUTHORIZED),
                         JwtError::InvalidToken => ("invalid_token", StatusCode::UNAUTHORIZED),
                         JwtError::Expired => ("expired", StatusCode::UNAUTHORIZED),
-                        JwtError::InvalidSignature => ("invalid_signature", StatusCode::UNAUTHORIZED),
+                        JwtError::InvalidSignature => {
+                            ("invalid_signature", StatusCode::UNAUTHORIZED)
+                        }
                         JwtError::MissingHmacSecret => {
                             ("missing_hmac_secret", StatusCode::INTERNAL_SERVER_ERROR)
                         }
@@ -689,10 +680,7 @@ impl AuthLayer {
             ErrorCode::Unauthorized,
             "Authorization header missing or not Bearer",
         );
-        Err((
-            StatusCode::UNAUTHORIZED,
-            Json(ApiResponse::error(detail)),
-        ))
+        Err((StatusCode::UNAUTHORIZED, Json(ApiResponse::error(detail))))
     }
 }
 
@@ -762,97 +750,97 @@ impl<S: Clone + Send + Sync + 'static> AuthRouterExt for Router<S> {
 }
 
 /// Validate a JWT bearer token.
-    ///
-    /// Supports two signing methods:
-    /// - `HS256` with an HMAC secret key
-    /// - `RS256` with an RSA public key
-    ///
-    /// Returns `Ok(TokenInfo)` on success, or `JwtError` on failure.
-    pub fn validate_jwt(token: &str, config: &JwtConfig) -> Result<TokenInfo, JwtError> {
-        if token.is_empty() {
-            return Err(JwtError::MissingToken);
-        }
-
-        // Both branches below check `iss`/`aud`/`exp`/`iat` manually against `config`, so the
-        // library's own claim validation is disabled here to avoid double (and differently
-        // configured) enforcement; `jsonwebtoken` still verifies the signature.
-        let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
-        validation.validate_exp = false;
-        validation.validate_aud = false;
-        validation.required_spec_claims.clear();
-
-        // Try HS256 first (HMAC)
-        if let Some(hmac_secret) = &config.hmac_secret {
-            let key = jsonwebtoken::DecodingKey::from_secret(hmac_secret);
-            match jsonwebtoken::decode::<JwtClaims>(token, &key, &validation) {
-                Ok(data) => {
-                    // Verify issuer and audience
-                    if data.claims.iss != config.issuer {
-                        return Err(JwtError::InvalidToken);
-                    }
-                    if data.claims.aud != config.audience {
-                        return Err(JwtError::InvalidToken);
-                    }
-
-                    // Check expiration
-                    let now = Utc::now().timestamp() as usize;
-                    if now < data.claims.iat || now > data.claims.exp {
-                        return Err(JwtError::Expired);
-                    }
-
-                    return Ok(TokenInfo {
-                        token_id: data.claims.sub.clone(),
-                        scopes: data.claims.scopes.clone(),
-                    });
-                }
-                Err(_) => {
-                    // Not a valid HS256 token (wrong key, signature, or shape); try RSA.
-                }
-            }
-        }
-
-        // Try RS256 (RSA public key verification)
-        if let Some(rsa_pem) = &config.rsa_public_key {
-            let key = match jsonwebtoken::DecodingKey::from_rsa_pem(rsa_pem.as_bytes()) {
-                Ok(key) => key,
-                Err(_) => return Err(JwtError::MissingRsaKey),
-            };
-            let mut rsa_validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
-            rsa_validation.validate_exp = false;
-            rsa_validation.validate_aud = false;
-            rsa_validation.required_spec_claims.clear();
-
-            match jsonwebtoken::decode::<JwtClaims>(token, &key, &rsa_validation) {
-                Ok(data) => {
-                    // Verify issuer and audience
-                    if data.claims.iss != config.issuer {
-                        return Err(JwtError::InvalidToken);
-                    }
-                    if data.claims.aud != config.audience {
-                        return Err(JwtError::InvalidToken);
-                    }
-
-                    // Check expiration
-                    let now = Utc::now().timestamp() as usize;
-                    if now < data.claims.iat || now > data.claims.exp {
-                        return Err(JwtError::Expired);
-                    }
-
-                    return Ok(TokenInfo {
-                        token_id: data.claims.sub.clone(),
-                        scopes: data.claims.scopes.clone(),
-                    });
-                }
-                Err(_) => {
-                    return Err(JwtError::InvalidSignature);
-                }
-            }
-        }
-
-        // No suitable key configured
-        if config.hmac_secret.is_none() && config.rsa_public_key.is_none() {
-            return Err(JwtError::MissingHmacSecret);
-        }
-
-        Err(JwtError::MissingRsaKey)
+///
+/// Supports two signing methods:
+/// - `HS256` with an HMAC secret key
+/// - `RS256` with an RSA public key
+///
+/// Returns `Ok(TokenInfo)` on success, or `JwtError` on failure.
+pub fn validate_jwt(token: &str, config: &JwtConfig) -> Result<TokenInfo, JwtError> {
+    if token.is_empty() {
+        return Err(JwtError::MissingToken);
     }
+
+    // Both branches below check `iss`/`aud`/`exp`/`iat` manually against `config`, so the
+    // library's own claim validation is disabled here to avoid double (and differently
+    // configured) enforcement; `jsonwebtoken` still verifies the signature.
+    let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
+    validation.validate_exp = false;
+    validation.validate_aud = false;
+    validation.required_spec_claims.clear();
+
+    // Try HS256 first (HMAC)
+    if let Some(hmac_secret) = &config.hmac_secret {
+        let key = jsonwebtoken::DecodingKey::from_secret(hmac_secret);
+        match jsonwebtoken::decode::<JwtClaims>(token, &key, &validation) {
+            Ok(data) => {
+                // Verify issuer and audience
+                if data.claims.iss != config.issuer {
+                    return Err(JwtError::InvalidToken);
+                }
+                if data.claims.aud != config.audience {
+                    return Err(JwtError::InvalidToken);
+                }
+
+                // Check expiration
+                let now = Utc::now().timestamp() as usize;
+                if now < data.claims.iat || now > data.claims.exp {
+                    return Err(JwtError::Expired);
+                }
+
+                return Ok(TokenInfo {
+                    token_id: data.claims.sub.clone(),
+                    scopes: data.claims.scopes.clone(),
+                });
+            }
+            Err(_) => {
+                // Not a valid HS256 token (wrong key, signature, or shape); try RSA.
+            }
+        }
+    }
+
+    // Try RS256 (RSA public key verification)
+    if let Some(rsa_pem) = &config.rsa_public_key {
+        let key = match jsonwebtoken::DecodingKey::from_rsa_pem(rsa_pem.as_bytes()) {
+            Ok(key) => key,
+            Err(_) => return Err(JwtError::MissingRsaKey),
+        };
+        let mut rsa_validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
+        rsa_validation.validate_exp = false;
+        rsa_validation.validate_aud = false;
+        rsa_validation.required_spec_claims.clear();
+
+        match jsonwebtoken::decode::<JwtClaims>(token, &key, &rsa_validation) {
+            Ok(data) => {
+                // Verify issuer and audience
+                if data.claims.iss != config.issuer {
+                    return Err(JwtError::InvalidToken);
+                }
+                if data.claims.aud != config.audience {
+                    return Err(JwtError::InvalidToken);
+                }
+
+                // Check expiration
+                let now = Utc::now().timestamp() as usize;
+                if now < data.claims.iat || now > data.claims.exp {
+                    return Err(JwtError::Expired);
+                }
+
+                return Ok(TokenInfo {
+                    token_id: data.claims.sub.clone(),
+                    scopes: data.claims.scopes.clone(),
+                });
+            }
+            Err(_) => {
+                return Err(JwtError::InvalidSignature);
+            }
+        }
+    }
+
+    // No suitable key configured
+    if config.hmac_secret.is_none() && config.rsa_public_key.is_none() {
+        return Err(JwtError::MissingHmacSecret);
+    }
+
+    Err(JwtError::MissingRsaKey)
+}

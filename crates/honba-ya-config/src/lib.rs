@@ -254,10 +254,7 @@ pub struct ResolvedUniverse {
 
 impl ResolvedUniverse {
     /// Builds a resolved universe, sorting for determinism.
-    pub fn new(
-        name: impl Into<String>,
-        mut instruments: Vec<honba_core::InstrumentId>,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, mut instruments: Vec<honba_core::InstrumentId>) -> Self {
         instruments.sort();
         instruments.dedup();
         Self {

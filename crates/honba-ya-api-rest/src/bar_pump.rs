@@ -12,8 +12,8 @@ use std::sync::PoisonError;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::task::JoinHandle;
 
-use honba_core::rust_decimal::prelude::ToPrimitive;
 use honba_core::Bar;
+use honba_core::rust_decimal::prelude::ToPrimitive;
 
 use crate::AppState;
 

@@ -219,7 +219,6 @@ pub(crate) async fn get_sweep_by_id(
     )
 }
 
-
 /// `GET /backtests`.
 pub(crate) async fn get_backtests(State(state): State<Arc<AppState>>) -> Response {
     let Some(runs) = state.runs.clone() else {

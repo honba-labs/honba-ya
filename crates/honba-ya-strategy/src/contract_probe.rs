@@ -161,11 +161,7 @@ impl Strategy for ContractProbe {
         );
         let id = self.instrument_id.clone();
         if pos.is_zero() {
-            ctx.submit(OrderIntent::stop_buy(
-                id,
-                lot,
-                Price::new(price.0 + tick.0),
-            ));
+            ctx.submit(OrderIntent::stop_buy(id, lot, Price::new(price.0 + tick.0)));
         } else if pos > Decimal::ZERO {
             ctx.submit(OrderIntent::stop_limit_sell(
                 id,

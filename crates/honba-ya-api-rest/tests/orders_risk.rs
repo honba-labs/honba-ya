@@ -7,12 +7,14 @@
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use honba_api_rest::{AppState, api_router_with};
-use honba_core::{Currency, Exchange, InstrumentId, InstrumentKind, OrderSide, TimeInForce, };
 use honba_api::TradingState;
-use honba_feed::wire::{Bar, BarAggregation, BarSpecification, BarType, Instrument, PriceType, QuoteTick, UnixNanos};
-use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
 use honba_api_rest::orders::{Order, OrderStatus, OrderType};
+use honba_api_rest::{AppState, api_router_with};
+use honba_core::{Currency, Exchange, InstrumentId, InstrumentKind, OrderSide, TimeInForce};
+use honba_feed::wire::{
+    Bar, BarAggregation, BarSpecification, BarType, Instrument, PriceType, QuoteTick, UnixNanos,
+};
+use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde_json::{Value, json};

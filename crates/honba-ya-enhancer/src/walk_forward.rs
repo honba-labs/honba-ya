@@ -1,13 +1,14 @@
 //! Walk-Forward Analysis (WFO) for strategy validation.
 
-use rand::Rng;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use std::collections::BTreeMap;
 
-use honba_backtest::NseTradingCalendar;
+use honba_backtest::{BacktestConfig, BacktestEngine, MarketEvent, TradingCalendar};
 use honba_core::{InstrumentId, Quantity, Tick};
 use honba_mon::RiskEngine;
 use honba_strategy::{StrategyManifest, factory::StrategyFactoryRegistry};
+use std::sync::Arc;
 
 /// Walk-Forward Analysis configuration.
 #[derive(Debug, Clone)]
@@ -76,7 +77,7 @@ pub fn run_wfo<S>(
     instrument: InstrumentId,
     quantity: Quantity,
     risk_engine: RiskEngine,
-    calendar: NseTradingCalendar,
+    calendar: Arc<dyn TradingCalendar>,
     optimizer: &mut S,
 ) -> WalkForwardResult
 where
@@ -86,7 +87,7 @@ where
         InstrumentId,
         Quantity,
         RiskEngine,
-        NseTradingCalendar,
+        Arc<dyn TradingCalendar>,
     ) -> Result<BTreeMap<String, f64>, String>,
 {
     let n_points = data.len();
@@ -238,53 +239,87 @@ pub struct FitnessResult {
     pub total_trades: usize,
 }
 
-/// Evaluate a strategy with given parameters on data.
+/// Evaluate a strategy with given parameters on data via a real
+/// [`BacktestEngine`] run over the window's market events.
 fn evaluate_with_params(
     manifest: &StrategyManifest,
     params: &BTreeMap<String, f64>,
     data: &[Tick],
     instrument: InstrumentId,
     quantity: Quantity,
-    _risk_engine: RiskEngine,
-    _calendar: NseTradingCalendar,
+    risk_engine: RiskEngine,
+    calendar: Arc<dyn TradingCalendar>,
 ) -> FitnessResult {
-    // Convert params to JSON for factory
+    // Convert params to JSON for factory. Integral-valued f64s (e.g. a period
+    // of 14.0) are emitted as JSON integers so factories that read them with
+    // `as_u64()` (as the built-in RSI/SMA factories do) succeed; plain
+    // `serde_json::json!(14.0_f64)` stores an F64 that `as_u64()` rejects.
     let param_json: BTreeMap<String, serde_json::Value> = params
         .iter()
-        .map(|(k, v)| (k.clone(), serde_json::json!(v)))
+        .map(|(k, v)| {
+            let val = if v.fract() == 0.0 {
+                serde_json::json!(*v as i64)
+            } else {
+                serde_json::json!(v)
+            };
+            (k.clone(), val)
+        })
         .collect();
 
     // Create strategy from factory
     let factory_registry = StrategyFactoryRegistry::new();
-    let strategy =
-        factory_registry.create(&manifest.name, &param_json, instrument.clone(), quantity);
+    let strategy = match factory_registry.create(&manifest.name, &param_json, instrument, quantity)
+    {
+        Ok(strat) => strat,
+        Err(_) => return FitnessResult::rejection(),
+    };
 
-    match strategy {
-        Ok(_strat) => {
-            // Run backtest (placeholder - in real implementation would use BacktestEngine)
-            // For now return synthetic results
-            let mut rng = rand::thread_rng();
-            let n = data.len() as f64;
-            let base_sharpe = (n / 1000.0).min(3.0);
-            let noise = rng.gen_range(-0.3..0.3);
-            let sharpe = (base_sharpe + noise).clamp(-2.0, 5.0);
+    // Real backtest through the canonical event loop.
+    let config = BacktestConfig {
+        starting_cash: Decimal::from(1_000_000), // ₹10 Lakhs
+        ..Default::default()
+    };
+    let mut engine = BacktestEngine::new(strategy, risk_engine, config, calendar);
+    let market_events: Vec<MarketEvent> =
+        data.iter().map(|t| MarketEvent::Tick(t.clone())).collect();
+    let result = engine.run_events(market_events);
 
-            FitnessResult {
-                sharpe,
-                sortino: sharpe * 0.9,
-                profit_factor: 1.0 + sharpe.abs() * 0.2,
-                max_drawdown_pct: 5.0 + rng.gen_range(-2.0..5.0),
-                net_pnl: Decimal::from((sharpe * 10000.0) as i64),
-                total_trades: (n / 10.0) as usize,
-            }
-        }
-        Err(_) => FitnessResult {
+    let net_pnl = result.net_pnl.to_f64().unwrap_or(0.0);
+    let gross_pnl = result.gross_pnl.to_f64().unwrap_or(0.0);
+    let total_fees = result.total_fees.total().to_f64().unwrap_or(0.0);
+    let max_drawdown_pct = result.max_drawdown_pct.to_f64().unwrap_or(0.0);
+
+    // Sharpe approximated from net PnL vs max drawdown (same heuristic as GA).
+    let sharpe = if max_drawdown_pct > 0.0 {
+        (net_pnl / max_drawdown_pct).clamp(-10.0, 10.0)
+    } else {
+        0.0
+    };
+
+    FitnessResult {
+        sharpe,
+        sortino: sharpe * 0.9,
+        profit_factor: if total_fees > 0.0 && gross_pnl > 0.0 {
+            (gross_pnl / total_fees).min(10.0)
+        } else {
+            1.0
+        },
+        max_drawdown_pct,
+        net_pnl: result.net_pnl,
+        total_trades: result.total_trades,
+    }
+}
+
+impl FitnessResult {
+    /// Worst-case fitness for a candidate that could not be built or run.
+    fn rejection() -> Self {
+        Self {
             sharpe: f64::NEG_INFINITY,
             sortino: f64::NEG_INFINITY,
             profit_factor: 0.0,
             max_drawdown_pct: 100.0,
             net_pnl: Decimal::MIN,
             total_trades: 0,
-        },
+        }
     }
 }

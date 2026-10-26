@@ -11,6 +11,7 @@ use honba_backtest::{NseTradingCalendar, ProductType};
 use honba_core::{Bar, Exchange, InstrumentId, Price, Quantity};
 use honba_mon::{OtrConfig, RiskEngine, RiskLimits};
 use honba_strategy::{OrderIntent, Strategy, StrategyContext};
+use std::sync::Arc;
 
 fn bar(inst: &InstrumentId, close: &str, ts: DateTime<Utc>) -> Bar {
     let price = Price::from_rupees(close).unwrap();
@@ -154,7 +155,12 @@ fn test_engine_drives_strategy_runner_intents() {
         product_type: ProductType::Delivery,
         ..Default::default()
     };
-    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
+    let mut engine = BacktestEngine::new(
+        strategy,
+        risk_engine,
+        config,
+        Arc::new(NseTradingCalendar::new()),
+    );
 
     let day = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
     let events = vec![MarketEvent::Bar(bar(&inst, "1500.00", ts(day, 9, 20)))];
@@ -189,7 +195,12 @@ fn test_engine_respects_warmup_bars() {
             warmup_bars: 2,
             ..Default::default()
         };
-        BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new())
+        BacktestEngine::new(
+            strategy,
+            risk_engine,
+            config,
+            Arc::new(NseTradingCalendar::new()),
+        )
     };
 
     // Only the first two (warm-up) bars: no order should ever be submitted.
@@ -224,7 +235,12 @@ fn test_engine_surfaces_intent_rejections() {
         product_type: ProductType::Delivery,
         ..Default::default()
     };
-    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
+    let mut engine = BacktestEngine::new(
+        strategy,
+        risk_engine,
+        config,
+        Arc::new(NseTradingCalendar::new()),
+    );
 
     let day = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
     let events = vec![MarketEvent::Bar(bar(&inst, "1500.00", ts(day, 9, 20)))];
@@ -251,7 +267,12 @@ fn test_backtest_result_exposes_fills() {
         product_type: ProductType::Delivery,
         ..Default::default()
     };
-    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
+    let mut engine = BacktestEngine::new(
+        strategy,
+        risk_engine,
+        config,
+        Arc::new(NseTradingCalendar::new()),
+    );
 
     let day = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
     let events = vec![

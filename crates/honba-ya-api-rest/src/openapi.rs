@@ -5,13 +5,11 @@
 //! Uses `schemars` for JSON Schema generation from Rust types.
 
 use axum::response::IntoResponse;
-use honba_core::{
-    InstrumentId, OrderSide, OrderStatus, OrderType, Price, Quantity, TimeInForce,
-};
+use honba_core::{InstrumentId, OrderSide, OrderStatus, OrderType, Price, Quantity, TimeInForce};
 use honba_mon::{RiskLimits, RiskRefusal};
-use serde::{Deserialize, Serialize};
 use schemars::schema::*;
 use schemars::schema_for;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// OpenAPI 3.1 info block.
@@ -33,8 +31,14 @@ pub struct OpenApiServer {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum SecurityScheme {
-    Http { scheme: String, bearer_format: Option<String> },
-    ApiKey { name: String, in_: String },
+    Http {
+        scheme: String,
+        bearer_format: Option<String>,
+    },
+    ApiKey {
+        name: String,
+        in_: String,
+    },
 }
 
 /// OpenAPI 3.1 security requirement.
@@ -147,7 +151,9 @@ impl OpenApiDocument {
                             description: "List of instruments".to_string(),
                             content: BTreeMap::from([(
                                 "application/json".to_string(),
-                                MediaType { schema: schema_for!(Vec<InstrumentId>).schema.into() },
+                                MediaType {
+                                    schema: schema_for!(Vec<InstrumentId>).schema.into(),
+                                },
                             )]),
                         },
                     )]),
@@ -176,7 +182,9 @@ impl OpenApiDocument {
                             description: "Latest quotes".to_string(),
                             content: BTreeMap::from([(
                                 "application/json".to_string(),
-                                MediaType { schema: schema_for!(serde_json::Value).schema.into() },
+                                MediaType {
+                                    schema: schema_for!(serde_json::Value).schema.into(),
+                                },
                             )]),
                         },
                     )]),
@@ -205,7 +213,9 @@ impl OpenApiDocument {
                             description: "List of orders".to_string(),
                             content: BTreeMap::from([(
                                 "application/json".to_string(),
-                                MediaType { schema: schema_for!(serde_json::Value).schema.into() },
+                                MediaType {
+                                    schema: schema_for!(serde_json::Value).schema.into(),
+                                },
                             )]),
                         },
                     )]),
@@ -313,7 +323,9 @@ impl OpenApiDocument {
                             description: "Portfolio state".to_string(),
                             content: BTreeMap::from([(
                                 "application/json".to_string(),
-                                MediaType { schema: schema_for!(serde_json::Value).schema.into() },
+                                MediaType {
+                                    schema: schema_for!(serde_json::Value).schema.into(),
+                                },
                             )]),
                         },
                     )]),
@@ -342,7 +354,9 @@ impl OpenApiDocument {
                             description: "OpenAPI 3.1 schema".to_string(),
                             content: BTreeMap::from([(
                                 "application/json".to_string(),
-                                MediaType { schema: schema_for!(serde_json::Value).schema.into() },
+                                MediaType {
+                                    schema: schema_for!(serde_json::Value).schema.into(),
+                                },
                             )]),
                         },
                     )]),
@@ -359,12 +373,18 @@ impl OpenApiDocument {
             "InstrumentId".to_string(),
             schema_for!(InstrumentId).schema.into(),
         );
-        schemas.insert("OrderSide".to_string(), schema_for!(OrderSide).schema.into());
+        schemas.insert(
+            "OrderSide".to_string(),
+            schema_for!(OrderSide).schema.into(),
+        );
         schemas.insert(
             "OrderStatus".to_string(),
             schema_for!(OrderStatus).schema.into(),
         );
-        schemas.insert("OrderType".to_string(), schema_for!(OrderType).schema.into());
+        schemas.insert(
+            "OrderType".to_string(),
+            schema_for!(OrderType).schema.into(),
+        );
         schemas.insert("Price".to_string(), schema_for!(Price).schema.into());
         schemas.insert("Quantity".to_string(), schema_for!(Quantity).schema.into());
         schemas.insert(
@@ -394,7 +414,9 @@ impl OpenApiDocument {
             info: OpenApiInfo {
                 title: "Honba REST API".to_string(),
                 version: honba_api::API_VERSION.to_string(),
-                description: "Honba trading platform REST API with JWT authentication and OpenAPI 3.1".to_string(),
+                description:
+                    "Honba trading platform REST API with JWT authentication and OpenAPI 3.1"
+                        .to_string(),
             },
             servers: vec![OpenApiServer {
                 url: "http://localhost:8080".to_string(),
@@ -408,7 +430,8 @@ impl OpenApiDocument {
             tags: vec![
                 Tag {
                     name: "market".to_string(),
-                    description: "Market data endpoints (instruments, quotes, bars, depth)".to_string(),
+                    description: "Market data endpoints (instruments, quotes, bars, depth)"
+                        .to_string(),
                 },
                 Tag {
                     name: "trading".to_string(),
@@ -426,12 +449,19 @@ impl OpenApiDocument {
         }
     }
 
+    /// Serialize the generated OpenAPI 3.1 document as a JSON `Value`,
+    /// suitable for writing to a file (`honba schema --openapi`).
+    pub fn openapi_json() -> serde_json::Value {
+        serde_json::to_value(Self::generate()).unwrap_or(serde_json::Value::Null)
+    }
+
     /// Generate the OpenAPI 3.1 document for v1 (legacy & supported).
     pub fn generate_v1() -> Self {
         let mut doc = Self::generate();
         doc.info.title = "Honba REST API v1".to_string();
         doc.info.version = "1.0.0".to_string();
-        doc.info.description = "Honba trading platform REST API v1 (Supported for legacy software)".to_string();
+        doc.info.description =
+            "Honba trading platform REST API v1 (Supported for legacy software)".to_string();
         doc.servers = vec![
             OpenApiServer {
                 url: "/api/v1".to_string(),
@@ -450,13 +480,12 @@ impl OpenApiDocument {
         let mut doc = Self::generate();
         doc.info.title = "Honba REST API v2".to_string();
         doc.info.version = "2.0.0".to_string();
-        doc.info.description = "Honba trading platform REST API v2 (Latest & Recommended)".to_string();
-        doc.servers = vec![
-            OpenApiServer {
-                url: "/api/v2".to_string(),
-                description: "Honba REST API v2 (Latest & Recommended)".to_string(),
-            },
-        ];
+        doc.info.description =
+            "Honba trading platform REST API v2 (Latest & Recommended)".to_string();
+        doc.servers = vec![OpenApiServer {
+            url: "/api/v2".to_string(),
+            description: "Honba REST API v2 (Latest & Recommended)".to_string(),
+        }];
         doc
     }
 }

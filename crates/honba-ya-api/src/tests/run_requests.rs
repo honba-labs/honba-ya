@@ -89,7 +89,11 @@ fn backtest_resolve_rejects_an_unknown_or_blank_fill_model() {
 #[test]
 fn backtest_resolve_defaults_cost_knobs_to_zero_and_carries_explicit_ones() {
     let r = full().resolve().unwrap();
-    assert_eq!(r.commission_per_fill, Decimal::ZERO, "unset commission is free");
+    assert_eq!(
+        r.commission_per_fill,
+        Decimal::ZERO,
+        "unset commission is free"
+    );
     assert_eq!(r.slippage_bps, Decimal::ZERO, "unset slippage is none");
 
     let mut req = full();

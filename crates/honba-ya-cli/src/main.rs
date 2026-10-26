@@ -1,6 +1,8 @@
 mod backtest;
 mod calendars;
 mod data;
+mod migrate;
+mod optimize;
 mod schema;
 mod serve;
 #[cfg(test)]
@@ -29,7 +31,17 @@ enum Commands {
         config: PathBuf,
         #[arg(short, long)]
         output: Option<PathBuf>,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        data_dir: Option<PathBuf>,
     },
+    /// Run Automatic Strategy Enhancer (GA / Bayesian / WFO)
+    Optimize(optimize::OptimizeArgs),
+    /// Run database migrations (PostgreSQL / SQLite)
+    Migrate(migrate::MigrateArgs),
     /// Calendar utilities
     Calendars {
         #[command(subcommand)]
@@ -126,6 +138,24 @@ enum DataCommands {
         #[arg(long)]
         out: PathBuf,
     },
+    /// Inspect market data catalog
+    CatalogInspect {
+        /// Data directory holding catalog
+        #[arg(long)]
+        data_dir: PathBuf,
+        /// Optional timeframe filter (e.g. 1d, 1m)
+        #[arg(long)]
+        timeframe: Option<String>,
+    },
+    /// Verify market data catalog integrity
+    CatalogVerify {
+        /// Data directory holding catalog
+        #[arg(long)]
+        data_dir: PathBuf,
+        /// Optional timeframe filter (e.g. 1d, 1m)
+        #[arg(long)]
+        timeframe: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -159,7 +189,21 @@ enum SchemaCommands {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Backtest { config, output } => backtest::run(&config, output.as_deref()),
+        Commands::Backtest {
+            config,
+            output,
+            from,
+            to,
+            data_dir,
+        } => backtest::run(
+            &config,
+            output.as_deref(),
+            from.as_deref(),
+            to.as_deref(),
+            data_dir.as_deref(),
+        ),
+        Commands::Optimize(args) => optimize::run(&args),
+        Commands::Migrate(args) => migrate::run(&args),
         Commands::Data { command } => match command {
             DataCommands::Load {
                 source,
@@ -167,6 +211,14 @@ fn main() -> Result<()> {
                 exchange,
             } => data::load(&source, &symbol, exchange.as_deref()),
             DataCommands::TicksImport { ticks, out } => data::ticks_import(&ticks, &out),
+            DataCommands::CatalogInspect {
+                data_dir,
+                timeframe,
+            } => data::catalog_inspect(&data_dir, timeframe.as_deref()),
+            DataCommands::CatalogVerify {
+                data_dir,
+                timeframe,
+            } => data::catalog_verify(&data_dir, timeframe.as_deref()),
         },
         Commands::Calendars { command } => match command {
             CalendarCommands::Show { year } => calendars::show(year),

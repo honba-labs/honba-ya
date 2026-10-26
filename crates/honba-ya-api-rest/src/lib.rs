@@ -11,12 +11,11 @@
 use crate::auth::AuthRouterExt;
 use axum::http::{HeaderName, HeaderValue, Method};
 use axum::{
-    async_trait,
-    extract::{rejection::JsonRejection, FromRequest, Request},
+    Router, async_trait,
+    extract::{FromRequest, Request, rejection::JsonRejection},
     http::StatusCode,
     response::{IntoResponse, Json, Response},
     routing::get,
-    Router,
 };
 use honba_api::{ApiResponse, ErrorCode, ErrorDetail};
 use std::sync::Arc;
@@ -62,12 +61,12 @@ pub mod ws;
 
 pub use approval::ApprovalQueue;
 pub use auth::{
-    scope_for, unscoped_routes, AuthConfig, AuthLayer, FileTokenStore, RouteScope, TokenInfo,
-    ROUTE_SCOPES,
+    AuthConfig, AuthLayer, FileTokenStore, JwtClaims, JwtConfig, ROUTE_SCOPES, RouteScope,
+    TokenInfo, scope_for, unscoped_routes,
 };
 pub use bar_pump::BarPumpReport;
-pub use catalog::{load_catalog, CatalogBars, CatalogLoadError, CATALOG_DIR};
-pub use dispatch::{build_target, dispatch, dispatch_stream, DispatchError};
+pub use catalog::{CATALOG_DIR, CatalogBars, CatalogLoadError, load_catalog};
+pub use dispatch::{DispatchError, build_target, dispatch, dispatch_stream};
 pub use exec::NextOpenSim;
 pub use executor::BacktestExecutor;
 pub use honba_api::JournalWriter;
@@ -80,10 +79,10 @@ pub use portfolio_store::{
 };
 pub use profile_store::{DEFAULT_USER_ID, Module, Profile, ProfileError, ProfileStore, Source};
 pub use registry::StrategyRegistry;
-pub use retention::{evictions, RetentionPolicy};
+pub use retention::{RetentionPolicy, evictions};
 pub use run_store::{OsEntropy, RecoveryReport, RunClock, RunEntropy, RunStore, SystemClock};
 pub use service::{
-    RunService, RunServiceConfig, ShutdownReport, DEFAULT_MAX_QUEUED, DEFAULT_SHUTDOWN_GRACE,
+    DEFAULT_MAX_QUEUED, DEFAULT_SHUTDOWN_GRACE, RunService, RunServiceConfig, ShutdownReport,
 };
 pub use state::AppState;
 pub use streams::get_backtest_events;
@@ -94,6 +93,11 @@ pub use v1::{
     get_sweep_by_id, post_close_positions, post_orders, post_strategies, post_sweeps,
     post_verify_strategy,
 };
+
+/// Serialized OpenAPI 3.1 document (v2) for codegen file emission (`honba schema --openapi`).
+pub fn openapi_json() -> serde_json::Value {
+    openapi::OpenApiDocument::openapi_json()
+}
 
 /// JSON body extractor whose rejections are the standard error envelope
 /// (`validation_invalid_request`) rather than axum's plain-text message.
@@ -273,8 +277,11 @@ pub fn api_router_with_config(state: AppState, config: &ApiConfig) -> Router {
     if let Some(tokens_file) = &config.auth.tokens_file {
         let audit_log_path = config.auth.audit_log_path.clone();
         let store = FileTokenStore::new(tokens_file.clone()).expect("failed to load token file");
-        let auth_layer =
-            Arc::new(AuthLayer::new(store, audit_log_path, config.auth.jwt_config.clone()));
+        let auth_layer = Arc::new(AuthLayer::new(
+            store,
+            audit_log_path,
+            config.auth.jwt_config.clone(),
+        ));
         router.with_auth(auth_layer)
     } else {
         router

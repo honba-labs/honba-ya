@@ -47,11 +47,12 @@ pub use overfitting_guardrails::{
 // Walk-Forward
 pub use walk_forward::{FitnessResult, WalkForwardConfig, WalkForwardResult, run_wfo};
 
-use honba_backtest::NseTradingCalendar;
+use honba_backtest::TradingCalendar;
 use honba_core::Tick;
 use honba_mon::RiskEngine;
 use honba_strategy::{Strategy, StrategyManifest};
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 /// Optimizer trait for strategy parameter search.
 pub trait Optimizer: Send + Sync {
@@ -116,7 +117,7 @@ impl EnhancerEngine {
         instrument: honba_core::InstrumentId,
         quantity: honba_core::Quantity,
         risk_engine: RiskEngine,
-        calendar: NseTradingCalendar,
+        calendar: Arc<dyn TradingCalendar>,
     ) -> Result<GaOptimizationResult, GaError> {
         self.ga_optimizer
             .optimize(manifest, data, instrument, quantity, risk_engine, calendar)
@@ -130,7 +131,7 @@ impl EnhancerEngine {
         instrument: honba_core::InstrumentId,
         quantity: honba_core::Quantity,
         risk_engine: RiskEngine,
-        calendar: NseTradingCalendar,
+        calendar: Arc<dyn TradingCalendar>,
     ) -> Result<BayesOptimizationResult, bayesian_optimizer::BayesError> {
         self.bayesian_optimizer.optimize(
             manifest,
@@ -151,7 +152,7 @@ impl EnhancerEngine {
         instrument: honba_core::InstrumentId,
         quantity: honba_core::Quantity,
         risk_engine: RiskEngine,
-        calendar: NseTradingCalendar,
+        calendar: Arc<dyn TradingCalendar>,
         mut optimizer: F,
     ) -> WalkForwardResult
     where
@@ -161,7 +162,7 @@ impl EnhancerEngine {
             honba_core::InstrumentId,
             honba_core::Quantity,
             RiskEngine,
-            NseTradingCalendar,
+            Arc<dyn TradingCalendar>,
         ) -> Result<BTreeMap<String, f64>, String>,
     {
         run_wfo(
@@ -186,7 +187,7 @@ impl EnhancerEngine {
         instrument: honba_core::InstrumentId,
         quantity: honba_core::Quantity,
         risk_engine: RiskEngine,
-        calendar: NseTradingCalendar,
+        calendar: Arc<dyn TradingCalendar>,
     ) -> MonteCarloResult {
         let factory = self.ga_optimizer.factory_registry.clone();
         monte_carlo_permutation(
@@ -213,7 +214,7 @@ impl EnhancerEngine {
         instrument: honba_core::InstrumentId,
         quantity: honba_core::Quantity,
         risk_engine: RiskEngine,
-        calendar: NseTradingCalendar,
+        calendar: Arc<dyn TradingCalendar>,
     ) -> StressTestResult {
         let factory = self.ga_optimizer.factory_registry.clone();
         stress_test(

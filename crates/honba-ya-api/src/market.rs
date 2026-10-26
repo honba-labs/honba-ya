@@ -171,9 +171,7 @@ pub fn parse_instrument_id(text: &str) -> Result<InstrumentId, ErrorDetail> {
         invalid(
             "id",
             "invalid_instrument_id",
-            format!(
-                "instrument id {text:?} names unknown exchange {exchange:?} (NSE, BSE or MCX)"
-            ),
+            format!("instrument id {text:?} names unknown exchange {exchange:?} (NSE, BSE or MCX)"),
         )
     })?;
     Ok(InstrumentId::new(exchange, symbol))

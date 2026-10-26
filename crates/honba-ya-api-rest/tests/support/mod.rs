@@ -9,15 +9,18 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::Utc;
-use honba_api::{
-    BacktestMetrics, BacktestRequest, ErrorDetail, Event, JournalWriter, Message,
-    ResolvedBacktest, ResolvedRequest, ResolvedSweep, RunExecutor, RunId, RunJob, RunKind,
-    RunManifest, RunOutcome, RunStatus, StrategyCatalog, compile_strategy,
-};
-use honba_api_rest::{BacktestExecutor, RunClock, RunEntropy, RunService, RunServiceConfig, RunStore, StrategyRegistry};
-use honba_core::{Exchange, InstrumentId};
 use honba_api::wire::QuoteTick;
-use honba_feed::wire::{ BarAggregation, BarSpecification, PriceType, UnixNanos};
+use honba_api::{
+    BacktestMetrics, BacktestRequest, ErrorDetail, Event, JournalWriter, Message, ResolvedBacktest,
+    ResolvedRequest, ResolvedSweep, RunExecutor, RunId, RunJob, RunKind, RunManifest, RunOutcome,
+    RunStatus, StrategyCatalog, compile_strategy,
+};
+use honba_api_rest::{
+    BacktestExecutor, RunClock, RunEntropy, RunService, RunServiceConfig, RunStore,
+    StrategyRegistry,
+};
+use honba_core::{Exchange, InstrumentId};
+use honba_feed::wire::{BarAggregation, BarSpecification, PriceType, UnixNanos};
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
@@ -193,8 +196,7 @@ const DAY_NS: u64 = 86_400_000_000_000;
 /// 80 daily TCS bars from 2024-01-01 shaped to make the 3/8 SMA crossover trade.
 pub fn fixture_reader() -> Arc<DatasetReader> {
     let spec = BarSpecification::new(1, BarAggregation::Day, PriceType::Last);
-    let mut builder =
-        ColumnarSliceBuilder::new(InstrumentId::new(Exchange::Nse, "TCS"), spec);
+    let mut builder = ColumnarSliceBuilder::new(InstrumentId::new(Exchange::Nse, "TCS"), spec);
     for i in 0..80u64 {
         let c = 100.0 + 12.0 * (i as f64 * 0.35).sin() + i as f64 * 0.05;
         let ts = UnixNanos::from_u64(BARS_FROM_NS + i * DAY_NS);
@@ -223,7 +225,10 @@ pub fn sma_request(seed: u64) -> BacktestRequest {
 
 pub struct TestBarReader;
 impl honba_core::BarReader for TestBarReader {
-    fn read_bars(&self, _req: &honba_core::BarRequest) -> honba_core::PortResult<Vec<honba_core::Bar>> {
+    fn read_bars(
+        &self,
+        _req: &honba_core::BarRequest,
+    ) -> honba_core::PortResult<Vec<honba_core::Bar>> {
         Ok(Vec::new())
     }
 }
@@ -339,10 +344,8 @@ impl RunExecutor for FailingExecutor {
         if self.0 {
             panic!("boom at /secret/path");
         }
-        Err(
-            ErrorDetail::new(honba_api::ErrorCode::NotFound, "no bars")
-                .with_context(json!({"reason": "no_data"})),
-        )
+        Err(ErrorDetail::new(honba_api::ErrorCode::NotFound, "no bars")
+            .with_context(json!({"reason": "no_data"})))
     }
 }
 
@@ -352,8 +355,8 @@ pub fn run_status(store: &RunStore, id: &RunId) -> RunStatus {
 
 /// The shared test manifest, renamed by the caller.
 pub fn tests_manifest(name: &str) -> honba_api::StrategyManifest {
-    use honba_api::{StrategyManifest, Subscriptions, TimeframeSpec, Universe};
     use honba_api::wire::BarAggregation;
+    use honba_api::{StrategyManifest, Subscriptions, TimeframeSpec, Universe};
     let tcs = InstrumentId::new(Exchange::Nse, "TCS");
     StrategyManifest::new(
         name,
@@ -365,4 +368,3 @@ pub fn tests_manifest(name: &str) -> honba_api::StrategyManifest {
         instruments: vec![tcs],
     })
 }
-

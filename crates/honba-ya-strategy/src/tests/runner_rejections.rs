@@ -53,7 +53,11 @@ fn a_rejection_is_recorded_and_releases_the_instrument() {
     })
     .unwrap();
     assert_eq!(r.order_rejections().len(), 1);
-    assert!(r.order_rejections()[0].reason.contains("InsufficientMargin"));
+    assert!(
+        r.order_rejections()[0]
+            .reason
+            .contains("InsufficientMargin")
+    );
     assert!(!r.context().busy(&any_instrument()));
 }
 

@@ -3,9 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use honba_strategy::{
-    StepKind, StepManifest, StrategyManifest, sweep_space_from_manifest,
-};
+use honba_strategy::{StepKind, StepManifest, StrategyManifest, sweep_space_from_manifest};
 
 fn catalog_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../honba-strategies")

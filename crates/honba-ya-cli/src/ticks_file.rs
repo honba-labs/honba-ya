@@ -100,7 +100,10 @@ pub(crate) fn parse(text: &str) -> Result<InMemoryTickReader> {
                 // crossed quote (bid > ask); unlike the deleted `honba_messages` wire
                 // type, it does not refuse a negative size, so that invariant is
                 // checked here instead, before the wire type ever sees the value.
-                if !bid_size.is_finite() || bid_size < 0.0 || !ask_size.is_finite() || ask_size < 0.0
+                if !bid_size.is_finite()
+                    || bid_size < 0.0
+                    || !ask_size.is_finite()
+                    || ask_size < 0.0
                 {
                     bail!("line {n}: invalid quote: sizes must be finite and >= 0");
                 }

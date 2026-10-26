@@ -2,9 +2,11 @@
 //! `client_order_id`, strict state-machine status transitions, and broker
 //! order-ID reconciliation lookups.
 
-use crate::{with_executor, Database};
+use crate::{Database, with_executor};
 use chrono::{DateTime, Utc};
-use honba_core::{InstrumentId, OrderRequest, OrderSide, OrderStatus, OrderType, Price, TimeInForce};
+use honba_core::{
+    InstrumentId, OrderRequest, OrderSide, OrderStatus, OrderType, Price, TimeInForce,
+};
 use rust_decimal::Decimal;
 use thiserror::Error;
 use uuid::Uuid;
@@ -258,8 +260,14 @@ pub fn is_legal_transition(from: OrderStatus, to: OrderStatus) -> bool {
     matches!(
         (from, to),
         (PendingNew, New | Cancelled | Rejected | Expired)
-            | (New, PartiallyFilled | Filled | Cancelled | Rejected | Expired)
-            | (PartiallyFilled, PartiallyFilled | Filled | Cancelled | Rejected | Expired)
+            | (
+                New,
+                PartiallyFilled | Filled | Cancelled | Rejected | Expired
+            )
+            | (
+                PartiallyFilled,
+                PartiallyFilled | Filled | Cancelled | Rejected | Expired
+            )
     )
 }
 

@@ -3,11 +3,11 @@
 //! `filled_quantity` / `avg_fill_price` inside the same transaction.
 
 use crate::orders::{parse_side, side_str};
-use crate::{with_executor, Database};
-use sqlx::Row;
+use crate::{Database, with_executor};
 use chrono::{DateTime, Utc};
 use honba_core::{FillReport, OrderSide};
 use rust_decimal::Decimal;
+use sqlx::Row;
 use thiserror::Error;
 
 /// Fill store errors.
@@ -111,13 +111,15 @@ pub(crate) async fn select_fills_for_order(
     client_order_id: &str,
 ) -> Result<Vec<PersistedFill>, FillStoreError> {
     with_executor!(db, |ex| {
-        sqlx::query(&format!("{SELECT_FILLS} WHERE client_order_id = $1 ORDER BY id ASC"))
-            .bind(client_order_id)
-            .fetch_all(ex)
-            .await?
-            .iter()
-            .map(PersistedFill::from_row)
-            .collect::<Result<Vec<_>, sqlx::Error>>()
+        sqlx::query(&format!(
+            "{SELECT_FILLS} WHERE client_order_id = $1 ORDER BY id ASC"
+        ))
+        .bind(client_order_id)
+        .fetch_all(ex)
+        .await?
+        .iter()
+        .map(PersistedFill::from_row)
+        .collect::<Result<Vec<_>, sqlx::Error>>()
     })
     .map_err(Into::into)
 }
@@ -215,12 +217,10 @@ impl FillStore {
                 None
             };
 
-            let ord = sqlx::query(
-                "SELECT quantity, status FROM orders WHERE client_order_id = $1",
-            )
-            .bind(&cid)
-            .fetch_optional(&mut *tx)
-            .await?;
+            let ord = sqlx::query("SELECT quantity, status FROM orders WHERE client_order_id = $1")
+                .bind(&cid)
+                .fetch_optional(&mut *tx)
+                .await?;
             if let Some(order) = ord {
                 let order_qty: Decimal = order
                     .try_get::<String, _>("quantity")?

@@ -125,14 +125,21 @@ impl AppState {
     }
 
     /// Attach the live market data broadcast channel from MarketDataActor / Supervisor.
-    pub fn with_market_data_broadcast(mut self, tx: tokio::sync::broadcast::Sender<honba_core::Tick>) -> Self {
+    pub fn with_market_data_broadcast(
+        mut self,
+        tx: tokio::sync::broadcast::Sender<honba_core::Tick>,
+    ) -> Self {
         self.market_data_broadcast_tx = Some(tx);
         self
     }
 
     /// Subscribe to the live market data broadcast stream if attached.
-    pub fn subscribe_market_data(&self) -> Option<tokio::sync::broadcast::Receiver<honba_core::Tick>> {
-        self.market_data_broadcast_tx.as_ref().map(|tx| tx.subscribe())
+    pub fn subscribe_market_data(
+        &self,
+    ) -> Option<tokio::sync::broadcast::Receiver<honba_core::Tick>> {
+        self.market_data_broadcast_tx
+            .as_ref()
+            .map(|tx| tx.subscribe())
     }
 
     /// The writable live-quote store `quotes` reads, if this state has one.

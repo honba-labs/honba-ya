@@ -1,6 +1,7 @@
 use chrono::{NaiveDate, NaiveTime, TimeZone, Utc};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use std::sync::Arc;
 
 use honba_backtest::*;
 // `honba_core::*` also exports a (different, live-trading) `MarketEvent`;
@@ -85,7 +86,7 @@ fn test_historical_day_backtest_with_indian_cost_and_settlement() {
         product_type: ProductType::Delivery,
         ..Default::default()
     };
-    let calendar = NseTradingCalendar::new();
+    let calendar = Arc::new(NseTradingCalendar::new());
 
     let mut engine = BacktestEngine::new(strategy, risk_engine, config, calendar);
 
@@ -246,7 +247,12 @@ fn test_deterministic_llm_prompt_replay_backtest() {
         product_type: ProductType::Delivery,
         ..Default::default()
     };
-    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
+    let mut engine = BacktestEngine::new(
+        strategy,
+        risk_engine,
+        config,
+        Arc::new(NseTradingCalendar::new()),
+    );
 
     let day = NaiveDate::from_ymd_opt(2025, 2, 10).unwrap();
     let t1 = Utc.from_utc_datetime(&day.and_time(NaiveTime::from_hms_opt(9, 30, 0).unwrap()));
@@ -319,7 +325,12 @@ fn test_backtest_fees_match_kokoro_tax_calculator() {
         product_type: ProductType::Delivery,
         ..Default::default()
     };
-    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
+    let mut engine = BacktestEngine::new(
+        strategy,
+        risk_engine,
+        config,
+        Arc::new(NseTradingCalendar::new()),
+    );
 
     let day = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
     let t_open = Utc.from_utc_datetime(&day.and_time(NaiveTime::from_hms_opt(9, 15, 0).unwrap()));
@@ -430,7 +441,12 @@ fn test_t1_settlement_uses_clearing_calendar() {
         product_type: ProductType::Delivery,
         ..Default::default()
     };
-    let mut engine = BacktestEngine::new(strategy, risk_engine, config, NseTradingCalendar::new());
+    let mut engine = BacktestEngine::new(
+        strategy,
+        risk_engine,
+        config,
+        Arc::new(NseTradingCalendar::new()),
+    );
 
     // Friday Jan 17, 2025 -> Saturday Jan 18 -> Monday Jan 20, 2025.
     let friday = NaiveDate::from_ymd_opt(2025, 1, 17).unwrap();
@@ -438,7 +454,8 @@ fn test_t1_settlement_uses_clearing_calendar() {
     let monday = NaiveDate::from_ymd_opt(2025, 1, 20).unwrap();
 
     let t_fri = Utc.from_utc_datetime(&friday.and_time(NaiveTime::from_hms_opt(9, 20, 0).unwrap()));
-    let t_sat = Utc.from_utc_datetime(&saturday.and_time(NaiveTime::from_hms_opt(9, 20, 0).unwrap()));
+    let t_sat =
+        Utc.from_utc_datetime(&saturday.and_time(NaiveTime::from_hms_opt(9, 20, 0).unwrap()));
     let t_mon = Utc.from_utc_datetime(&monday.and_time(NaiveTime::from_hms_opt(9, 20, 0).unwrap()));
 
     let price = Price::from_rupees("1000.00").unwrap();

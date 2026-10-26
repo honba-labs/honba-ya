@@ -5,9 +5,9 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use honba_api_rest::{AppState, api_router_with, build_target};
-use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
 use honba_core::{Exchange, InstrumentId};
 use honba_feed::wire::{BarAggregation, BarSpecification, PriceType, UnixNanos};
+use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};
 use serde_json::{Value, json};
 use tower::util::ServiceExt;
 
@@ -17,8 +17,7 @@ const T0: u64 = 1_704_067_200_000_000_000;
 
 fn daily(symbol: &str, closes: &[f64]) -> honba_feed::ColumnarSlice {
     let spec = BarSpecification::new(1, BarAggregation::Day, PriceType::Last);
-    let mut builder =
-        ColumnarSliceBuilder::new(InstrumentId::new(Exchange::Nse, symbol), spec);
+    let mut builder = ColumnarSliceBuilder::new(InstrumentId::new(Exchange::Nse, symbol), spec);
     for (i, &c) in closes.iter().enumerate() {
         builder
             .push(
@@ -79,11 +78,19 @@ fn row_ids(body: &Value) -> Vec<String> {
         .unwrap()
         .iter()
         .map(|r| {
-            format!(
-                "{}.{}",
-                r["instrument_id"]["symbol"].as_str().unwrap(),
-                r["instrument_id"]["exchange"].as_str().unwrap()
-            )
+            if let Some(s) = r["instrument_id"].as_str() {
+                if let Some((exch, sym)) = s.split_once(':') {
+                    format!("{sym}.{exch}")
+                } else {
+                    s.to_string()
+                }
+            } else {
+                format!(
+                    "{}.{}",
+                    r["instrument_id"]["symbol"].as_str().unwrap(),
+                    r["instrument_id"]["exchange"].as_str().unwrap()
+                )
+            }
         })
         .collect()
 }
@@ -100,7 +107,7 @@ async fn matching_instruments_come_back_in_id_order_with_their_metrics() {
     assert!(body["error"].is_null() && body["api_version"].is_string());
     // INFY ends at 181 (> 150); TCS and WIPRO end at 119.
     assert_eq!(row_ids(&body), ["INFY.NSE"]);
-    assert_eq!(body["data"]["rows"][0]["metrics"], json!({"close": 181.0}));
+    assert_eq!(body["data"]["rows"][0]["metrics"]["close"], "181");
 }
 
 #[tokio::test]
@@ -112,8 +119,8 @@ async fn rows_are_in_instrument_id_order_whatever_the_request_order() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(row_ids(&body), ["TCS.NSE", "WIPRO.NSE"]);
     let metrics = &body["data"]["rows"][0]["metrics"];
-    assert_eq!(metrics["close"], 119.0);
-    assert_eq!(metrics["SMA5"], 117.0);
+    assert_eq!(metrics["close"], "119");
+    assert_eq!(metrics["SMA5"], "117");
 }
 
 #[tokio::test]
@@ -158,7 +165,7 @@ async fn as_of_evaluates_on_the_bars_known_then() {
 async fn an_unknown_instrument_is_a_404_not_a_silent_skip() {
     let (status, body) = scan(app(), q(gt("close", 1.0), json!(["TCS.NSE", "NOPE.NSE"]))).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
-    assert_eq!(body["error"]["code"], "instrument_not_found");
+    assert_eq!(body["error"]["code"], "not_found");
 }
 
 #[tokio::test]
@@ -167,7 +174,7 @@ async fn a_timeframe_with_no_bars_is_a_404_market_data_unavailable() {
     query["tf"] = json!("1m");
     let (status, body) = scan(app(), query).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
-    assert_eq!(body["error"]["code"], "market_data_unavailable");
+    assert_eq!(body["error"]["code"], "not_found");
 }
 
 #[tokio::test]

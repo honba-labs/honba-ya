@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 use honba_core::{Exchange, InstrumentId, OrderSide};
-use honba_persistence::{migrate, Database, PositionStore, PositionStoreError};
+use honba_persistence::{Database, PositionStore, PositionStoreError, migrate};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -42,7 +42,14 @@ async fn fifo_three_buys_then_partial_sell_exact_math() {
     buy(&store, client, dec!(10), dec!(100), 1).await;
     buy(&store, client, dec!(10), dec!(110), 2).await;
     let after_buys = store
-        .apply_fill(&reliance(), client, OrderSide::Buy, dec!(5), dec!(120), ts(3))
+        .apply_fill(
+            &reliance(),
+            client,
+            OrderSide::Buy,
+            dec!(5),
+            dec!(120),
+            ts(3),
+        )
         .await
         .expect("third buy");
     // WAC = (1000 + 1100 + 600) / 25 = 2700 / 25 = 108.
@@ -54,7 +61,14 @@ async fn fifo_three_buys_then_partial_sell_exact_math() {
     // Partial sell: 15 @ 130 → FIFO consumes lot1 (10 @ 100) fully and
     // 5 of lot2 (10 @ 110): realized = (130-100)*10 + (130-110)*5 = 400.
     let after_sell = store
-        .apply_fill(&reliance(), client, OrderSide::Sell, dec!(15), dec!(130), ts(4))
+        .apply_fill(
+            &reliance(),
+            client,
+            OrderSide::Sell,
+            dec!(15),
+            dec!(130),
+            ts(4),
+        )
         .await
         .expect("partial sell");
     assert_eq!(after_sell.open_quantity(), dec!(10));
@@ -72,7 +86,11 @@ async fn fifo_three_buys_then_partial_sell_exact_math() {
     assert_eq!(lots[0].side(), Some(OrderSide::Buy));
 
     // Position getters agree with the returned row.
-    let position = store.get_position(client, &reliance()).await.unwrap().unwrap();
+    let position = store
+        .get_position(client, &reliance())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(position.open_quantity(), dec!(10));
     assert_eq!(position.weighted_average_cost(), dec!(115));
     assert_eq!(position.realized_pnl(), dec!(400));
@@ -90,18 +108,38 @@ async fn oversell_fails_and_rolls_back_without_mutation() {
     buy(&store, client, dec!(10), dec!(110), 2).await;
     buy(&store, client, dec!(5), dec!(120), 3).await;
     store
-        .apply_fill(&reliance(), client, OrderSide::Sell, dec!(15), dec!(130), ts(4))
+        .apply_fill(
+            &reliance(),
+            client,
+            OrderSide::Sell,
+            dec!(15),
+            dec!(130),
+            ts(4),
+        )
         .await
         .expect("partial sell");
-    let before = store.get_position(client, &reliance()).await.unwrap().unwrap();
+    let before = store
+        .get_position(client, &reliance())
+        .await
+        .unwrap()
+        .unwrap();
     let lots_before = store.get_lots(client, &reliance()).await.unwrap();
 
     // Open is 10 — selling 100 must fail as a long-only violation.
     let err = store
-        .apply_fill(&reliance(), client, OrderSide::Sell, dec!(100), dec!(130), ts(5))
+        .apply_fill(
+            &reliance(),
+            client,
+            OrderSide::Sell,
+            dec!(100),
+            dec!(130),
+            ts(5),
+        )
         .await;
     match err {
-        Err(PositionStoreError::InsufficientPosition { requested, open, .. }) => {
+        Err(PositionStoreError::InsufficientPosition {
+            requested, open, ..
+        }) => {
             assert_eq!(requested, "100");
             assert_eq!(open, "10");
         }
@@ -109,7 +147,11 @@ async fn oversell_fails_and_rolls_back_without_mutation() {
     }
 
     // Transaction rolled back: no mutated rows anywhere.
-    let after = store.get_position(client, &reliance()).await.unwrap().unwrap();
+    let after = store
+        .get_position(client, &reliance())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(after, before);
     assert_eq!(after.open_quantity(), dec!(10));
     assert_eq!(after.realized_pnl(), dec!(400));
@@ -120,9 +162,19 @@ async fn oversell_fails_and_rolls_back_without_mutation() {
 
     // Non-positive quantities are rejected before touching the database.
     let invalid = store
-        .apply_fill(&reliance(), client, OrderSide::Buy, Decimal::ZERO, dec!(1), ts(6))
+        .apply_fill(
+            &reliance(),
+            client,
+            OrderSide::Buy,
+            Decimal::ZERO,
+            dec!(1),
+            ts(6),
+        )
         .await;
-    assert!(matches!(invalid, Err(PositionStoreError::InvalidQuantity(_))));
+    assert!(matches!(
+        invalid,
+        Err(PositionStoreError::InvalidQuantity(_))
+    ));
 }
 
 #[tokio::test]
@@ -135,7 +187,14 @@ async fn two_clients_maintain_isolated_rows_and_lots() {
 
     // Same instrument, different client: independent row with its own WAC.
     let pos_b = store
-        .apply_fill(&reliance(), "client-b", OrderSide::Buy, dec!(7), dec!(200), ts(3))
+        .apply_fill(
+            &reliance(),
+            "client-b",
+            OrderSide::Buy,
+            dec!(7),
+            dec!(200),
+            ts(3),
+        )
         .await
         .expect("client-b buy");
     assert_eq!(pos_b.client_id, "client-b");
@@ -144,7 +203,11 @@ async fn two_clients_maintain_isolated_rows_and_lots() {
     assert_eq!(pos_b.realized_pnl(), dec!(0));
 
     // Client A untouched by client B's activity.
-    let pos_a = store.get_position("client-a", &reliance()).await.unwrap().unwrap();
+    let pos_a = store
+        .get_position("client-a", &reliance())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(pos_a.open_quantity(), dec!(20));
     assert_eq!(pos_a.weighted_average_cost(), dec!(105));
     assert_eq!(pos_a.realized_pnl(), dec!(0));
@@ -160,19 +223,32 @@ async fn two_clients_maintain_isolated_rows_and_lots() {
     // Client B's sell cannot touch client A's inventory, and an unknown
     // client simply reports no position.
     let sold_b = store
-        .apply_fill(&reliance(), "client-b", OrderSide::Sell, dec!(7), dec!(210), ts(4))
+        .apply_fill(
+            &reliance(),
+            "client-b",
+            OrderSide::Sell,
+            dec!(7),
+            dec!(210),
+            ts(4),
+        )
         .await
         .expect("client-b flat sell");
     assert_eq!(sold_b.open_quantity(), dec!(0));
     assert_eq!(sold_b.weighted_average_cost(), dec!(0));
     assert_eq!(sold_b.realized_pnl(), dec!(70));
-    let pos_a = store.get_position("client-a", &reliance()).await.unwrap().unwrap();
-    assert_eq!(pos_a.open_quantity(), dec!(20));
-    assert!(store
-        .get_position("client-c", &reliance())
+    let pos_a = store
+        .get_position("client-a", &reliance())
         .await
         .unwrap()
-        .is_none());
+        .unwrap();
+    assert_eq!(pos_a.open_quantity(), dec!(20));
+    assert!(
+        store
+            .get_position("client-c", &reliance())
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 async fn after_buy_rows(store: &PositionStore, client: &str) -> usize {

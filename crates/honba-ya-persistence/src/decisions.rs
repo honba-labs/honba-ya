@@ -3,7 +3,7 @@
 //! Every decision row records the SHA-256 of the exact prompt payload so a
 //! decision can be deterministically replayed against the same inputs.
 
-use crate::{with_executor, Database};
+use crate::{Database, with_executor};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use thiserror::Error;

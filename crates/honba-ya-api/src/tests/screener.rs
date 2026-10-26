@@ -154,10 +154,7 @@ fn malformed_filters_are_invalid_filters() {
 
 #[test]
 fn unsupported_metrics_are_rejected_at_resolve_before_any_bar_is_read() {
-    let q = query(
-        Some(gt("price_earnings_ttm", 1)),
-        Some(json!(["TCS.NSE"])),
-    );
+    let q = query(Some(gt("price_earnings_ttm", 1)), Some(json!(["TCS.NSE"])));
     let err = q.resolve().unwrap_err();
     assert_eq!(err.code, ErrorCode::ValidationInvalidRequest);
     assert_eq!(reason(&err), ("filters", "unsupported_metric"));

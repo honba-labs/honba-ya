@@ -6,10 +6,11 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use std::collections::BTreeMap;
 
-use honba_backtest::NseTradingCalendar;
+use honba_backtest::TradingCalendar;
 use honba_core::{InstrumentId, Quantity};
 use honba_mon::RiskEngine;
 use honba_strategy::{StrategyManifest, factory::StrategyFactoryRegistry};
+use std::sync::Arc;
 
 /// Monte Carlo stress test results.
 #[derive(Debug, Clone)]
@@ -76,7 +77,7 @@ pub fn monte_carlo_permutation(
     _instrument: InstrumentId,
     _quantity: Quantity,
     _risk_engine: RiskEngine,
-    _calendar: NseTradingCalendar,
+    _calendar: Arc<dyn TradingCalendar>,
 ) -> MonteCarloResult {
     let mut rng = rand::thread_rng();
     let mut pnl_simulations: Vec<Decimal> = Vec::with_capacity(n_simulations);
@@ -335,7 +336,7 @@ pub fn stress_test(
     instrument: InstrumentId,
     quantity: Quantity,
     risk_engine: RiskEngine,
-    calendar: NseTradingCalendar,
+    calendar: Arc<dyn TradingCalendar>,
 ) -> StressTestResult {
     // Base permutation test
     let base_result = monte_carlo_permutation(

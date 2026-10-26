@@ -1,5 +1,4 @@
 //! `PortfolioStore`: isolation, revisions, id validation and atomic writes.
-use rust_decimal::Decimal;
 use crate::{
     PortfolioAccountRecord, PortfolioDocument, PortfolioError, PortfolioHeldPosition,
     PortfolioStore,
@@ -10,6 +9,7 @@ use honba_core::{
     PortfolioPosition as Position, PortfolioSource, PositionSide, Price, Quantity,
 };
 use honba_portfolio::Product;
+use rust_decimal::Decimal;
 use uuid::Uuid;
 
 fn store() -> (tempfile::TempDir, PortfolioStore) {

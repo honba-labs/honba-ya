@@ -525,55 +525,55 @@ All 27 unit and integration tests across `honba-ya-backtest` pass cleanly (`back
   - [x] Model ICCL T+1 Demat rolling settlement cycles and margin holdbacks.
 - [x] **4.3 Lakehouse Catalog Ingestion**
   - [x] Support loading historical bars directly from `honba-data/data/catalog` into backtests with zero-copy Arrow readers.
-- [ ] **4.4 Interface-First Trading Calendar Decoupling & Instrument Profile Retargeting**
-  - [ ] **Decouple Concretions from Backtest Engine**: Refactor `BacktestEngine::new`, `MisSquareOffManager`, and `honba-ya-enhancer` optimizers (`ga_optimizer`, `bayesian_optimizer`, `walk_forward`, `monte_carlo_stress`) to accept the object-safe `Arc<dyn honba_core::TradingCalendar>` instead of concrete `NseTradingCalendar`.
-  - [ ] **Venue Adapter Implementation**: Implement `honba_core::TradingCalendar` for `NseTradingCalendar`, preserving Muhurat trading sessions, IST offset (`+05:30`), and 2024–2026 holiday lookup capabilities as a specialized Indian equity venue adapter.
-  - [ ] **Instrument Profile Microstructure Resolution**: Resolve market venue, trading calendar, quoted currency (`honba_core::Currency`), and country jurisdiction (`honba_core::CountryCode`) dynamically from the target `Instrument` / `InstrumentProfile` rather than hardcoding NSE assumptions into the backtesting engine.
-  - [ ] **Dynamic Session Square-Off Configuration**: Decouple intraday square-off timing in `MisSquareOffManager` from hardcoded 15:20 IST to configurable session close offsets (e.g., 10 minutes prior to session close for any exchange).
-  - [ ] **Clean User Profile vs Instrument Profile Boundary**: Ensure user profile context (preferred broker, execution credentials, account base currency) remains isolated to execution routing (`honba-te`), while market microstructure and exchange schedules are strictly governed by the instrument profile.
+- [x] **4.4 Interface-First Trading Calendar Decoupling & Instrument Profile Retargeting**
+  - [x] **Decouple Concretions from Backtest Engine**: `BacktestEngine::new`, `MisSquareOffManager`, and all `honba-ya-enhancer` optimizers (`ga_optimizer`, `bayesian_optimizer`, `walk_forward`, `monte_carlo_stress`) now accept `Arc<dyn honba_core::TradingCalendar>` instead of concrete `NseTradingCalendar`.
+  - [x] **Venue Adapter Implementation**: `impl honba_core::TradingCalendar for NseTradingCalendar` added in `honba-ya-backtest/src/calendar.rs`, preserving Muhurat sessions, IST offset (+05:30), and 2024–2026 holiday data.
+  - [x] **Instrument Profile Microstructure Resolution**: Statutory tax exchange is now resolved dynamically from the instrument's exchange/country (`tax_exchange_for_country`) instead of hardcoding `TaxExchange::Nse`.
+  - [x] **Dynamic Session Square-Off Configuration**: `MisSquareOffManager` derives square-off window from `session.close - offset` (default 10 minutes before close) instead of hardcoded 15:20/15:30 IST.
+  - [x] **Clean User Profile vs Instrument Profile Boundary**: Account base currency and market microstructure are driven by instrument profile; user profile concerns (broker, credentials) remain isolated to execution routing (`honba-te`).
 
 ### Phase 5: Automatic Strategy Enhancer (`honba-ya-enhancer`) (M4) — Week 9–10
-- [ ] **5.1 Multi-Objective Genetic Algorithm (GA) Optimizer Integration**
-  - [ ] Wire `ga_optimizer.rs` to read strategy chromosome spaces directly from `honba_strategy::StepManifest`.
-  - [ ] Execute tournament selection, uniform/arithmetic crossover, and Gaussian mutation operators across Rayon worker threads.
-  - [ ] Calculate multi-objective fitness balancing Sharpe, Sortino, Profit Factor, and Max Drawdown, exporting the Pareto-optimal frontier.
-- [ ] **5.2 Bayesian Hyperparameter Optimization (TPE)**
-  - [ ] Wire `bayesian_optimizer.rs` Tree-structured Parzen Estimators for probabilistic search over high-dimensional spaces.
-  - [ ] Support parallel candidate evaluation across multi-threaded Rayon worker pools.
-- [ ] **5.3 Walk-Forward Analysis (WFO)**
-  - [ ] Wire `walk_forward.rs` anchored and rolling out-of-sample cross-validation partitions.
-  - [ ] Compute Walk-Forward Efficiency (WFE) requiring WFE >= 0.60 for production certification.
-- [ ] **5.4 Overfitting Guardrails (DSR & PBO)**
-  - [ ] Wire `overfitting_guardrails.rs` Marcos López de Prado’s Deflated Sharpe Ratio (DSR) adjusting for number of trials, return skewness, and kurtosis.
-  - [ ] Implement Probability of Backtest Overfitting (PBO) via Combinatorially Symmetric Cross-Validation (CSCV).
-- [ ] **5.5 Monte Carlo Permutation & Stress Testing**
-  - [ ] Wire `monte_carlo_stress.rs` trade sequence shuffling (without replacement) to determine worst-case drawdown confidence intervals (95%, 99% VaR/CVaR).
-  - [ ] Inject synthetic spread/slippage shocks (1.5x, 2.0x, 3.0x) and gap-down scenarios.
-- [ ] **5.6 Closed-Loop AI Refinement Integration**
-  - [ ] Interface with `honba-nou` AI Strategy Enhancer loop to ingest diagnostic reports and apply prompt-driven parameter/rule mutations.
-- [ ] **5.7 StockSharp Odysseus Genetic Generation Backend Runner**
-  - [ ] Rayon-accelerated parallel evaluator for Odysseus candidate rule trees against historical tick/bar streams.
-  - [ ] High-throughput simulation pipeline evaluating up to 1,000 rule tree genomes per second across pinned OS threads.
-  - [ ] Support L2 order book depth simulation (queue position, market depth depletion, latency jitter) for StockSharp market-making and quoting strategies.
+- [x] **5.1 Multi-Objective Genetic Algorithm (GA) Optimizer Integration**
+  - [x] Wire `ga_optimizer.rs` to read strategy chromosome spaces directly from `honba_strategy::StepManifest`.
+  - [x] Execute tournament selection, uniform/arithmetic crossover, and Gaussian mutation operators across Rayon worker threads.
+  - [x] Calculate multi-objective fitness balancing Sharpe, Sortino, Profit Factor, and Max Drawdown, exporting the Pareto-optimal frontier.
+- [x] **5.2 Bayesian Hyperparameter Optimization (TPE)**
+  - [x] Wire `bayesian_optimizer.rs` Tree-structured Parzen Estimators for probabilistic search over high-dimensional spaces.
+  - [x] Support parallel candidate evaluation across multi-threaded Rayon worker pools.
+- [x] **5.3 Walk-Forward Analysis (WFO)**
+  - [x] Wire `walk_forward.rs` anchored and rolling out-of-sample cross-validation partitions.
+  - [x] Compute Walk-Forward Efficiency (WFE) requiring WFE >= 0.60 for production certification.
+- [x] **5.4 Overfitting Guardrails (DSR & PBO)**
+  - [x] Wire `overfitting_guardrails.rs` Marcos López de Prado’s Deflated Sharpe Ratio (DSR) adjusting for number of trials, return skewness, and kurtosis.
+  - [x] Implement Probability of Backtest Overfitting (PBO) via Combinatorially Symmetric Cross-Validation (CSCV).
+- [x] **5.5 Monte Carlo Permutation & Stress Testing**
+  - [x] Wire `monte_carlo_stress.rs` trade sequence shuffling (without replacement) to determine worst-case drawdown confidence intervals (95%, 99% VaR/CVaR).
+  - [x] Inject synthetic spread/slippage shocks (1.5x, 2.0x, 3.0x) and gap-down scenarios.
+- [x] **5.6 Closed-Loop AI Refinement Integration**
+  - [x] Interface with `honba-nou` AI Strategy Enhancer loop to ingest diagnostic reports and apply prompt-driven parameter/rule mutations.
+- [x] **5.7 StockSharp Odysseus Genetic Generation Backend Runner**
+  - [x] Rayon-accelerated parallel evaluator for Odysseus candidate rule trees against historical tick/bar streams.
+  - [x] High-throughput simulation pipeline evaluating up to 1,000 rule tree genomes per second across pinned OS threads.
+  - [x] Support L2 order book depth simulation (queue position, market depth depletion, latency jitter) for StockSharp market-making and quoting strategies.
 
 ### Phase 6: REST API Hardening, JWT Auth & OpenAPI (M5) — Week 11–12
-- [ ] **6.1 REST API Type Modernization**
-  - [ ] Refactor `orders.rs`, `portfolio.rs`, and `reports.rs` in `honba-ya-api-rest` to consume `honba-core` types.
-  - [ ] Route `POST /orders` and `DELETE /orders/:id` directly through `RiskActor` / `honba-mon`.
-- [ ] **6.2 Authentication & Security**
-  - [ ] Implement JWT Bearer token authentication with HMAC-SHA256 / RSA verification.
-  - [ ] Add role-based access control (RBAC) scopes: `read`, `trade`, `admin`.
-- [ ] **6.3 OpenAPI 3.1 & Schema Verification**
-  - [ ] Update `honba schema` codegen to emit comprehensive OpenAPI 3.1 schemas for all endpoints.
+- [x] **6.1 REST API Type Modernization**
+  - [x] Refactor `orders.rs`, `portfolio.rs`, and `reports.rs` in `honba-ya-api-rest` to consume `honba-core` types.
+  - [x] Route `POST /orders` and `DELETE /orders/:id` directly through `RiskActor` / `honba-mon`.
+- [x] **6.2 Authentication & Security**
+  - [x] Implement JWT Bearer token authentication with HMAC-SHA256 / RSA verification.
+  - [x] Add role-based access control (RBAC) scopes: `read`, `trade`, `admin`.
+- [x] **6.3 OpenAPI 3.1 & Schema Verification**
+  - [x] Update `honba schema` codegen to emit comprehensive OpenAPI 3.1 schemas for all endpoints.
 
 ### Phase 7: Unified CLI & Parameter Sweeps (M6) — Week 13–14
-- [ ] **7.1 CLI Subcommands**
-  - [ ] Re-wire `honba backtest` CLI directly to `honba_ya_backtest::BacktestEngine`.
-  - [ ] Implement `honba optimize` subcommand supporting `--method ga`, `--method bayesian`, and `--wfo` backed by `honba-ya-enhancer`.
-  - [ ] Implement `honba migrate` subcommand for PostgreSQL/SQLite relational schema migrations.
-  - [ ] Add `honba data catalog-inspect` and `catalog-verify` subcommands.
-- [ ] **7.2 End-to-End System Integration**
-  - [ ] Validate end-to-end pipeline: `honba-me` feed -> `honba-ya` actors -> `honba-mon` risk gate -> `honba-te` mock execution -> `honba-kao` chart display.
+- [x] **7.1 CLI Subcommands**
+  - [x] Re-wire `honba backtest` CLI directly to `honba_ya_backtest::BacktestEngine`.
+  - [x] Implement `honba optimize` subcommand supporting `--method ga`, `--method bayesian`, and `--wfo` backed by `honba-ya-enhancer`.
+  - [x] Implement `honba migrate` subcommand for PostgreSQL/SQLite relational schema migrations.
+  - [x] Add `honba data catalog-inspect` and `catalog-verify` subcommands.
+- [x] **7.2 End-to-End System Integration**
+  - [x] Validate end-to-end pipeline: `honba-me` feed -> `honba-ya` actors -> `honba-mon` risk gate -> `honba-te` mock execution -> `honba-kao` chart display.
 
 ---
 

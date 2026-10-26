@@ -31,7 +31,10 @@ impl Strategy for WarmupProbe {
         &self.name
     }
     fn on_start(&mut self, ctx: &mut dyn StrategyContext) -> Result<()> {
-        ctx.submit(OrderIntent::market_buy(self.first.clone(), Quantity::from_u64(1)));
+        ctx.submit(OrderIntent::market_buy(
+            self.first.clone(),
+            Quantity::from_u64(1),
+        ));
         Ok(())
     }
     fn on_bar(&mut self, ctx: &mut dyn StrategyContext, bar: &Bar) -> Result<()> {
@@ -101,7 +104,12 @@ fn warmup_gate_vectors() {
         let suppressed: Vec<Value> = runner
             .suppressed()
             .iter()
-            .map(|s| serde_json::json!([s.ts_init.timestamp_nanos_opt().unwrap_or(0), s.intent.instrument_id.symbol]))
+            .map(|s| {
+                serde_json::json!([
+                    s.ts_init.timestamp_nanos_opt().unwrap_or(0),
+                    s.intent.instrument_id.symbol
+                ])
+            })
             .collect();
         assert_eq!(
             Value::Array(suppressed),

@@ -5,8 +5,8 @@
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use honba_api_rest::{ApiConfig, AppState, api_router_with, api_router_with_config};
 use honba_api::TradingState;
+use honba_api_rest::{ApiConfig, AppState, api_router_with, api_router_with_config};
 use honba_core::{Currency, Exchange, InstrumentId, InstrumentKind};
 use honba_feed::wire::{BarAggregation, BarSpecification, Instrument, PriceType, UnixNanos};
 use honba_feed::{ColumnarSliceBuilder, Dataset, DatasetReader};

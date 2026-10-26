@@ -26,8 +26,8 @@ use std::time::Duration;
 
 use honba_api_rest::{ApiConfig, AppState, RetentionPolicy, RunServiceConfig};
 use honba_config::{ExecutionConfig, FillModel};
-use honba_feed::{InMemoryTickReader, ParquetTickStore};
 use honba_core::TradingState;
+use honba_feed::{InMemoryTickReader, ParquetTickStore};
 
 /// Parses the `--trading-state` value; the spellings are the wire form (ADR 0018 decision 2).
 ///
@@ -65,8 +65,8 @@ pub(crate) fn non_loopback_warning(addr: SocketAddr) -> Option<String> {
         return None;
     }
     Some(format!(
-        "warning: listening on {addr}, which is not loopback; the API has no auth or TLS, \
-         so anyone who can reach it can read the data"
+        "warning: listening on {addr}, which is not loopback; without --tokens-file or \
+         --jwt-secret the API has no auth or TLS, so anyone who can reach it can read the data"
     ))
 }
 
@@ -106,7 +106,7 @@ pub(crate) struct RunsArgs {
     pub keep_days: u64,
 }
 
-/// Auth configuration (ADR 0023, E11-S8).
+/// Auth configuration (ADR 0023, E11-S8, Phase 6.2).
 #[derive(clap::Args, Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AuthArgs {
     /// Path to tokens.toml file. When provided, Bearer token auth is enabled.
@@ -117,6 +117,19 @@ pub(crate) struct AuthArgs {
     /// Defaults to `audit.log` in the journals directory if `--tokens-file` is set.
     #[arg(long)]
     pub audit_log_file: Option<PathBuf>,
+    /// HMAC secret for HS256 JWT bearer token signing/verification.
+    /// When set, JWT auth is enabled without needing a tokens.toml file.
+    #[arg(long)]
+    pub jwt_secret: Option<String>,
+    /// Path to PEM-encoded RSA public key for RS256 JWT verification.
+    #[arg(long)]
+    pub jwt_rsa_key: Option<PathBuf>,
+    /// JWT issuer (`iss`) claim expected in tokens. Default: `honba`.
+    #[arg(long, default_value = "honba")]
+    pub jwt_issuer: String,
+    /// JWT audience (`aud`) claim expected in tokens. Default: `honba-api`.
+    #[arg(long, default_value = "honba-api")]
+    pub jwt_audience: String,
 }
 
 /// The live bar feed behind `POST /bars` (E3-S7 follow-up). Off by default: with it off the
@@ -280,6 +293,21 @@ pub fn run(
         }
     }
 
+    // Phase 6.2: JWT bearer auth via HMAC secret or RSA public key.
+    if auth.jwt_secret.is_some() || auth.jwt_rsa_key.is_some() {
+        let rsa_pem = if let Some(path) = &auth.jwt_rsa_key {
+            Some(std::fs::read_to_string(path).with_context(|| format!("reading RSA key {}", path.display()))?)
+        } else {
+            None
+        };
+        config.auth.jwt_config = Some(honba_api_rest::JwtConfig {
+            hmac_secret: auth.jwt_secret.as_ref().map(|s| s.as_bytes().to_vec()),
+            rsa_public_key: rsa_pem,
+            issuer: auth.jwt_issuer.clone(),
+            audience: auth.jwt_audience.clone(),
+        });
+    }
+
     // A `honba-data` root (with a `catalog/` tree) serves the catalog at every timeframe it
     // holds; otherwise the directory is a flat set of `SYMBOL.EXCHANGE.parquet` files.
     let state = if AppState::has_catalog(data_dir) {
@@ -318,8 +346,8 @@ pub fn run(
         let listener = tokio::net::TcpListener::bind(addr)
             .await
             .with_context(|| format!("binding {addr}"))?;
-        // Only warn about non-loopback if auth is NOT enabled
-        if auth.tokens_file.is_none() {
+        // Only warn about non-loopback if auth is NOT enabled (tokens or JWT).
+        if auth.tokens_file.is_none() && auth.jwt_secret.is_none() && auth.jwt_rsa_key.is_none() {
             if let Some(warning) = non_loopback_warning(addr) {
                 eprintln!("{warning}");
             }

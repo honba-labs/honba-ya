@@ -2,8 +2,8 @@ use std::io::Write;
 use std::path::Path;
 
 use chrono::Utc;
-use honba_api::{Event, Message};
 use honba_api::wire::QuoteTick;
+use honba_api::{Event, Message};
 use honba_core::{Exchange, InstrumentId};
 use rust_decimal::Decimal;
 

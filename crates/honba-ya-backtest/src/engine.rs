@@ -26,20 +26,21 @@
 //! open MIS (Margin Intraday Square-off) positions, as per SEBI regulations.
 
 use chrono::{DateTime, NaiveDate, Utc};
-use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
-use rust_decimal_macros::dec;
-use std::collections::{BTreeMap, HashMap, HashSet};
-use uuid::Uuid;
-
 use honba_core::{
-    Currency, FeeBreakdown, FillReport, InstrumentId, Money, OrderRequest, OrderSide, OrderType,
-    Price, Quantity, Tick,
+    CountryCode, Currency, FeeBreakdown, FillReport, InstrumentId, Money, OrderRequest, OrderSide,
+    OrderType, Price, Quantity, Tick, TradingCalendar,
 };
 use honba_kokoro_ledger::{
     Exchange as TaxExchange, ProductType, TaxBreakdown, TaxCalculator, TradeSide, Transaction,
     post_transaction,
 };
+use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
+use rust_decimal_macros::dec;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
+use uuid::Uuid;
+
 use honba_mon::RiskEngine;
 use honba_portfolio::{
     AccountState, ClearingCalendar, DematHoldings, Fill, PositionSide, Product, SettlementEngine,
@@ -47,7 +48,6 @@ use honba_portfolio::{
 };
 use honba_strategy::{LedgerContext, Strategy, StrategyRunner};
 
-use crate::calendar::NseTradingCalendar;
 use crate::catalog::{CatalogError, CatalogLoader};
 use crate::events::MarketEvent;
 use crate::sim::{
@@ -81,6 +81,22 @@ fn to_kokoro_product(product: ProductType) -> Product {
     match product {
         ProductType::Delivery => Product::Delivery,
         ProductType::Intraday | ProductType::Futures | ProductType::Options => Product::Intraday,
+    }
+}
+
+/// Resolve the tax exchange for statutory fee computation from an
+/// instrument's country jurisdiction, rather than hardcoding NSE.
+///
+/// This implements Phase 4.4 item 3 (Instrument Profile Microstructure
+/// Resolution): the venue and country are read from the target
+/// `Instrument`/`InstrumentProfile` instead of assuming NSE for every
+/// order.
+fn tax_exchange_for_country(country: CountryCode) -> TaxExchange {
+    match country {
+        CountryCode::In => TaxExchange::Nse,
+        // Non-Indian venues have no BSE equivalent in the kokoro ledger;
+        // default to NSE as the canonical cash-segment exchange.
+        CountryCode::Us | CountryCode::Uk | CountryCode::Jp => TaxExchange::Nse,
     }
 }
 
@@ -313,7 +329,7 @@ impl<S: Strategy> BacktestEngine<S> {
         strategy: S,
         risk_engine: RiskEngine,
         config: BacktestConfig,
-        calendar: NseTradingCalendar,
+        calendar: Arc<dyn TradingCalendar>,
     ) -> Self {
         let initial_cash = config.starting_cash;
         let ctx = LedgerContext::with_cash(Money::inr(initial_cash));
@@ -708,16 +724,23 @@ impl<S: Strategy> BacktestEngine<S> {
         };
 
         // Compute exact statutory taxes & brokerage via the canonical
-        // kokoro TaxCalculator (always NSE cash-segment rates, matching the
-        // old IndianCostModel's assumption).
+        // kokoro TaxCalculator. The exchange is resolved from the
+        // instrument's country jurisdiction (Phase 4.4 item 3) rather
+        // than hardcoding NSE for every order.
         let tax_side = match order.side {
             OrderSide::Buy => TradeSide::Buy,
             OrderSide::Sell => TradeSide::Sell,
         };
+        let country = match order.instrument.exchange {
+            honba_core::Exchange::Nse | honba_core::Exchange::Bse | honba_core::Exchange::Mcx => {
+                CountryCode::In
+            }
+        };
+        let tax_exchange = tax_exchange_for_country(country);
         let fees: TaxBreakdown = TaxCalculator::compute_charges(
             tax_side,
             self.product_type,
-            TaxExchange::Nse,
+            tax_exchange,
             fill_price.0,
             filled_qty,
             is_first_sell,

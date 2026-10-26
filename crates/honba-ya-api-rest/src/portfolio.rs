@@ -59,8 +59,11 @@ fn store_failure(error: PortfolioError) -> Response {
         // The id comes from a token record, never from the request: refuse, don't build a path.
         PortfolioError::InvalidUserId => failure(
             StatusCode::FORBIDDEN,
-            ErrorDetail::new(ErrorCode::Unauthorized, "this token id cannot own a portfolio")
-                .with_context(json!({"reason": "invalid_user_id"})),
+            ErrorDetail::new(
+                ErrorCode::Unauthorized,
+                "this token id cannot own a portfolio",
+            )
+            .with_context(json!({"reason": "invalid_user_id"})),
         ),
         PortfolioError::RevisionConflict { expected, current } => failure(
             StatusCode::CONFLICT,

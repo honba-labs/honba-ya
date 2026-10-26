@@ -12,6 +12,8 @@ use crate::portfolio::SymbolMapper;
 /// Backpressure policy for market data ingestion when buffers are full.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BackpressurePolicy {
+    /// Forward every tick directly without coalescing (zero data loss stream).
+    Passthrough,
     /// Coalesce recent ticks keeping only the latest tick per instrument (default).
     #[default]
     CoalesceLatest,
@@ -92,7 +94,8 @@ impl MarketDataActor {
         info!("MarketDataActor starting");
         self.status = ActorStatus::Running;
 
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(self.coalesce_interval));
+        let mut interval =
+            tokio::time::interval(tokio::time::Duration::from_millis(self.coalesce_interval));
         loop {
             tokio::select! {
                 biased;
@@ -149,6 +152,14 @@ impl MarketDataActor {
             return;
         }
 
+        if self.backpressure_policy == BackpressurePolicy::Passthrough {
+            for sender in &self.strategy_senders {
+                let _ = sender.send(StrategyMsg::OnTick(tick.clone())).await;
+            }
+            let _ = self.broadcast_tx.send(tick);
+            return;
+        }
+
         // Apply backpressure policy if buffer reached capacity
         if self.tick_buffer.len() >= self.max_buffer_size {
             match self.backpressure_policy {
@@ -166,6 +177,7 @@ impl MarketDataActor {
                     }
                     self.tick_buffer.push(tick);
                 }
+                BackpressurePolicy::Passthrough => unreachable!(),
             }
         } else {
             self.tick_buffer.push(tick);

@@ -506,7 +506,10 @@ impl OrderLedger {
     where
         F: Fn(&Order) -> bool,
     {
-        self.list().into_iter().filter(|order| filter(order)).collect()
+        self.list()
+            .into_iter()
+            .filter(|order| filter(order))
+            .collect()
     }
 
     /// Marks the row `order_id` cancelled when it is still working.
@@ -607,7 +610,10 @@ async fn check_risk(
         Quantity::new(quantity),
         REST_ALGO_ID,
     );
-    let mut engine = state.risk_engine.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut engine = state
+        .risk_engine
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
     engine.check_order(&request, now)
 }
 

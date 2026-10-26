@@ -79,10 +79,8 @@ fn risk_unknown_top_level_field_is_silently_ignored() {
     // `honba_mon::RiskLimits` does not carry `#[serde(deny_unknown_fields)]`, so an
     // unrecognised key inside `[risk]` is ignored rather than rejected. This test
     // documents that reality instead of asserting a strictness honba-mon doesn't provide.
-    let cfg: BacktestRunConfig = serde_json::from_str(&base_json(
-        r#", "risk": {"max_notinal_per_order": 5.0}"#,
-    ))
-    .unwrap();
+    let cfg: BacktestRunConfig =
+        serde_json::from_str(&base_json(r#", "risk": {"max_notinal_per_order": 5.0}"#)).unwrap();
     assert_eq!(cfg.risk, RiskLimits::default());
 }
 

@@ -3,8 +3,8 @@
 mod support;
 
 use honba_api::{BacktestMetrics, RunKind, RunStatus};
-use honba_api_rest::JournalWriter;
 use honba_api::{ErrorCode, SCHEMA_VERSION};
+use honba_api_rest::JournalWriter;
 use serde_json::json;
 use support::*;
 

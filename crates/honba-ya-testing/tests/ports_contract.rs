@@ -13,7 +13,7 @@ use rust_decimal_macros::dec;
 
 use honba_testing::fixtures::{any_instrument, instrument, utc_nanos};
 use honba_testing::{
-    Clock, CONTRACT_PROBE_KEY, CONTRACT_PROBE_SECRET, ExecutionGateway, FeedItem, FixedClock,
+    CONTRACT_PROBE_KEY, CONTRACT_PROBE_SECRET, Clock, ExecutionGateway, FeedItem, FixedClock,
     InstrumentInfo, InstrumentKind, InstrumentMaster, MapInstrumentMaster, MarketDataFeed,
     PortError, PortResult, RecordingSink, SecretStore, Sink, StubGateway, StubSecretStore,
     VecMessageFeed, check_clock_contract, check_feed_contract, check_gateway_contract,

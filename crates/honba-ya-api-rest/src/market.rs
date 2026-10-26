@@ -162,10 +162,7 @@ pub(crate) fn unprocessable(detail: ErrorDetail) -> Response {
 pub(crate) fn instrument_not_found(id: &honba_core::InstrumentId) -> Response {
     failure(
         StatusCode::NOT_FOUND,
-        ErrorDetail::new(
-            ErrorCode::NotFound,
-            format!("instrument {id} not found"),
-        ),
+        ErrorDetail::new(ErrorCode::NotFound, format!("instrument {id} not found")),
     )
 }
 

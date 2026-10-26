@@ -7,7 +7,7 @@ use honba_core::{
     Exchange, FillReport, InstrumentId, OrderRequest, OrderSide, OrderStatus, OrderType, Price,
     Quantity, TimeInForce,
 };
-use honba_persistence::{migrate, Database, FillStore, OrderStore};
+use honba_persistence::{Database, FillStore, OrderStore, migrate};
 use rust_decimal_macros::dec;
 
 async fn setup() -> Database {
@@ -81,10 +81,7 @@ async fn partial_then_full_fill_aggregation_and_auto_promotion() {
     assert_eq!(f1.quantity(), dec!(40));
     assert_eq!(f1.price(), dec!(100.5));
     assert_eq!(f1.side(), Some(OrderSide::Buy));
-    assert_eq!(
-        f1.fee_breakdown_json,
-        r#"{"stt":"0.60","exchange":"0.05"}"#
-    );
+    assert_eq!(f1.fee_breakdown_json, r#"{"stt":"0.60","exchange":"0.05"}"#);
 
     let order = orders.get_by_client_order_id(&cid).await.unwrap().unwrap();
     assert_eq!(order.filled_quantity(), dec!(40));
@@ -109,7 +106,12 @@ async fn partial_then_full_fill_aggregation_and_auto_promotion() {
 
     // Drive to PartiallyFilled, then complete the order.
     orders
-        .update_status(&cid, OrderStatus::New, OrderStatus::PartiallyFilled, ts(1003))
+        .update_status(
+            &cid,
+            OrderStatus::New,
+            OrderStatus::PartiallyFilled,
+            ts(1003),
+        )
         .await
         .expect("partial ack");
 

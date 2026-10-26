@@ -1,7 +1,7 @@
 use chrono::Utc;
 use futures::{SinkExt, StreamExt};
-use honba_api_rest::ws::{tick_to_ws, ws_handler, WsClientCommand, WsDirectMsg, WsTick};
 use honba_api_rest::AppState;
+use honba_api_rest::ws::{WsClientCommand, WsDirectMsg, WsTick, tick_to_ws, ws_handler};
 use honba_core::{DepthLevel, Exchange, InstrumentId, Price, Quantity, Tick};
 use honba_feed::{Dataset, DatasetReader};
 use std::sync::Arc;
@@ -86,9 +86,14 @@ fn test_ws_client_command_deserialization() {
     let json_action = r#"{"action": "subscribe", "symbols": ["RELIANCE", "TCS"]}"#;
     let cmd: WsClientCommand = serde_json::from_str(json_action).unwrap();
     match cmd {
-        WsClientCommand::Action { action, symbols, .. } => {
+        WsClientCommand::Action {
+            action, symbols, ..
+        } => {
             assert_eq!(action, "subscribe");
-            assert_eq!(symbols, Some(vec!["RELIANCE".to_string(), "TCS".to_string()]));
+            assert_eq!(
+                symbols,
+                Some(vec!["RELIANCE".to_string(), "TCS".to_string()])
+            );
         }
         _ => panic!("Expected Action variant"),
     }
@@ -109,9 +114,8 @@ async fn test_ws_zero_polling_broadcast_gateway_roundtrip() {
 
     // Build AppState using DatasetReader::new
     let reader = DatasetReader::new(Dataset::new(), vec![]);
-    let app_state = Arc::new(
-        AppState::from_reader(reader).with_market_data_broadcast(broadcast_tx.clone()),
-    );
+    let app_state =
+        Arc::new(AppState::from_reader(reader).with_market_data_broadcast(broadcast_tx.clone()));
 
     let router = axum::Router::new()
         .route("/ws", axum::routing::get(ws_handler))

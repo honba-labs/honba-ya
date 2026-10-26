@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
+use axum::Router;
 use axum::http::HeaderValue;
 use axum::response::Response;
-use axum::Router;
 
-use crate::{v1, AppState};
+use crate::{AppState, v1};
 
 /// Build the v2 router with attached state.
 pub fn routes(state: Arc<AppState>) -> Router {

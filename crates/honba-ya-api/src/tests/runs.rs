@@ -6,7 +6,7 @@ use serde_json::json;
 use crate::{
     BacktestMetrics, ErrorCode, ErrorDetail, MANIFEST_VERSION, ResolvedBacktest, ResolvedRequest,
     ResolvedSweep, RunEvent, RunId, RunIdGenerator, RunKind, RunManifest, RunStatus,
-    StrategyCatalog, SCHEMA_VERSION, compile_strategy,
+    SCHEMA_VERSION, StrategyCatalog, compile_strategy,
 };
 
 use super::{tests_manifest, ts};

@@ -4,8 +4,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use honba_api::{
-    ErrorCode, ErrorDetail, StrategyCatalog, StrategyIr, StrategyManifest,
-    Subscriptions, TimeframeSpec, Universe, compile_strategy,
+    ErrorCode, ErrorDetail, StrategyCatalog, StrategyIr, StrategyManifest, Subscriptions,
+    TimeframeSpec, Universe, compile_strategy,
 };
 use honba_core::{Exchange, InstrumentId};
 

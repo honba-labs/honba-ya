@@ -1,11 +1,10 @@
 use chrono::Utc;
 use honba_core::{
-    Exchange, FillReport, InstrumentId, Money, OrderRequest, OrderSide,
-    OrderType, Price, Quantity,
+    Exchange, FillReport, InstrumentId, Money, OrderRequest, OrderSide, OrderType, Price, Quantity,
 };
 use honba_persistence::{
-    migrate, Database, DecisionRepository, FillRepository, OrderRepository, PositionRepository,
-    TraderRepository,
+    Database, DecisionRepository, FillRepository, OrderRepository, PositionRepository,
+    TraderRepository, migrate,
 };
 use rust_decimal::Decimal;
 use std::str::FromStr;
@@ -100,7 +99,10 @@ async fn test_concurrent_persistence_transactions_under_load() {
                 fee_breakdown: None,
                 trace_context: None,
             };
-            fill_repo.insert(&fill, "{}", now).await.expect("fill insert");
+            fill_repo
+                .insert(&fill, "{}", now)
+                .await
+                .expect("fill insert");
 
             // 5. Update position via FIFO lot
             pos_repo

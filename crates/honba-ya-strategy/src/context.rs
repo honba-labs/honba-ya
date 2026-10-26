@@ -227,7 +227,10 @@ impl StrategyContext for LedgerContext {
     }
 
     fn position(&self, instrument_id: &InstrumentId) -> Decimal {
-        self.positions.get(instrument_id).copied().unwrap_or(Decimal::ZERO)
+        self.positions
+            .get(instrument_id)
+            .copied()
+            .unwrap_or(Decimal::ZERO)
     }
 
     fn positions(&self) -> Vec<(InstrumentId, Decimal)> {

@@ -24,6 +24,7 @@ pub use calendar::{NseTradingCalendar, SessionWindow};
 pub use catalog::{CatalogError, CatalogLoader, decimal_from_f64_lossless};
 pub use engine::{BacktestConfig, BacktestEngine, BacktestResult, decimal_qty_to_u64};
 pub use events::{FillEvent, MarketEvent, OrderEvent, SignalEvent};
+pub use honba_core::TradingCalendar;
 // Canonical Indian statutory cost & double-entry ledger types now live in
 // honba-kokoro-ledger; re-exported here so existing call sites keep working.
 pub use honba_kokoro_ledger::{
