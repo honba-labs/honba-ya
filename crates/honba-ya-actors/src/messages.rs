@@ -20,6 +20,8 @@ pub enum ActorStatus {
     Starting,
     /// Actor is active and processing messages normally.
     Running,
+    /// Actor execution is degraded (e.g. Python task timeout / fail-safe active).
+    Degraded,
     /// Actor is draining remaining queued messages or orders prior to stopping.
     Draining,
     /// Actor has terminated gracefully.
@@ -52,6 +54,29 @@ pub enum StrategyMsg {
     OnBar(Bar),
     /// Inbound fill notification.
     OnFill(FillReport),
+    /// Request actor shutdown.
+    Shutdown,
+}
+
+/// Commands and queries dispatched to the `PositionSizingActor`.
+#[derive(Debug)]
+pub enum PositionSizingMsg {
+    /// Ingest a candidate order from StrategyActor, compute dynamic position sizing,
+    /// and forward the sized request to RiskActor.
+    SizeOrder {
+        /// Candidate order request from strategy
+        request: OrderRequest,
+        /// Evaluation timestamp
+        now: DateTime<Utc>,
+        /// Channel returning broker acknowledgement or pre-trade refusal
+        reply_to: oneshot::Sender<Result<OrderAck, BrokerError>>,
+    },
+    /// Update the current instantaneous portfolio state for risk budget evaluation.
+    UpdatePortfolio(honba_kokoro::sizing::Portfolio),
+    /// Set dynamic position sizing method.
+    SetSizingMethod(honba_core::sizing::SizingMethod),
+    /// Set default risk percentage per trade.
+    SetRiskPct(Decimal),
     /// Request actor shutdown.
     Shutdown,
 }

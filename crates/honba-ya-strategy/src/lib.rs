@@ -49,7 +49,7 @@ pub use runner::{
 };
 pub use sma_crossover::{MAX_SMA_PERIOD, SmaCrossover};
 pub use step::{
-    HistoryBars, StepChain, StepConsumes, StepEmits, StepKind, StepManifest, StepParam,
+    HistoryBars, StepChain, StepConsumes, StepEmits, StepKind, StepManifest, StepParam, StepPipeline,
     StepRequires, StepShapeOrList,
 };
 pub use strategy::{Strategy, StrategyAdapter};

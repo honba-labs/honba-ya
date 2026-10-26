@@ -13,13 +13,16 @@ name = "honba_actors"
 [dependencies]
 honba-core.workspace = true
 honba-mon.workspace = true
+honba-kokoro.workspace = true
 honba-ya-persistence.workspace = true
 honba-te-core = { path = "../../../honba-te/crates/honba-te-core" }
 tokio.workspace = true
+tokio-util = "0.7"
 async-trait.workspace = true
 futures.workspace = true
 chrono.workspace = true
 rust_decimal.workspace = true
+rust_decimal_macros.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 serde.workspace = true
@@ -36,4 +39,3 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 tracing-subscriber = { workspace = true }
 honba-ya-testing = { package = "honba-ya-testing", path = "../honba-ya-testing" }
 honba-te-core = { path = "../../../honba-te/crates/honba-te-core" }
-honba-mon.workspace = true

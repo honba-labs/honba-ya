@@ -5,6 +5,7 @@
 //! - Order-to-Trade Ratio (OTR) per `algo_id` and per scrip (`InstrumentId`).
 //! - End-to-end order dispatch latency and risk gate evaluation latency.
 //! - Cumulative daily PnL, notional turnover, and risk gate refusal counts.
+//! - Actor mailbox queue depths, turnaround latencies, backpressure drops, and error rates.
 
 use honba_core::{FillReport, OrderRequest};
 use prometheus::{
@@ -25,6 +26,12 @@ pub struct MetricsCollector {
     daily_pnl_gauge: GaugeVec,
     refusal_counter: CounterVec,
     order_ops_counter: CounterVec,
+
+    // Phase 8.1 Actor Telemetry Metrics
+    actor_mailbox_queue_depth: GaugeVec,
+    actor_processing_latency: HistogramVec,
+    actor_backpressure_drops: CounterVec,
+    actor_errors: CounterVec,
 }
 
 impl MetricsCollector {
@@ -96,6 +103,42 @@ impl MetricsCollector {
         let order_ops_counter = CounterVec::new(ops_opts, &["algo_id", "symbol", "operation"])?;
         registry.register(Box::new(order_ops_counter.clone()))?;
 
+        // 8. Actor Mailbox Queue Depth Gauge
+        let depth_opts = Opts::new(
+            "actor_mailbox_queue_depth",
+            "Gauge of pending messages in actor mpsc channels",
+        );
+        let actor_mailbox_queue_depth = GaugeVec::new(depth_opts, &["actor"])?;
+        registry.register(Box::new(actor_mailbox_queue_depth.clone()))?;
+
+        // 9. Actor Processing Latency Histogram
+        let latency_opts = HistogramOpts::new(
+            "actor_processing_latency_seconds",
+            "Histogram of per-message actor turnaround latency in seconds",
+        )
+        .buckets(vec![
+            0.000001, 0.000010, 0.000050, 0.000100, 0.000500, 0.001000, 0.002000, 0.005000,
+            0.010000, 0.050000, 0.100000,
+        ]);
+        let actor_processing_latency = HistogramVec::new(latency_opts, &["actor"])?;
+        registry.register(Box::new(actor_processing_latency.clone()))?;
+
+        // 10. Actor Backpressure Drops Counter
+        let drops_opts = Opts::new(
+            "actor_backpressure_drops_total",
+            "Counter of coalesced or dropped ticks during market bursts",
+        );
+        let actor_backpressure_drops = CounterVec::new(drops_opts, &["actor", "reason"])?;
+        registry.register(Box::new(actor_backpressure_drops.clone()))?;
+
+        // 11. Actor Errors Counter
+        let errors_opts = Opts::new(
+            "actor_errors_total",
+            "Counter of actor task errors and supervisor restarts",
+        );
+        let actor_errors = CounterVec::new(errors_opts, &["actor", "error_kind"])?;
+        registry.register(Box::new(actor_errors.clone()))?;
+
         Ok(Self {
             registry,
             otr_gauge,
@@ -105,12 +148,44 @@ impl MetricsCollector {
             daily_pnl_gauge,
             refusal_counter,
             order_ops_counter,
+            actor_mailbox_queue_depth,
+            actor_processing_latency,
+            actor_backpressure_drops,
+            actor_errors,
         })
     }
 
     /// Access the underlying Prometheus registry.
     pub fn registry(&self) -> &Registry {
         &self.registry
+    }
+
+    /// Set pending queue depth of an actor channel.
+    pub fn set_mailbox_queue_depth(&self, actor: &str, depth: usize) {
+        self.actor_mailbox_queue_depth
+            .with_label_values(&[actor])
+            .set(depth as f64);
+    }
+
+    /// Record per-message actor turnaround latency.
+    pub fn record_actor_latency(&self, actor: &str, duration: Duration) {
+        self.actor_processing_latency
+            .with_label_values(&[actor])
+            .observe(duration.as_secs_f64());
+    }
+
+    /// Record a dropped or coalesced tick event due to backpressure.
+    pub fn record_backpressure_drop(&self, actor: &str, reason: &str) {
+        self.actor_backpressure_drops
+            .with_label_values(&[actor, reason])
+            .inc();
+    }
+
+    /// Record an actor error or supervisor restart.
+    pub fn record_actor_error(&self, actor: &str, error_kind: &str) {
+        self.actor_errors
+            .with_label_values(&[actor, error_kind])
+            .inc();
     }
 
     /// Record a newly generated candidate order from strategy.
@@ -191,8 +266,6 @@ impl MetricsCollector {
             .set(otr);
     }
 
-    /// Export all collected metrics in Prometheus plain text format.
-
     /// Create an Axum router serving `GET /metrics` in Prometheus format.
     pub fn router(self: std::sync::Arc<Self>) -> axum::Router {
         use axum::response::IntoResponse;
@@ -220,6 +293,7 @@ impl MetricsCollector {
         )
     }
 
+    /// Export all collected metrics in Prometheus plain text format.
     pub fn export_metrics(&self) -> Result<String, prometheus::Error> {
         let encoder = TextEncoder::new();
         let metric_families = self.registry.gather();
@@ -227,11 +301,5 @@ impl MetricsCollector {
         encoder.encode(&metric_families, &mut buffer)?;
         String::from_utf8(buffer)
             .map_err(|e| prometheus::Error::Msg(format!("Metrics utf8 conversion failed: {e}")))
-    }
-}
-
-impl Default for MetricsCollector {
-    fn default() -> Self {
-        Self::new().expect("default MetricsCollector initialization failed")
     }
 }

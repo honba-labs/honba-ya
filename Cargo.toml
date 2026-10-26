@@ -51,6 +51,7 @@ http-body-util = "0.1"
 
 honba-core            = { path = "../honba-core" }
 honba-mon             = { path = "../honba-mon" }
+honba-kokoro          = { path = "../honba-kokoro/crates/honba-kokoro" }
 honba-kokoro-portfolio = { path = "../honba-kokoro/crates/honba-kokoro-portfolio" }
 honba-kokoro-ledger    = { path = "../honba-kokoro/crates/honba-kokoro-ledger" }
 honba-kokoro-oms       = { path = "../honba-kokoro/crates/honba-kokoro-oms" }

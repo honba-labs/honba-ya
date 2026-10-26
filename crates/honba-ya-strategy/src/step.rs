@@ -130,6 +130,71 @@ pub struct StepEmits {
     pub reportable: Vec<String>,
 }
 
+/// Declarative pipeline representation representing an ordered execution chain.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct StepPipeline {
+    /// Ordered steps in the pipeline (e.g. `["signal", "size.fixed_fractional", "risk", "execute"]`).
+    pub steps: Vec<String>,
+}
+
+impl StepPipeline {
+    /// Parse a declarative chain DSL string (e.g. `"signal -> size.fixed_fractional -> risk -> execute"`).
+    pub fn parse(dsl: &str) -> Result<Self, ManifestError> {
+        let steps: Vec<String> = dsl
+            .split("->")
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        if steps.is_empty() {
+            return Err(ManifestError::InvalidStep(
+                "Declarative pipeline cannot be empty".to_string(),
+            ));
+        }
+
+        let pipeline = Self { steps };
+        pipeline.validate_chain_ordering()?;
+        Ok(pipeline)
+    }
+
+    /// Validates that the steps follow the canonical lifecycle ordering:
+    /// Screen -> Filter -> Signal -> Size -> Risk -> Execute
+    pub fn validate_chain_ordering(&self) -> Result<(), ManifestError> {
+        let mut last_stage_rank = 0;
+        for step in &self.steps {
+            let stage_rank = if step.starts_with("screen") {
+                1
+            } else if step.starts_with("filter") {
+                2
+            } else if step.starts_with("signal") {
+                3
+            } else if step.starts_with("size") {
+                4
+            } else if step.starts_with("risk") {
+                5
+            } else if step.starts_with("execute") {
+                6
+            } else {
+                continue;
+            };
+
+            if stage_rank < last_stage_rank {
+                return Err(ManifestError::InvalidStep(format!(
+                    "Invalid pipeline stage ordering: '{}' cannot follow previous stage in chain",
+                    step
+                )));
+            }
+            last_stage_rank = stage_rank;
+        }
+        Ok(())
+    }
+
+    /// Check if pipeline contains a position sizing step (`size.*` or `size`).
+    pub fn has_sizing_step(&self) -> bool {
+        self.steps.iter().any(|s| s.starts_with("size"))
+    }
+}
+
 /// Chain positioning hints in `step.toml`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StepChain {
@@ -139,6 +204,16 @@ pub struct StepChain {
     /// Steps that can come before.
     #[serde(default)]
     pub before: Vec<String>,
+    /// Declarative pipeline definition, e.g. `"signal -> size.fixed_fractional -> risk -> execute"`.
+    #[serde(default)]
+    pub pipeline: Option<String>,
+}
+
+impl StepChain {
+    /// Parse and return the declarative `StepPipeline` if specified in `pipeline`.
+    pub fn to_pipeline(&self) -> Option<Result<StepPipeline, ManifestError>> {
+        self.pipeline.as_deref().map(StepPipeline::parse)
+    }
 }
 
 /// Full step manifest corresponding to `step.schema.json`.
@@ -261,5 +336,34 @@ impl StepManifest {
         };
 
         Ok(manifest)
+    }
+
+    /// Return the declared pipeline if present in `self.chain`.
+    pub fn pipeline(&self) -> Option<Result<StepPipeline, ManifestError>> {
+        self.chain.as_ref().and_then(|c| c.to_pipeline())
+    }
+}
+
+#[cfg(test)]
+mod pipeline_tests {
+    use super::*;
+
+    #[test]
+    fn test_step_pipeline_parse_and_validate() {
+        let dsl = "signal -> size.fixed_fractional -> risk -> execute";
+        let pipeline = StepPipeline::parse(dsl).expect("valid pipeline parse");
+        assert_eq!(pipeline.steps.len(), 4);
+        assert_eq!(pipeline.steps[0], "signal");
+        assert_eq!(pipeline.steps[1], "size.fixed_fractional");
+        assert_eq!(pipeline.steps[2], "risk");
+        assert_eq!(pipeline.steps[3], "execute");
+        assert!(pipeline.has_sizing_step());
+    }
+
+    #[test]
+    fn test_step_pipeline_invalid_ordering() {
+        let dsl = "risk -> signal -> execute";
+        let res = StepPipeline::parse(dsl);
+        assert!(res.is_err());
     }
 }

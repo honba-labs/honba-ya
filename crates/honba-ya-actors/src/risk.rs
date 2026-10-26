@@ -12,7 +12,9 @@ use tracing::{info, warn};
 
 use crate::messages::{ActorStatus, ExecutionMsg, RiskBreachEvent, RiskMsg};
 use crate::metrics::MetricsCollector;
-use crate::tracing_spans::{span_filled, span_risk_evaluated};
+use crate::tracing_spans::{
+    span_actor_process_message, span_filled, span_risk_evaluate_order, span_risk_evaluated,
+};
 
 /// Actor enforcing deterministic pre-trade risk controls and regulatory limits.
 pub struct RiskActor {
@@ -69,12 +71,30 @@ impl RiskActor {
         self.status = ActorStatus::Running;
 
         while let Some(msg) = self.rx.recv().await {
+            let start = Instant::now();
+            let msg_kind = match &msg {
+                RiskMsg::EvaluateOrder { .. } => "evaluate_order",
+                RiskMsg::RecordCancellation { .. } => "record_cancellation",
+                RiskMsg::RecordFill(_) => "record_fill",
+                RiskMsg::HaltAlgo { .. } => "halt_algo",
+                RiskMsg::ResumeAlgo { .. } => "resume_algo",
+                RiskMsg::HaltGlobal { .. } => "halt_global",
+                RiskMsg::ResumeGlobal => "resume_global",
+                RiskMsg::Shutdown => "shutdown",
+            };
+            let proc_span = span_actor_process_message("risk", msg_kind, None);
+            let _enter_proc = proc_span.enter();
+
             match msg {
                 RiskMsg::EvaluateOrder {
                     request,
                     now,
                     reply_to,
                 } => {
+                    let eval_span =
+                        span_risk_evaluate_order(&request, request.trace_context.as_ref());
+                    let _enter_eval = eval_span.enter();
+
                     // 1. Synchronous, deterministic pre-trade risk evaluation with latency measurement
                     let eval_start = Instant::now();
                     let risk_result = self.risk_engine.check_order(&request, now);
@@ -119,6 +139,7 @@ impl RiskActor {
                                 false,
                                 Some(refusal.rule()),
                             );
+                            m.record_actor_error("risk", "pre_trade_refusal");
                         }
 
                         // Persist to SEBI audit ledger
@@ -138,6 +159,9 @@ impl RiskActor {
                             .execution_tx
                             .send(crate::messages::ExecutionMsg::RiskBreachEvent(breach_event))
                             .await;
+                        if let Some(ref m) = self.metrics {
+                            m.record_actor_latency("risk", start.elapsed());
+                        }
                         continue;
                     }
 
@@ -165,6 +189,10 @@ impl RiskActor {
                         let _ = reply_to.send(Err(BrokerError::Transport(format!(
                             "ExecutionActor unreachable: {e}"
                         ))));
+                        if let Some(ref m) = self.metrics {
+                            m.record_actor_error("risk", "execution_tx_failed");
+                            m.record_actor_latency("risk", start.elapsed());
+                        }
                         continue;
                     }
 
@@ -224,12 +252,12 @@ impl RiskActor {
                 }
 
                 RiskMsg::HaltGlobal { reason } => {
-                    warn!(reason = %reason, "Global emergency halt triggered in RiskActor");
+                    warn!(reason = %reason, "Global kill switch triggered in RiskActor");
                     self.risk_engine.halt_global(reason, Utc::now());
                 }
 
                 RiskMsg::ResumeGlobal => {
-                    info!("Resuming global trading in RiskActor");
+                    info!("Global trading resumed in RiskActor");
                     self.risk_engine.resume_global();
                 }
 
@@ -238,6 +266,10 @@ impl RiskActor {
                     self.status = ActorStatus::Draining;
                     break;
                 }
+            }
+
+            if let Some(ref m) = self.metrics {
+                m.record_actor_latency("risk", start.elapsed());
             }
         }
 

@@ -580,36 +580,36 @@ All 27 unit and integration tests across `honba-ya-backtest` pass cleanly (`back
 ### Phase 8: Actor Observability Spans, Position Sizing Actor, Tactical DDD Implementation & Python Async Model (M7)
 > **Institutional OpenTelemetry tracing, Prometheus actor metrics, PositionSizingActor chaining, Tactical DDD persistence implementation, and Python actor async isolation.**
 
-- [ ] **8.1 OpenTelemetry Mailbox Tracing & Prometheus Metrics (`honba-ya-actors`)**
-  - [ ] Add OpenTelemetry tracing spans around every actor mailbox dispatch:
+- [x] **8.1 OpenTelemetry Mailbox Tracing & Prometheus Metrics (`honba-ya-actors`)**
+  - [x] Add OpenTelemetry tracing spans around every actor mailbox dispatch:
     - Spans: `actor.process_message`, `market_data.coalesce`, `risk.evaluate_order`, `execution.dispatch_wire`.
     - Context propagation: inject and extract `TraceContext` across actors and outbound wire requests.
-  - [ ] Instrument actor channels and queues with Prometheus metrics:
+  - [x] Instrument actor channels and queues with Prometheus metrics:
     - `actor_mailbox_queue_depth{actor}`: Gauge of pending messages in actor mpsc channels.
     - `actor_processing_latency_seconds{actor}`: Histogram of per-message actor turnaround latency.
     - `actor_backpressure_drops_total{actor, reason}`: Counter of coalesced or dropped ticks during market bursts.
     - `actor_errors_total{actor, error_kind}`: Counter of actor task errors and supervisor restarts.
-  - [ ] Document formal actor pipeline Service Level Objectives (SLOs):
+  - [x] Document formal actor pipeline Service Level Objectives (SLOs):
     - Tick-to-Quote WebSocket broadcast: $p99 < 2\\,\\text{ms}$.
     - Strategy signal-to-order generation: $p99 < 1\\,\\text{ms}$.
     - End-to-end tick-to-wire broker dispatch: $p99 < 5\\,\\text{ms}$.
-- [ ] **8.2 Dynamic Position Sizing Actor & Chaining Step (`honba-ya-actors`, `honba-ya-strategy`)**
-  - [ ] Implement `PositionSizingActor` in `honba-ya-actors`:
+- [x] **8.2 Dynamic Position Sizing Actor & Chaining Step (`honba-ya-actors`, `honba-ya-strategy`)**
+  - [x] Implement `PositionSizingActor` in `honba-ya-actors`:
     - Sits as a supervised actor between `StrategyActor` and `RiskActor`.
     - Ingests candidate signals and executes `PositionSizer` port from `honba-core::sizing`.
     - Queries `honba-kokoro` portfolio for instantaneous equity, margin allocations, and stop distances.
-  - [ ] Wire dynamic sizing steps into `honba-ya-strategy::StepManifest`:
+  - [x] Wire dynamic sizing steps into `honba-ya-strategy::StepManifest`:
     - Support declarative chaining in `step.toml`: `signal -> size.fixed_fractional -> risk -> execute`.
     - Support position sizing execution in `honba-ya-backtest` deterministic event loop.
-- [ ] **8.3 Tactical DDD Domain Repository Implementation (`honba-ya-persistence`)**
-  - [ ] Implement `honba-kokoro` domain repository traits in `honba-ya-persistence`:
+- [x] **8.3 Tactical DDD Domain Repository Implementation (`honba-ya-persistence`)**
+  - [x] Implement `honba-kokoro` domain repository traits in `honba-ya-persistence`:
     - `impl honba_kokoro::repository::OrderRepository for SqlxOrderStore`
     - `impl honba_kokoro::repository::PositionRepository for SqlxPositionStore`
     - `impl honba_kokoro::repository::AccountRepository for SqlxAccountStore`
     - `impl honba_kokoro::repository::LedgerRepository for SqlxLedgerStore`
-  - [ ] Strict Dependency Inversion: domain logic in `honba-kokoro` has zero dependency on sqlx or relational schemas; `honba-ya-persistence` provides concrete database implementations.
-- [ ] **8.4 Python Strategy Actor Execution Isolation & Async Model (`honba-ya-actors`)**
-  - [ ] Document and implement the Python actor execution model:
+  - [x] Strict Dependency Inversion: domain logic in `honba-kokoro` has zero dependency on sqlx or relational schemas; `honba-ya-persistence` provides concrete database implementations.
+- [x] **8.4 Python Strategy Actor Execution Isolation & Async Model (`honba-ya-actors`)**
+  - [x] Document and implement the Python actor execution model:
     - Run Python strategies on a dedicated, pinned OS thread pool with a GIL-aware scheduler.
     - Integrate Tokio runtime with Python execution via cooperative async boundary (`pyo3-asyncio`).
     - Enforce execution timeouts (`tokio::time::timeout`) with cancellation tokens so blocking Python calls cannot stall Tokio worker threads.

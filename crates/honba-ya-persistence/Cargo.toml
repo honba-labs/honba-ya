@@ -10,6 +10,7 @@ name = "honba_persistence"
 [dependencies]
 sqlx.workspace = true
 honba-core.workspace = true
+honba-kokoro.workspace = true
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true

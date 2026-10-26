@@ -1,7 +1,7 @@
 //! Execution actor managing broker order placement, status queries, retries, and fills.
 
 use chrono::Utc;
-use honba_core::{OrderAck, OrderStatus};
+use honba_core::{OrderAck};
 use honba_kokoro_oms::{OrderState, OrderStateMachine};
 use honba_persistence::{
     SqliteAuditLedger, messages::RiskBreachEvent as PersistenceRiskBreachEvent,
@@ -15,7 +15,10 @@ use uuid::Uuid;
 
 use crate::messages::{ActorStatus, ExecutionMsg, RiskMsg, StrategyMsg};
 use crate::metrics::MetricsCollector;
-use crate::tracing_spans::{span_broker_acked, span_broker_submitted, span_cancelled};
+use crate::tracing_spans::{
+    span_actor_process_message, span_broker_acked, span_broker_submitted, span_cancelled,
+    span_execution_dispatch_wire,
+};
 
 /// Execution actor interfacing with broker adapters.
 pub struct ExecutionActor {
@@ -100,8 +103,26 @@ impl ExecutionActor {
     }
 
     async fn process_msg(&mut self, msg: ExecutionMsg) {
+        let start = Instant::now();
+        let msg_kind = match &msg {
+            ExecutionMsg::ExecuteOrder { .. } => "execute_order",
+            ExecutionMsg::CancelOrder { .. } => "cancel_order",
+            ExecutionMsg::QueryStatus { .. } => "query_status",
+            ExecutionMsg::RiskBreachEvent(_) => "risk_breach_event",
+            ExecutionMsg::Shutdown => "shutdown",
+        };
+        let proc_span = span_actor_process_message("execution", msg_kind, None);
+        let _enter_proc = proc_span.enter();
+
         match msg {
             ExecutionMsg::ExecuteOrder { request, reply_to } => {
+                let wire_span = span_execution_dispatch_wire(
+                    &request,
+                    self.broker.name(),
+                    request.trace_context.as_ref(),
+                );
+                let _enter_wire = wire_span.enter();
+
                 // 0. OMS: Check idempotency and register order
                 if let Some(ref mut oms) = self.oms {
                     let client_order_id_str = request.client_order_id.to_string();
@@ -169,6 +190,7 @@ impl ExecutionActor {
                                 dispatch_duration,
                                 false,
                             );
+                            m.record_actor_error("execution", "broker_dispatch_error");
                         }
 
                         // OMS: Mark order as rejected on broker error
@@ -216,51 +238,56 @@ impl ExecutionActor {
                                 correlation_id,
                                 &order_id,
                                 "unknown",
-                                "broker cancel acked",
+                                "user_requested",
                                 cancel_duration_us,
                             )
                             .await;
                     }
 
-                    if let Some(ref m) = self.metrics {
-                        m.record_cancellation(&algo_id, "unknown");
+                    if let Some(ref risk_tx) = self.risk_tx {
+                        let _ = risk_tx
+                            .send(RiskMsg::RecordCancellation {
+                                algo_id: algo_id.clone(),
+                            })
+                            .await;
                     }
-
-                    if let Some(ref r_tx) = self.risk_tx {
-                        let _ = r_tx.send(RiskMsg::RecordCancellation { algo_id }).await;
-                    }
+                } else if let Some(ref m) = self.metrics {
+                    m.record_actor_error("execution", "broker_cancel_error");
                 }
-                // Convert execution::BrokerError to messages::BrokerError for the reply channel
-                let res_converted: Result<(), crate::messages::BrokerError> =
+
+                let res_converted =
                     res.map_err(|e| crate::messages::BrokerError::InvalidRequest(e.to_string()));
                 let _ = reply_to.send(res_converted);
             }
 
             ExecutionMsg::QueryStatus { order_id, reply_to } => {
                 let res = self.broker.get_order_status(&order_id).await;
-                let res_converted: Result<OrderStatus, crate::messages::BrokerError> =
+                let res_converted =
                     res.map_err(|e| crate::messages::BrokerError::InvalidRequest(e.to_string()));
                 let _ = reply_to.send(res_converted);
             }
 
-            ExecutionMsg::RiskBreachEvent(event) => {
-                // Persist risk breach event to SEBI audit ledger
+            ExecutionMsg::RiskBreachEvent(breach) => {
                 if let Some(ref audit) = self.audit_ledger {
-                    let persistence_event = PersistenceRiskBreachEvent {
-                        ts: event.ts,
-                        algo_id: event.algo_id,
-                        instrument: event.instrument,
-                        refusal_reason: event.refusal_reason,
-                        rule_code: event.rule_code,
-                        eval_duration_us: event.eval_duration_us,
-                        requested_qty: event.requested_qty,
-                        requested_price: event.requested_price,
+                    let pers_breach = PersistenceRiskBreachEvent {
+                        ts: breach.ts,
+                        algo_id: breach.algo_id,
+                        instrument: breach.instrument,
+                        refusal_reason: breach.refusal_reason,
+                        rule_code: breach.rule_code,
+                        eval_duration_us: breach.eval_duration_us,
+                        requested_qty: breach.requested_qty,
+                        requested_price: breach.requested_price,
                     };
-                    let _ = audit.record_risk_breach_event(&persistence_event).await;
+                    let _ = audit.record_risk_breach_event(&pers_breach).await;
                 }
             }
 
             ExecutionMsg::Shutdown => {}
+        }
+
+        if let Some(ref m) = self.metrics {
+            m.record_actor_latency("execution", start.elapsed());
         }
     }
 }

@@ -9,6 +9,7 @@
 
 pub mod audit;
 pub mod decisions;
+pub mod domain_stores;
 pub mod fills;
 pub mod messages;
 pub mod migrations;
@@ -18,6 +19,7 @@ pub mod traders;
 
 pub use audit::{AuditError, AuditLedgerRecord, SqliteAuditLedger};
 pub use decisions::{DecisionStore, DecisionStoreError, PersistedDecision, sha256_hex};
+pub use domain_stores::{SqlxAccountStore, SqlxLedgerStore, SqlxOrderStore, SqlxPositionStore};
 pub use fills::{FillStore, FillStoreError, PersistedFill};
 pub use messages::RiskBreachEvent;
 pub use migrations::{MigrationError, migrate, rollback_last};

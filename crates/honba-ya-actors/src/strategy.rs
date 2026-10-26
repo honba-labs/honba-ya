@@ -3,14 +3,17 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, warn};
 
 use honba_core::{Bar, FillReport, OrderRequest, Tick};
 
-use crate::messages::{ActorStatus, RiskMsg, StrategyMsg};
+use crate::messages::{ActorStatus, PositionSizingMsg, RiskMsg, StrategyMsg};
 use crate::metrics::MetricsCollector;
-use crate::tracing_spans::span_order_generated;
+use crate::tracing_spans::{
+    derive_or_create_trace_context, span_actor_process_message, span_order_generated,
+};
 
 /// Contract implemented by trading strategies (momentum, mean-reversion, ML/LLM-driven).
 #[async_trait]
@@ -41,6 +44,7 @@ pub struct StrategyActor<S: Strategy> {
     strategy: S,
     rx: mpsc::Receiver<StrategyMsg>,
     risk_tx: mpsc::Sender<RiskMsg>,
+    sizing_tx: Option<mpsc::Sender<PositionSizingMsg>>,
     status: ActorStatus,
     metrics: Option<Arc<MetricsCollector>>,
 }
@@ -56,9 +60,16 @@ impl<S: Strategy> StrategyActor<S> {
             strategy,
             rx,
             risk_tx,
+            sizing_tx: None,
             status: ActorStatus::Starting,
             metrics: None,
         }
+    }
+
+    /// Attach a position sizing actor sender for dynamic position sizing chaining.
+    pub fn with_sizing_tx(mut self, sizing_tx: mpsc::Sender<PositionSizingMsg>) -> Self {
+        self.sizing_tx = Some(sizing_tx);
+        self
     }
 
     /// Attach Prometheus metrics collector.
@@ -82,17 +93,27 @@ impl<S: Strategy> StrategyActor<S> {
         self.status = ActorStatus::Running;
 
         while let Some(msg) = self.rx.recv().await {
+            let start = Instant::now();
+            let msg_kind = match &msg {
+                StrategyMsg::OnTick(_) => "on_tick",
+                StrategyMsg::OnBar(_) => "on_bar",
+                StrategyMsg::OnFill(_) => "on_fill",
+                StrategyMsg::Shutdown => "shutdown",
+            };
+            let proc_span = span_actor_process_message("strategy", msg_kind, None);
+            let _enter_proc = proc_span.enter();
+
             match msg {
                 StrategyMsg::OnTick(tick) => {
                     let orders = self.strategy.on_tick(&tick).await;
                     for order in orders {
-                        self.submit_to_risk(order).await;
+                        self.submit_to_pipeline(order).await;
                     }
                 }
                 StrategyMsg::OnBar(bar) => {
                     let orders = self.strategy.on_bar(&bar).await;
                     for order in orders {
-                        self.submit_to_risk(order).await;
+                        self.submit_to_pipeline(order).await;
                     }
                 }
                 StrategyMsg::OnFill(fill) => {
@@ -104,6 +125,10 @@ impl<S: Strategy> StrategyActor<S> {
                     break;
                 }
             }
+
+            if let Some(ref m) = self.metrics {
+                m.record_actor_latency("strategy", start.elapsed());
+            }
         }
 
         self.status = ActorStatus::Stopped;
@@ -111,7 +136,12 @@ impl<S: Strategy> StrategyActor<S> {
         self.status
     }
 
-    async fn submit_to_risk(&self, req: OrderRequest) {
+    async fn submit_to_pipeline(&self, mut req: OrderRequest) {
+        // Ensure W3C distributed trace context is stamped
+        if req.trace_context.is_none() {
+            req.trace_context = Some(derive_or_create_trace_context(None));
+        }
+
         // Structured tracing span: OrderGenerated
         let gen_span = span_order_generated(&req);
         let _enter = gen_span.enter();
@@ -121,15 +151,28 @@ impl<S: Strategy> StrategyActor<S> {
         }
 
         let (reply_tx, reply_rx) = oneshot::channel();
-        let eval_msg = RiskMsg::EvaluateOrder {
-            request: req.clone(),
-            now: Utc::now(),
-            reply_to: reply_tx,
-        };
 
-        if let Err(e) = self.risk_tx.send(eval_msg).await {
-            error!(error = %e, "Failed to send order to RiskActor");
-            return;
+        if let Some(ref sizing_tx) = self.sizing_tx {
+            let size_cmd = PositionSizingMsg::SizeOrder {
+                request: req.clone(),
+                now: Utc::now(),
+                reply_to: reply_tx,
+            };
+            if let Err(e) = sizing_tx.send(size_cmd).await {
+                error!(error = %e, "Failed to send order to PositionSizingActor");
+                return;
+            }
+        } else {
+            let eval_msg = RiskMsg::EvaluateOrder {
+                request: req.clone(),
+                now: Utc::now(),
+                reply_to: reply_tx,
+            };
+
+            if let Err(e) = self.risk_tx.send(eval_msg).await {
+                error!(error = %e, "Failed to send order to RiskActor");
+                return;
+            }
         }
 
         // Wait for risk evaluation and broker ack asynchronously
@@ -149,7 +192,7 @@ impl<S: Strategy> StrategyActor<S> {
                 );
             }
             Err(e) => {
-                error!(error = %e, "RiskActor dropped reply channel");
+                error!(error = %e, "Reply channel dropped by downstream actor");
             }
         }
     }

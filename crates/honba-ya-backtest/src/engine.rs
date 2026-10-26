@@ -311,6 +311,9 @@ pub struct BacktestEngine<S: Strategy> {
     /// find every instrument with an open position to force-close, rather
     /// than guessing at a single arbitrary instrument.
     open_positions: HashMap<InstrumentId, Decimal>,
+    position_sizer: Option<Box<dyn honba_core::ports::PositionSizer>>,
+    sizing_method: Option<honba_core::sizing::SizingMethod>,
+    sizing_risk_pct: Decimal,
 }
 
 impl<S: Strategy> BacktestEngine<S> {
@@ -385,7 +388,23 @@ impl<S: Strategy> BacktestEngine<S> {
             scrips_sold_today: HashSet::new(),
             product_type: config.product_type,
             open_positions: HashMap::new(),
+            position_sizer: None,
+            sizing_method: None,
+            sizing_risk_pct: dec!(0.01),
         }
+    }
+
+    /// Attach dynamic position sizer implementing institutional `PositionSizer` port.
+    pub fn with_position_sizer(
+        mut self,
+        sizer: Box<dyn honba_core::ports::PositionSizer>,
+        method: honba_core::sizing::SizingMethod,
+        risk_pct: Decimal,
+    ) -> Self {
+        self.position_sizer = Some(sizer);
+        self.sizing_method = Some(method);
+        self.sizing_risk_pct = risk_pct;
+        self
     }
 
     /// The attached MIS square-off manager, if any.
@@ -592,7 +611,37 @@ impl<S: Strategy> BacktestEngine<S> {
         //    configured, in which case it waits in `pending_orders` until a
         //    later event reaches its `ready_ts` (step 2.5 above).
         let orders = self.runner.drain_orders();
-        for order in orders {
+        for mut order in orders {
+            if let (Some(sizer), Some(method)) = (self.position_sizer.as_ref(), self.sizing_method.clone()) {
+                let entry_price = match self.latest_prices.get(&order.instrument) {
+                    Some(p) => *p,
+                    None => order.order_type.limit_price().unwrap_or(Price(dec!(100.00))),
+                };
+                let side = match order.side {
+                    OrderSide::Buy => honba_core::PositionSide::Long,
+                    OrderSide::Sell => honba_core::PositionSide::Short,
+                };
+                let equity = Money::inr(self.account.cash.amount.max(Decimal::ZERO));
+                let budget = honba_core::sizing::RiskBudget::new(
+                    equity,
+                    self.sizing_risk_pct,
+                    Quantity::from_u64(1),
+                );
+                let req = honba_core::sizing::PositionSizingRequest::new(
+                    order.instrument.clone(),
+                    side,
+                    entry_price,
+                    equity,
+                    budget,
+                    method,
+                );
+                if let Ok(res) = sizer.calculate_size(&req) {
+                    if res.quantity.value() > Decimal::ZERO {
+                        order.quantity = res.quantity;
+                    }
+                }
+            }
+
             let ready_ts = self
                 .order_book
                 .as_ref()

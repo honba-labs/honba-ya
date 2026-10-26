@@ -1,13 +1,17 @@
 //! Market data ingestion actor.
 
 use std::collections::HashSet;
+use std::sync::Arc;
+use std::time::Instant;
 
 use honba_core::{InstrumentId, Tick};
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info, warn};
 
 use crate::messages::{ActorStatus, MarketDataMsg, StrategyMsg};
+use crate::metrics::MetricsCollector;
 use crate::portfolio::SymbolMapper;
+use crate::tracing_spans::{span_actor_process_message, span_market_data_coalesce};
 
 /// Backpressure policy for market data ingestion when buffers are full.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -39,6 +43,7 @@ pub struct MarketDataActor {
     coalesce_interval: u64,
     /// Backpressure policy when buffer capacity is reached.
     backpressure_policy: BackpressurePolicy,
+    metrics: Option<Arc<MetricsCollector>>,
 }
 
 impl MarketDataActor {
@@ -61,6 +66,7 @@ impl MarketDataActor {
                 max_buffer_size: 100,
                 coalesce_interval: 50, // coalesce every 50ms
                 backpressure_policy: BackpressurePolicy::CoalesceLatest,
+                metrics: None,
             },
             broadcast_rx,
         )
@@ -84,6 +90,12 @@ impl MarketDataActor {
         self
     }
 
+    /// Attach Prometheus metrics collector.
+    pub fn with_metrics(mut self, metrics: Arc<MetricsCollector>) -> Self {
+        self.metrics = Some(metrics);
+        self
+    }
+
     /// Access the symbol mapper for registering tokens.
     pub fn symbol_mapper_mut(&mut self) -> &mut SymbolMapper {
         &mut self.symbol_mapper
@@ -101,21 +113,38 @@ impl MarketDataActor {
                 biased;
 
                 msg = self.rx.recv() => {
+                    let start = Instant::now();
                     match msg {
                         Some(MarketDataMsg::Subscribe(instrument_id)) => {
+                            let _span = span_actor_process_message("market_data", "subscribe", None);
                             self.symbol_mapper.register(instrument_id.to_string(), instrument_id.clone());
                             self.active_subscriptions.insert(instrument_id.clone());
                             debug!("Subscribed to {}", instrument_id);
+                            if let Some(ref m) = self.metrics {
+                                m.record_actor_latency("market_data", start.elapsed());
+                            }
                         }
                         Some(MarketDataMsg::Unsubscribe(instrument_id)) => {
+                            let _span = span_actor_process_message("market_data", "unsubscribe", None);
                             self.active_subscriptions.remove(&instrument_id);
                             debug!("Unsubscribed from {}", instrument_id);
+                            if let Some(ref m) = self.metrics {
+                                m.record_actor_latency("market_data", start.elapsed());
+                            }
                         }
                         Some(MarketDataMsg::IngestTick(tick)) => {
+                            let _span = span_actor_process_message("market_data", "ingest_tick", None);
                             self.handle_tick(tick).await;
+                            if let Some(ref m) = self.metrics {
+                                m.record_actor_latency("market_data", start.elapsed());
+                            }
                         }
                         Some(MarketDataMsg::IngestBar(bar)) => {
+                            let _span = span_actor_process_message("market_data", "ingest_bar", None);
                             self.handle_bar(bar).await;
+                            if let Some(ref m) = self.metrics {
+                                m.record_actor_latency("market_data", start.elapsed());
+                            }
                         }
                         Some(MarketDataMsg::Shutdown) => {
                             info!("MarketDataActor received shutdown; flushing remaining buffer");
@@ -169,11 +198,17 @@ impl MarketDataActor {
                 }
                 BackpressurePolicy::DropNewest => {
                     warn!(instrument = %instrument_id, "MarketDataActor buffer full, dropping newest tick due to backpressure");
+                    if let Some(ref m) = self.metrics {
+                        m.record_backpressure_drop("market_data", "drop_newest");
+                    }
                 }
                 BackpressurePolicy::DropOldest => {
                     warn!(instrument = %instrument_id, "MarketDataActor buffer full, evicting oldest tick due to backpressure");
                     if !self.tick_buffer.is_empty() {
                         self.tick_buffer.remove(0);
+                    }
+                    if let Some(ref m) = self.metrics {
+                        m.record_backpressure_drop("market_data", "drop_oldest");
                     }
                     self.tick_buffer.push(tick);
                 }
@@ -189,6 +224,9 @@ impl MarketDataActor {
         for sender in &self.strategy_senders {
             if let Err(e) = sender.try_send(StrategyMsg::OnBar(bar.clone())) {
                 warn!("Strategy channel busy or closed when forwarding bar: {e}");
+                if let Some(ref m) = self.metrics {
+                    m.record_backpressure_drop("market_data", "strategy_busy");
+                }
             }
         }
     }
@@ -199,6 +237,8 @@ impl MarketDataActor {
         }
 
         let ticks = std::mem::take(&mut self.tick_buffer);
+        let count = ticks.len();
+        let _span = span_market_data_coalesce(count);
 
         // Coalesce ticks by instrument: keep only the latest tick per instrument
         let mut latest = std::collections::HashMap::new();
@@ -211,6 +251,16 @@ impl MarketDataActor {
             latest.insert(key, tick);
         }
 
+        let unique_count = latest.len();
+        let coalesced_drops = count.saturating_sub(unique_count);
+        if coalesced_drops > 0 {
+            if let Some(ref m) = self.metrics {
+                for _ in 0..coalesced_drops {
+                    m.record_backpressure_drop("market_data", "coalesced");
+                }
+            }
+        }
+
         for tick in latest.into_values() {
             let tick_for_strategies = tick.clone();
             let _ = self.broadcast_tx.send(tick);
@@ -220,3 +270,4 @@ impl MarketDataActor {
         }
     }
 }
+
