@@ -12,6 +12,7 @@ members = [
   "crates/honba-ya-strategy",
   "crates/honba-ya-api-rest",
 ]
+default-members = []
 
 [workspace.package]
 version = "0.1.0"
