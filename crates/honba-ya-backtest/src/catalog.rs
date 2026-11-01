@@ -109,6 +109,45 @@ impl From<CatalogError> for PortError {
     }
 }
 
+/// Summary of one instrument partition inside a timeframe during catalog inspection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogInstrumentSummary {
+    /// Timeframe directory name (e.g. `"1d"` or `"1m"`).
+    pub timeframe: String,
+    /// Canonical instrument identifier.
+    pub instrument: InstrumentId,
+    /// Total loaded bars for this partition.
+    pub bar_count: usize,
+    /// First bar timestamp when non-empty.
+    pub first_timestamp: Option<DateTime<Utc>>,
+    /// Last bar timestamp when non-empty.
+    pub last_timestamp: Option<DateTime<Utc>>,
+    /// First bar close price when non-empty.
+    pub first_close: Option<Decimal>,
+    /// Last bar close price when non-empty.
+    pub last_close: Option<Decimal>,
+}
+
+/// Integrity verification summary across a market-data catalog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogVerificationReport {
+    /// Number of timeframe directories checked.
+    pub timeframes_checked: usize,
+    /// Total instrument partitions checked.
+    pub total_instruments: usize,
+    /// Total bars validated across all checked partitions.
+    pub total_bars: usize,
+    /// Detected OHLC, timestamp monotonicity, or empty-partition anomalies.
+    pub anomalies: Vec<String>,
+}
+
+impl CatalogVerificationReport {
+    /// Returns `true` when zero anomalies were found across at least one timeframe.
+    pub fn is_clean(&self) -> bool {
+        self.timeframes_checked > 0 && self.anomalies.is_empty()
+    }
+}
+
 /// Zero-copy Arrow/Parquet reader over `honba-data/data/catalog`.
 #[derive(Debug, Clone)]
 pub struct CatalogLoader {
@@ -226,6 +265,108 @@ impl CatalogLoader {
                 .then_with(|| a.instrument.symbol.cmp(&b.instrument.symbol))
         });
         Ok(all_bars.into_iter().map(MarketEvent::Bar).collect())
+    }
+
+    /// Inspect catalog partitions under `timeframe` (or all timeframes when `None`) and return
+    /// per-instrument bar counts, date bounds, and boundary close prices.
+    pub fn inspect_summary(
+        &self,
+        timeframe: Option<&str>,
+    ) -> Result<Vec<CatalogInstrumentSummary>, CatalogError> {
+        let timeframes = self.list_timeframes()?;
+        let target_tfs: Vec<String> = match timeframe {
+            Some(tf) => vec![tf.to_string()],
+            None => timeframes,
+        };
+        let mut summaries = Vec::new();
+        for tf in target_tfs {
+            for inst in self.list_instruments(&tf)? {
+                let bars = self.load_bars(&inst, &tf, None, None)?;
+                summaries.push(CatalogInstrumentSummary {
+                    timeframe: tf.clone(),
+                    instrument: inst,
+                    bar_count: bars.len(),
+                    first_timestamp: bars.first().map(|b| b.timestamp),
+                    last_timestamp: bars.last().map(|b| b.timestamp),
+                    first_close: bars.first().map(|b| b.close.0),
+                    last_close: bars.last().map(|b| b.close.0),
+                });
+            }
+        }
+        Ok(summaries)
+    }
+
+    /// Verify catalog integrity: non-empty partitions, strict timestamp monotonicity,
+    /// OHLC bounds (`low <= open <= high`, `low <= close <= high`), and non-negative volume.
+    pub fn verify_integrity(
+        &self,
+        timeframe: Option<&str>,
+    ) -> Result<CatalogVerificationReport, CatalogError> {
+        let timeframes = self.list_timeframes()?;
+        let target_tfs: Vec<String> = match timeframe {
+            Some(tf) => vec![tf.to_string()],
+            None => timeframes,
+        };
+
+        let mut total_bars = 0usize;
+        let mut total_instruments = 0usize;
+        let mut anomalies = Vec::new();
+
+        for tf in &target_tfs {
+            for inst in self.list_instruments(tf)? {
+                total_instruments += 1;
+                let bars = self.load_bars(&inst, tf, None, None)?;
+                if bars.is_empty() {
+                    anomalies.push(format!("{inst} ({tf}): empty partition"));
+                    continue;
+                }
+                total_bars += bars.len();
+                let mut prev_ts = None;
+                for (idx, b) in bars.iter().enumerate() {
+                    if let Some(prev) = prev_ts
+                        && b.timestamp <= prev
+                    {
+                        anomalies.push(format!(
+                            "{inst} ({tf}) row {idx}: retrograde timestamp {} <= prev {}",
+                            b.timestamp, prev
+                        ));
+                    }
+                    prev_ts = Some(b.timestamp);
+
+                    if b.low.0 > b.high.0 {
+                        anomalies.push(format!(
+                            "{inst} ({tf}) row {idx}: low {} > high {}",
+                            b.low.0, b.high.0
+                        ));
+                    }
+                    if b.open.0 < b.low.0 || b.open.0 > b.high.0 {
+                        anomalies.push(format!(
+                            "{inst} ({tf}) row {idx}: open {} out of bounds [{}, {}]",
+                            b.open.0, b.low.0, b.high.0
+                        ));
+                    }
+                    if b.close.0 < b.low.0 || b.close.0 > b.high.0 {
+                        anomalies.push(format!(
+                            "{inst} ({tf}) row {idx}: close {} out of bounds [{}, {}]",
+                            b.close.0, b.low.0, b.high.0
+                        ));
+                    }
+                    if b.volume.0 < Decimal::ZERO {
+                        anomalies.push(format!(
+                            "{inst} ({tf}) row {idx}: negative volume {}",
+                            b.volume.0
+                        ));
+                    }
+                }
+            }
+        }
+
+        Ok(CatalogVerificationReport {
+            timeframes_checked: target_tfs.len(),
+            total_instruments,
+            total_bars,
+            anomalies,
+        })
     }
 
     fn find_timeframe_dir(&self, timeframe: &str) -> Result<Option<PathBuf>, CatalogError> {
@@ -580,4 +721,76 @@ fn file_name(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow::datatypes::{Field, Schema};
+    use parquet::arrow::ArrowWriter;
+    use std::sync::Arc;
+
+    fn write_partition(path: &Path, opens: &[f64], highs: &[f64], lows: &[f64], closes: &[f64]) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("ts", DataType::Int64, false),
+            Field::new("open", DataType::Float64, false),
+            Field::new("high", DataType::Float64, false),
+            Field::new("low", DataType::Float64, false),
+            Field::new("close", DataType::Float64, false),
+            Field::new("volume", DataType::Float64, false),
+        ]));
+        let ts: Vec<i64> = (0..opens.len())
+            .map(|i| ((i as i64) + 1) * 60_000_000_000)
+            .collect();
+        let vols = vec![100.0; opens.len()];
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(Int64Array::from(ts)),
+                Arc::new(Float64Array::from(opens.to_vec())),
+                Arc::new(Float64Array::from(highs.to_vec())),
+                Arc::new(Float64Array::from(lows.to_vec())),
+                Arc::new(Float64Array::from(closes.to_vec())),
+                Arc::new(Float64Array::from(vols)),
+            ],
+        )
+        .unwrap();
+        let mut writer = ArrowWriter::try_new(File::create(path).unwrap(), schema, None).unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+    }
+
+    #[test]
+    fn inspect_and_verify_catalog_detect_valid_and_anomalous_ohlc() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ok_file = tmp.path().join("catalog/1d/NSE/TCS/2025.parquet");
+        write_partition(
+            &ok_file,
+            &[10.0, 11.0],
+            &[12.0, 13.0],
+            &[9.0, 10.0],
+            &[11.0, 12.0],
+        );
+
+        let loader = CatalogLoader::new(tmp.path());
+        let summary = loader.inspect_summary(None).unwrap();
+        assert_eq!(summary.len(), 1);
+        assert_eq!(summary[0].bar_count, 2);
+        assert_eq!(
+            summary[0].instrument,
+            InstrumentId::new(Exchange::Nse, "TCS")
+        );
+
+        let report = loader.verify_integrity(None).unwrap();
+        assert!(report.is_clean(), "{report:?}");
+        assert_eq!(report.total_bars, 2);
+
+        // Add an anomalous partition (low > high)
+        let bad_file = tmp.path().join("catalog/1d/NSE/INFY/2025.parquet");
+        write_partition(&bad_file, &[10.0], &[9.0], &[12.0], &[10.0]);
+        let bad_report = loader.verify_integrity(Some("1d")).unwrap();
+        assert!(!bad_report.is_clean());
+        assert!(!bad_report.anomalies.is_empty());
+    }
 }

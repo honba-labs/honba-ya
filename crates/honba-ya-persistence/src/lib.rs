@@ -22,7 +22,9 @@ pub use decisions::{DecisionStore, DecisionStoreError, PersistedDecision, sha256
 pub use domain_stores::{SqlxAccountStore, SqlxLedgerStore, SqlxOrderStore, SqlxPositionStore};
 pub use fills::{FillStore, FillStoreError, PersistedFill};
 pub use messages::RiskBreachEvent;
-pub use migrations::{MigrationError, migrate, rollback_last};
+pub use migrations::{
+    MigrationError, MigrationOutcome, connect_and_migrate, migrate, rollback_last,
+};
 pub use orders::{OrderStore, OrderStoreError, PersistedOrder};
 pub use positions::{PersistedPosition, PersistedPositionLot, PositionStore, PositionStoreError};
 pub use traders::{PersistedTrader, TraderStore, TraderStoreError};
