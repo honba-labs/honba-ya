@@ -28,6 +28,7 @@ use tower_http::{
 mod approval;
 mod auth;
 mod bar_pump;
+pub mod bootstrap;
 mod caller;
 mod catalog;
 mod dispatch;
@@ -52,6 +53,7 @@ mod screener;
 mod service;
 mod state;
 mod streams;
+pub mod ticks_file;
 mod trades;
 mod trading_state;
 mod user_doc;
@@ -65,6 +67,12 @@ pub use auth::{
     TokenInfo, scope_for, unscoped_routes,
 };
 pub use bar_pump::BarPumpReport;
+pub use bootstrap::{
+    PreparedServer, ServeAuthConfig, ServeConfig, ServeFillConfig, ServeIngestConfig, ServeOutcome,
+    ServeRiskConfig, ServeRunsConfig, TickSource, load_risk_limits, non_loopback_warning,
+    parse_fill_model, parse_trading_state, parse_trading_state_command, prepare_server,
+    run_server_blocking, to_api_trading_state,
+};
 pub use catalog::{CATALOG_DIR, CatalogBars, CatalogLoadError, load_catalog};
 pub use dispatch::{DispatchError, build_target, dispatch, dispatch_stream};
 pub use exec::NextOpenSim;
@@ -86,6 +94,10 @@ pub use service::{
 };
 pub use state::AppState;
 pub use streams::get_backtest_events;
+pub use ticks_file::{
+    ParquetBarsSummary, equity_curve, import_ticks_ndjson, load_parquet_bars_summary,
+    load_ticks_ndjson, pair_fills, parse_ticks_ndjson,
+};
 pub use ws::ws_handler;
 
 pub use v1::{

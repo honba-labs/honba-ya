@@ -21,7 +21,10 @@ pub mod events;
 pub mod sim;
 
 pub use calendar::{NseTradingCalendar, SessionWindow};
-pub use catalog::{CatalogError, CatalogLoader, decimal_from_f64_lossless};
+pub use catalog::{
+    CatalogError, CatalogInstrumentSummary, CatalogLoader, CatalogVerificationReport,
+    decimal_from_f64_lossless,
+};
 pub use engine::{BacktestConfig, BacktestEngine, BacktestResult, decimal_qty_to_u64};
 pub use events::{FillEvent, MarketEvent, OrderEvent, SignalEvent};
 pub use honba_core::TradingCalendar;

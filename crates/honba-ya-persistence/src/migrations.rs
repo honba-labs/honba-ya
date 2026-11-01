@@ -18,6 +18,15 @@ pub enum MigrationError {
     Database(#[from] sqlx::Error),
 }
 
+/// Outcome returned by [`connect_and_migrate`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MigrationOutcome {
+    /// Forward migrations applied (empty when already up to date).
+    Applied(Vec<i64>),
+    /// Highest applied migration rolled back (`None` when none were applied).
+    RolledBack(Option<i64>),
+}
+
 /// A single embedded migration version.
 struct EmbeddedMigration {
     /// Monotonic version number (1-based).
@@ -225,4 +234,53 @@ pub async fn rollback_last(db: &Database) -> Result<Option<i64>, MigrationError>
     .map_err(MigrationError::from)?;
     tracing::info!(version, name = m.name, "rolled back migration");
     Ok(Some(version))
+}
+
+/// Connect to `database_url` and either apply pending migrations or roll back
+/// the most recent migration when `rollback` is `true`.
+pub async fn connect_and_migrate(
+    database_url: &str,
+    rollback: bool,
+) -> Result<MigrationOutcome, MigrationError> {
+    let db = Database::connect(database_url).await?;
+    if rollback {
+        Ok(MigrationOutcome::RolledBack(rollback_last(&db).await?))
+    } else {
+        Ok(MigrationOutcome::Applied(migrate(&db).await?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn connect_and_migrate_applies_and_rolls_back_sqlite() {
+        let dir = std::env::temp_dir().join(format!(
+            "honba-persistence-migrate-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("honba.db");
+        let url = format!("sqlite://{}", db_path.display());
+
+        let first = connect_and_migrate(&url, false).await.unwrap();
+        assert_eq!(first, MigrationOutcome::Applied(vec![1, 2, 3, 4, 5]));
+
+        let second = connect_and_migrate(&url, false).await.unwrap();
+        assert_eq!(second, MigrationOutcome::Applied(vec![]));
+
+        let rolled = connect_and_migrate(&url, true).await.unwrap();
+        assert_eq!(rolled, MigrationOutcome::RolledBack(Some(5)));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn connect_and_migrate_rejects_unsupported_scheme() {
+        let err = connect_and_migrate("mysql://localhost/honba", false)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("unsupported database URL scheme"));
+    }
 }
