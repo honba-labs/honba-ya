@@ -1,7 +1,7 @@
 //! Execution actor managing broker order placement, status queries, retries, and fills.
 
 use chrono::Utc;
-use honba_core::{OrderAck};
+use honba_core::OrderAck;
 use honba_kokoro_oms::{OrderState, OrderStateMachine};
 use honba_persistence::{
     SqliteAuditLedger, messages::RiskBreachEvent as PersistenceRiskBreachEvent,

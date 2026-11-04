@@ -13,8 +13,9 @@ Enforces:
 """
 
 import sys
-import tomllib
 from pathlib import Path
+
+import tomllib
 
 ALLOWED_PROD = {
     "honba-ya-api": {"honba-core"},
@@ -190,8 +191,9 @@ def check_crate(d: Path) -> int:
 
     if name in SYNC_PURE_CRATES:
         for dep in all_dep_names:
-            if dep.endswith(("-rest", "-actors")):
-                if name != "honba-ya-enhancer" or dep != "honba-ya-actors":
+            if dep.endswith(("-rest", "-actors")) and (
+                name != "honba-ya-enhancer" or dep != "honba-ya-actors"
+            ):
                     print(
                         f"VIOLATION: {name} depends on {dep} "
                         "(sync pure crates may not depend on async server crates)"
