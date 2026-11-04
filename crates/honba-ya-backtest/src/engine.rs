@@ -612,10 +612,15 @@ impl<S: Strategy> BacktestEngine<S> {
         //    later event reaches its `ready_ts` (step 2.5 above).
         let orders = self.runner.drain_orders();
         for mut order in orders {
-            if let (Some(sizer), Some(method)) = (self.position_sizer.as_ref(), self.sizing_method.clone()) {
+            if let (Some(sizer), Some(method)) =
+                (self.position_sizer.as_ref(), self.sizing_method.clone())
+            {
                 let entry_price = match self.latest_prices.get(&order.instrument) {
                     Some(p) => *p,
-                    None => order.order_type.limit_price().unwrap_or(Price(dec!(100.00))),
+                    None => order
+                        .order_type
+                        .limit_price()
+                        .unwrap_or(Price(dec!(100.00))),
                 };
                 let side = match order.side {
                     OrderSide::Buy => honba_core::PositionSide::Long,
